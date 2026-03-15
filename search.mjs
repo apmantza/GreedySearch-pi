@@ -26,7 +26,10 @@ import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { tmpdir, homedir } from 'os';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const CDP = join(homedir(), '.claude', 'skills', 'chrome-cdp', 'scripts', 'cdp.mjs');
+// Pi installs chrome-cdp-skill to ~/.pi/agent/git/...; fall back to Claude Code path
+const CDP = existsSync(join(homedir(), '.pi', 'agent', 'git', 'github.com', 'pasky', 'chrome-cdp-skill', 'skills', 'chrome-cdp', 'scripts', 'cdp.mjs'))
+  ? join(homedir(), '.pi', 'agent', 'git', 'github.com', 'pasky', 'chrome-cdp-skill', 'skills', 'chrome-cdp', 'scripts', 'cdp.mjs')
+  : join(homedir(), '.claude', 'skills', 'chrome-cdp', 'scripts', 'cdp.mjs');
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
 
 const ENGINES = {
