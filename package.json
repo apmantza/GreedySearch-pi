@@ -1,5 +1,5 @@
 {
-  "name": "greedysearch-pi",
+  "name": "@apmantza/greedysearch-pi",
   "version": "1.0.0",
   "description": "Pi extension: search Perplexity, Bing Copilot, and Google AI simultaneously — synthesized AI answers, not just links",
   "type": "module",

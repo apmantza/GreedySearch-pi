@@ -7,13 +7,13 @@ Forked from [GreedySearch-claude](https://github.com/apmantza/GreedySearch-claud
 ## Install
 
 ```bash
-pi install git:github.com/apmantza/GreedySearch-pi
+pi install npm:@apmantza/greedysearch-pi
 ```
 
-Or for local development:
+Or directly from git:
 
 ```bash
-pi install https://github.com/apmantza/GreedySearch-pi
+pi install git:github.com/apmantza/GreedySearch-pi
 ```
 
 ## Usage
