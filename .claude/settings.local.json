@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh api:*)",
+      "Bash(python -c \"import sys,json,base64; open\\(''''/tmp/pi-tools-ex.ts'''',''''w'''',encoding=''''utf-8''''\\).write\\(base64.b64decode\\(json.load\\(sys.stdin\\)[''''content'''']\\).decode\\(''''utf-8''''\\)\\)\")",
+      "Read(//tmp/**)",
+      "Bash(for f:*)",
+      "Bash(mkdir:*)"
+    ]
+  }
+}

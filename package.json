@@ -1,0 +1,26 @@
+{
+  "name": "greedysearch-pi",
+  "version": "1.0.0",
+  "description": "Pi extension: search Perplexity, Bing Copilot, and Google AI simultaneously — synthesized AI answers, not just links",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/apmantza/GreedySearch-pi"
+  },
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
+  }
+}
