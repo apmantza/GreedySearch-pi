@@ -10,18 +10,14 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
-const CDP_PI_PATH = join(homedir(), ".pi", "agent", "git", "github.com", "pasky", "chrome-cdp-skill", "skills", "chrome-cdp", "scripts", "cdp.mjs");
-const CDP_CLAUDE_PATH = join(homedir(), ".claude", "skills", "chrome-cdp", "scripts", "cdp.mjs");
-
 function cdpAvailable(): boolean {
-	return existsSync(CDP_PI_PATH) || existsSync(CDP_CLAUDE_PATH);
+	return existsSync(join(__dir, "cdp.mjs"));
 }
 
 function runSearch(engine: string, query: string): Promise<Record<string, unknown>> {
@@ -90,7 +86,7 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		if (!cdpAvailable()) {
 			ctx.ui.notify(
-				"GreedySearch: chrome-cdp-skill not found. Run: pi install git:github.com/pasky/chrome-cdp-skill",
+				"GreedySearch: cdp.mjs missing from package directory — try reinstalling: pi install git:github.com/apmantza/GreedySearch-pi",
 				"warning",
 			);
 		}
@@ -123,7 +119,7 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 
 			if (!cdpAvailable()) {
 				return {
-					content: [{ type: "text", text: "chrome-cdp-skill not installed. Run: pi install git:github.com/pasky/chrome-cdp-skill" }],
+					content: [{ type: "text", text: "cdp.mjs missing — try reinstalling: pi install git:github.com/apmantza/GreedySearch-pi" }],
 					details: {} as { raw?: Record<string, unknown> },
 				};
 			}
