@@ -11,10 +11,11 @@
 import { readFileSync, existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { tmpdir, homedir } from 'os';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { dismissConsent } from './consent.mjs';
 
-const CDP = join(homedir(), '.claude', 'skills', 'chrome-cdp', 'scripts', 'cdp.mjs');
+const CDP = join(dirname(fileURLToPath(import.meta.url)), '..', 'cdp.mjs');
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
 
 const STREAM_POLL_INTERVAL = 700;  // ms between checks

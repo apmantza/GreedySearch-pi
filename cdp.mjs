@@ -22,10 +22,13 @@ const DAEMON_CONNECT_DELAY = 300;
 const MIN_TARGET_PREFIX_LEN = 8;
 
 const _tmpdir = tmpdir().replace(/\\/g, '/');
-const SOCK_PREFIX = `${_tmpdir}/cdp-`;
 const PAGES_CACHE = `${_tmpdir}/cdp-pages.json`;
 
-function sockPath(targetId) { return `${SOCK_PREFIX}${targetId}.sock`; }
+function sockPath(targetId) {
+  // Windows: use named pipes (reliable cross-platform IPC in Node.js)
+  if (platform() === 'win32') return `\\\\.\\pipe\\cdp-${targetId}`;
+  return `${_tmpdir}/cdp-${targetId}.sock`;
+}
 
 function getDevToolsActivePortPath() {
   const os = platform();
@@ -43,6 +46,8 @@ function getWsUrl() {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function listDaemonSockets() {
+  // Named pipes on Windows aren't enumerable as filesystem entries
+  if (platform() === 'win32') return [];
   const tmp = tmpdir();
   try {
     return readdirSync(tmp)

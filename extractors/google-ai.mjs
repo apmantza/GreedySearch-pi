@@ -16,7 +16,7 @@ import { fileURLToPath } from 'url';
 import { dismissConsent } from './consent.mjs';
 const __dir = dirname(fileURLToPath(import.meta.url));
 
-const CDP = join(homedir(), '.claude', 'skills', 'chrome-cdp', 'scripts', 'cdp.mjs');
+const CDP = join(dirname(fileURLToPath(import.meta.url)), '..', 'cdp.mjs');
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
 
 const STREAM_POLL_INTERVAL = 600;
