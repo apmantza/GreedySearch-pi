@@ -6,7 +6,8 @@
       "Read(//tmp/**)",
       "Bash(for f:*)",
       "Bash(mkdir:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(git add:*)"
     ]
   }
 }
