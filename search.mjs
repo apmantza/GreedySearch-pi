@@ -184,7 +184,7 @@ async function ensureChrome() {
   } catch {
     process.stderr.write('Chrome not running — auto-launching GreedySearch Chrome...\n');
     await new Promise((resolve, reject) => {
-      const proc = spawn('node', [join(__dir, 'launch.mjs')], { stdio: 'inherit' });
+      const proc = spawn('node', [join(__dir, 'launch.mjs')], { stdio: ['ignore', process.stderr, process.stderr] });
       proc.on('close', code => code === 0 ? resolve() : reject(new Error('launch.mjs failed')));
     });
   }
