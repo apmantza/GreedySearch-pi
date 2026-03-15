@@ -8,12 +8,21 @@
  */
 
 import { spawn } from "node:child_process";
-import { dirname } from "node:path";
+import { existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
+
+const CDP_PI_PATH = join(homedir(), ".pi", "agent", "git", "github.com", "pasky", "chrome-cdp-skill", "skills", "chrome-cdp", "scripts", "cdp.mjs");
+const CDP_CLAUDE_PATH = join(homedir(), ".claude", "skills", "chrome-cdp", "scripts", "cdp.mjs");
+
+function cdpAvailable(): boolean {
+	return existsSync(CDP_PI_PATH) || existsSync(CDP_CLAUDE_PATH);
+}
 
 function runSearch(engine: string, query: string): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
@@ -78,6 +87,15 @@ function formatResults(engine: string, data: Record<string, unknown>): string {
 }
 
 export default function greedySearchExtension(pi: ExtensionAPI) {
+	pi.on("session_start", async (_event, ctx) => {
+		if (!cdpAvailable()) {
+			ctx.ui.notify(
+				"GreedySearch: chrome-cdp-skill not found. Run: pi install git:github.com/pasky/chrome-cdp-skill",
+				"warning",
+			);
+		}
+	});
+
 	pi.registerTool({
 		name: "greedy_search",
 		label: "Greedy Search",
@@ -102,6 +120,13 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 		}),
 		execute: async (_toolCallId, params) => {
 			const { query, engine = "all" } = params as { query: string; engine: string };
+
+			if (!cdpAvailable()) {
+				return {
+					content: [{ type: "text", text: "chrome-cdp-skill not installed. Run: pi install git:github.com/pasky/chrome-cdp-skill" }],
+					details: {} as { raw?: Record<string, unknown> },
+				};
+			}
 
 			let data: Record<string, unknown>;
 			try {
