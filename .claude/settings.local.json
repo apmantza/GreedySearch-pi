@@ -7,7 +7,12 @@
       "Bash(for f:*)",
       "Bash(mkdir:*)",
       "Bash(node:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(uv:*)",
+      "Bash(.venv/Scripts/fig-ocr.exe --help)",
+      "Bash(.venv/Scripts/fig-ocr.exe tui:*)",
+      "Bash(tree:*)",
+      "Bash(find:*)"
     ]
   }
 }
