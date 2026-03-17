@@ -154,11 +154,16 @@ async function main() {
   // Already running?
   const existing = isRunning();
   if (existing) {
-    console.log(`GreedySearch Chrome already running (pid ${existing}, port ${PORT}).`);
-    // Ensure redirect is in place (idempotent)
     const ready = await writePortFile(5000);
-    if (ready) { redirectCdpToGreedySearch(); console.log('DevToolsActivePort redirected.'); }
-    return;
+    if (ready) {
+      console.log(`GreedySearch Chrome already running (pid ${existing}, port ${PORT}).`);
+      redirectCdpToGreedySearch();
+      console.log('DevToolsActivePort redirected.');
+      return;
+    }
+    // Stale PID — process alive but not Chrome on port 9223. Fall through to fresh launch.
+    console.log(`Stale PID ${existing} detected (not Chrome on port ${PORT}) — launching fresh.`);
+    try { unlinkSync(PID_FILE); } catch {}
   }
 
   const CHROME_EXE = process.env.CHROME_PATH || findChrome();

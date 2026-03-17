@@ -116,7 +116,7 @@ async function closeTab(targetId) {
   } catch { /* best-effort */ }
 }
 
-function runExtractor(script, query, tabPrefix = null, short = false) {
+function runExtractor(script, query, tabPrefix = null, short = false, timeoutMs = 90000) {
   const extraArgs = [
     ...(tabPrefix ? ['--tab', tabPrefix] : []),
     ...(short    ? ['--short']          : []),
@@ -129,7 +129,12 @@ function runExtractor(script, query, tabPrefix = null, short = false) {
     let err = '';
     proc.stdout.on('data', d => out += d);
     proc.stderr.on('data', d => err += d);
+    const t = setTimeout(() => {
+      proc.kill();
+      reject(new Error(`${script} timed out after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
     proc.on('close', code => {
+      clearTimeout(t);
       if (code !== 0) reject(new Error(err.trim() || `extractor exit ${code}`));
       else {
         try { resolve(JSON.parse(out.trim())); }
