@@ -222,12 +222,14 @@ async function main() {
 
   await ensureChrome();
 
-  const short       = args.includes('--short');
+  const full        = args.includes('--full');
+  const short       = !full;   // brief by default; --full opts into complete answers
   const fetchSource = args.includes('--fetch-top-source');
   const outIdx      = args.indexOf('--out');
   const outFile     = outIdx !== -1 ? args[outIdx + 1] : null;
   const rest        = args.filter((a, i) =>
-    a !== '--short' &&
+    a !== '--full' &&
+    a !== '--short' &&  // keep accepting --short for back-compat
     a !== '--fetch-top-source' &&
     a !== '--out' &&
     (outIdx === -1 || i !== outIdx + 1)
