@@ -20,6 +20,13 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const CDP = join(__dir, 'cdp.mjs');
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
 
+// Mode system prompts — prepended to the user's task
+const MODE_PROMPTS = {
+  code: null,  // no preamble — default behaviour
+  review: `You are a senior software engineer doing a thorough code review. Analyse the code below for: correctness and edge cases, security issues, performance problems, readability and naming, missing error handling, and anything that would not survive a production incident. Be specific — cite line-level issues where relevant. Suggest concrete fixes, not vague advice.`,
+  plan: `You are a senior software architect. The user will describe something they want to build and their current plan. Your job is to: (1) identify risks, gaps, and hidden assumptions in the plan, (2) flag anything that will cause pain later (scaling, ops, security, maintainability), (3) suggest better alternatives where the plan is suboptimal, (4) call out what's missing entirely. Be direct and opinionated — the goal is to find problems before they're built.`,
+};
+
 const STREAM_POLL_INTERVAL = 800;
 const STREAM_STABLE_ROUNDS = 4;
 const STREAM_TIMEOUT = 120000;  // coding tasks take longer
@@ -202,7 +209,7 @@ function extractExplanation(text, codeBlocks) {
   return explanation.slice(0, 1000);  // cap explanation at 1000 chars
 }
 
-async function runEngine(engineName, task, context, tabPrefix) {
+async function runEngine(engineName, task, context, mode, tabPrefix) {
   const engine = ENGINES[engineName];
   if (!engine) throw new Error(`Unknown engine: ${engineName}`);
 
@@ -233,9 +240,11 @@ async function runEngine(engineName, task, context, tabPrefix) {
   await new Promise(r => setTimeout(r, 300));
 
   // Build the prompt
-  const prompt = context
+  const preamble = MODE_PROMPTS[mode] || null;
+  const body = context
     ? `${task}\n\nHere is the relevant code/context:\n\`\`\`\n${context}\n\`\`\``
     : task;
+  const prompt = preamble ? `${preamble}\n\n---\n\n${body}` : body;
 
   await engine.type(tab, prompt);
   await new Promise(r => setTimeout(r, 400));
@@ -258,12 +267,18 @@ async function main() {
   const args = process.argv.slice(2);
   if (!args.length || args[0] === '--help') {
     process.stderr.write([
-      'Usage: node coding-task.mjs "<task>" --engine gemini|copilot|all',
+      'Usage: node coding-task.mjs "<task>" --engine gemini|copilot|all [--mode code|review|plan]',
       '       node coding-task.mjs "<task>" --engine gemini --context "<code>"',
+      '',
+      'Modes:',
+      '  code   (default) — write or modify code',
+      '  review — senior engineer code review: correctness, security, performance',
+      '  plan   — architect review: risks, gaps, alternatives for a build plan',
       '',
       'Examples:',
       '  node coding-task.mjs "write a debounce function in JS" --engine gemini',
-      '  node coding-task.mjs "refactor this to use async/await" --engine all --context "cb code here"',
+      '  node coding-task.mjs "review this module" --mode review --engine all --context "$(cat myfile.mjs)"',
+      '  node coding-task.mjs "I want to build X, here is my plan: ..." --mode plan --engine all',
     ].join('\n') + '\n');
     process.exit(1);
   }
@@ -276,12 +291,20 @@ async function main() {
   const outFile = outIdx !== -1 ? args[outIdx + 1] : null;
   const tabFlagIdx = args.indexOf('--tab');
   const tabPrefix = tabFlagIdx !== -1 ? args[tabFlagIdx + 1] : null;
+  const modeFlagIdx = args.indexOf('--mode');
+  const mode = modeFlagIdx !== -1 ? args[modeFlagIdx + 1] : 'code';
+
+  if (!MODE_PROMPTS.hasOwnProperty(mode)) {
+    process.stderr.write(`Error: unknown mode "${mode}". Use: code, review, plan\n`);
+    process.exit(1);
+  }
 
   const skipFlags = new Set([
     ...(engineFlagIdx  >= 0 ? [engineFlagIdx,  engineFlagIdx  + 1] : []),
     ...(contextFlagIdx >= 0 ? [contextFlagIdx, contextFlagIdx + 1] : []),
     ...(outIdx         >= 0 ? [outIdx,         outIdx         + 1] : []),
     ...(tabFlagIdx     >= 0 ? [tabFlagIdx,     tabFlagIdx     + 1] : []),
+    ...(modeFlagIdx    >= 0 ? [modeFlagIdx,    modeFlagIdx    + 1] : []),
   ]);
   const task = args.filter((_, i) => !skipFlags.has(i)).join(' ');
 
@@ -296,7 +319,7 @@ async function main() {
 
   if (engineArg === 'all') {
     const results = await Promise.allSettled(
-      Object.keys(ENGINES).map(e => runEngine(e, task, context, null))
+      Object.keys(ENGINES).map(e => runEngine(e, task, context, mode, null))
     );
     result = {};
     for (const [i, r] of results.entries()) {
@@ -305,7 +328,7 @@ async function main() {
     }
   } else {
     try {
-      result = await runEngine(engineArg, task, context, tabPrefix);
+      result = await runEngine(engineArg, task, context, mode, tabPrefix);
     } catch (e) {
       process.stderr.write(`Error: ${e.message}\n`);
       process.exit(1);
