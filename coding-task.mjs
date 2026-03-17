@@ -281,7 +281,8 @@ async function main() {
       '',
       'Examples:',
       '  node coding-task.mjs "write a debounce function in JS" --engine gemini',
-      '  node coding-task.mjs "review this module" --mode review --engine all --context "$(cat myfile.mjs)"',
+      '  node coding-task.mjs "review this module" --mode review --engine all --file src/myfile.mjs',
+      '  node coding-task.mjs "debug this" --mode debug --engine all --file a.mjs --file b.mjs',
       '  node coding-task.mjs "I want to build X, here is my plan: ..." --mode plan --engine all',
     ].join('\n') + '\n');
     process.exit(1);
@@ -290,7 +291,6 @@ async function main() {
   const engineFlagIdx = args.indexOf('--engine');
   const engineArg = engineFlagIdx !== -1 ? args[engineFlagIdx + 1] : 'gemini';
   const contextFlagIdx = args.indexOf('--context');
-  const context = contextFlagIdx !== -1 ? args[contextFlagIdx + 1] : null;
   const outIdx = args.indexOf('--out');
   const outFile = outIdx !== -1 ? args[outIdx + 1] : null;
   const tabFlagIdx = args.indexOf('--tab');
@@ -299,9 +299,23 @@ async function main() {
   const mode = modeFlagIdx !== -1 ? args[modeFlagIdx + 1] : 'code';
 
   if (!MODE_PROMPTS.hasOwnProperty(mode)) {
-    process.stderr.write(`Error: unknown mode "${mode}". Use: code, review, plan\n`);
+    process.stderr.write(`Error: unknown mode "${mode}". Use: code, review, plan, test, debug\n`);
     process.exit(1);
   }
+
+  // --file can be repeated: --file a.mjs --file b.mjs
+  const fileIndices = [];
+  const filePaths = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--file' && args[i + 1]) {
+      fileIndices.push(i, i + 1);
+      filePaths.push(args[i + 1]);
+    }
+  }
+  const fileContext = filePaths.length > 0
+    ? filePaths.map(p => `// FILE: ${p}\n${readFileSync(p, 'utf8')}`).join('\n\n')
+    : null;
+  const context = fileContext || (contextFlagIdx !== -1 ? args[contextFlagIdx + 1] : null);
 
   const skipFlags = new Set([
     ...(engineFlagIdx  >= 0 ? [engineFlagIdx,  engineFlagIdx  + 1] : []),
@@ -309,6 +323,7 @@ async function main() {
     ...(outIdx         >= 0 ? [outIdx,         outIdx         + 1] : []),
     ...(tabFlagIdx     >= 0 ? [tabFlagIdx,     tabFlagIdx     + 1] : []),
     ...(modeFlagIdx    >= 0 ? [modeFlagIdx,    modeFlagIdx    + 1] : []),
+    ...fileIndices,
   ]);
   const task = args.filter((_, i) => !skipFlags.has(i)).join(' ');
 
