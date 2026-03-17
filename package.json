@@ -1,6 +1,6 @@
 {
   "name": "@apmantza/greedysearch-pi",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Pi extension: search Perplexity, Bing Copilot, and Google AI simultaneously — synthesized AI answers, not just links",
   "type": "module",
   "keywords": [

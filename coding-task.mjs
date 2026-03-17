@@ -25,6 +25,7 @@ const MODE_PROMPTS = {
   code: null,  // no preamble — default behaviour
   review: `You are a senior software engineer doing a thorough code review. Analyse the code below for: correctness and edge cases, security issues, performance problems, readability and naming, missing error handling, and anything that would not survive a production incident. Be specific — cite line-level issues where relevant. Suggest concrete fixes, not vague advice.`,
   plan: `You are a senior software architect. The user will describe something they want to build and their current plan. Your job is to: (1) identify risks, gaps, and hidden assumptions in the plan, (2) flag anything that will cause pain later (scaling, ops, security, maintainability), (3) suggest better alternatives where the plan is suboptimal, (4) call out what's missing entirely. Be direct and opinionated — the goal is to find problems before they're built.`,
+  test: `You are a senior engineer writing tests for code written by someone else. Your goal is to find what they missed. Write a comprehensive test suite that covers: edge cases the author likely didn't think of, boundary conditions (empty input, nulls, max values, type coercion), error paths and exception handling, concurrency or ordering issues if relevant, and any behaviour that differs from what the function name implies. Use the same language and testing framework as the code if apparent, otherwise default to the most common one for that language. Output runnable test code — not a list of what to test.`,
 };
 
 const STREAM_POLL_INTERVAL = 800;
@@ -274,6 +275,7 @@ async function main() {
       '  code   (default) — write or modify code',
       '  review — senior engineer code review: correctness, security, performance',
       '  plan   — architect review: risks, gaps, alternatives for a build plan',
+      '  test   — write tests an author would miss: edge cases, error paths, boundary conditions',
       '',
       'Examples:',
       '  node coding-task.mjs "write a debounce function in JS" --engine gemini',
