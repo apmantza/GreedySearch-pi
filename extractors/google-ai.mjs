@@ -13,10 +13,10 @@ import { spawn } from 'child_process';
 import { tmpdir, homedir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { dismissConsent } from './consent.mjs';
+import { dismissConsent, handleVerification } from './consent.mjs';
 const __dir = dirname(fileURLToPath(import.meta.url));
 
-const CDP = join(dirname(fileURLToPath(import.meta.url)), '..', 'cdp.mjs');
+const CDP = join(homedir(), '.claude', 'skills', 'chrome-cdp', 'scripts', 'cdp.mjs');
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
 
 const STREAM_POLL_INTERVAL = 600;
@@ -131,6 +131,15 @@ async function main() {
     // If consent redirected us away, navigate back
     const currentUrl = await cdp(['eval', tab, 'document.location.href']).catch(() => '');
     if (!currentUrl.includes('google.com/search')) {
+      await cdp(['nav', tab, url], 35000);
+      await new Promise(r => setTimeout(r, 1500));
+    }
+
+    // Handle "verify you're human" — auto-click simple buttons, wait for user on hard CAPTCHA
+    const verifyResult = await handleVerification(tab, cdp, 60000);
+    if (verifyResult === 'needs-human') throw new Error('Google verification required — could not be completed automatically');
+    if (verifyResult === 'clicked' || verifyResult === 'cleared-by-user') {
+      // Re-navigate to the search URL after verification
       await cdp(['nav', tab, url], 35000);
       await new Promise(r => setTimeout(r, 1500));
     }

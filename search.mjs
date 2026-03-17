@@ -27,8 +27,6 @@ import { tmpdir } from 'os';
 import http from 'http';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-// Pi installs chrome-cdp-skill to ~/.pi/agent/git/...; fall back to Claude Code path
-// Always use the bundled Windows-compatible cdp.mjs
 const CDP = join(__dir, 'cdp.mjs');
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
 
@@ -184,26 +182,26 @@ function writeOutput(data, outFile) {
   }
 }
 
-const GREEDY_PORT = 9223;
-
-function isGreedySearchChromeUp() {
+function probePort9223(timeoutMs = 3000) {
   return new Promise(resolve => {
-    const req = http.get(`http://localhost:${GREEDY_PORT}/json/version`, res => {
-      resolve(res.statusCode === 200);
+    const req = http.get('http://localhost:9223/json/version', res => {
       res.resume();
+      resolve(res.statusCode === 200);
     });
     req.on('error', () => resolve(false));
-    req.setTimeout(1500, () => { req.destroy(); resolve(false); });
+    req.setTimeout(timeoutMs, () => { req.destroy(); resolve(false); });
   });
 }
 
 async function ensureChrome() {
-  if (await isGreedySearchChromeUp()) return;
-  process.stderr.write('GreedySearch Chrome not running — auto-launching...\n');
-  await new Promise((resolve, reject) => {
-    const proc = spawn('node', [join(__dir, 'launch.mjs')], { stdio: ['ignore', process.stderr, process.stderr] });
-    proc.on('close', code => code === 0 ? resolve() : reject(new Error('launch.mjs failed')));
-  });
+  const ready = await probePort9223();
+  if (!ready) {
+    process.stderr.write('GreedySearch Chrome not running on port 9223 — auto-launching...\n');
+    await new Promise((resolve, reject) => {
+      const proc = spawn('node', [join(__dir, 'launch.mjs')], { stdio: ['ignore', process.stderr, process.stderr] });
+      proc.on('close', code => code === 0 ? resolve() : reject(new Error('launch.mjs failed')));
+    });
+  }
 }
 
 async function main() {
@@ -240,10 +238,10 @@ async function main() {
   if (engine === 'all') {
     await cdp(['list']); // refresh pages cache
 
-    // Assign tabs: reuse existing engine tabs from cache, open new ones only where needed.
-    // Track opened tabs separately so we only close what we created.
+    // Assign tabs: reuse existing engine tabs from cache, open new ones where needed.
+    // Engine tabs are never closed — keeping them alive preserves session cookies and
+    // reduces the chance of verification challenges on subsequent searches.
     const tabs = [];
-    const openedTabs = [];
     let blankReused = false;
 
     for (const e of ALL_ENGINES) {
@@ -253,13 +251,11 @@ async function main() {
       } else if (!blankReused) {
         const tab = await getOrReuseBlankTab();
         tabs.push(tab);
-        openedTabs.push(tab);
         blankReused = true;
       } else {
         await new Promise(r => setTimeout(r, 500));
         const tab = await openNewTab();
         tabs.push(tab);
-        openedTabs.push(tab);
       }
     }
 
@@ -269,9 +265,6 @@ async function main() {
         runExtractor(ENGINES[e], query, tabs[i], short).then(r => ({ engine: e, ...r }))
       )
     );
-
-    // Close only tabs we opened (not pre-existing ones)
-    await Promise.allSettled(openedTabs.map(closeTab));
 
     const out = {};
     for (let i = 0; i < results.length; i++) {
