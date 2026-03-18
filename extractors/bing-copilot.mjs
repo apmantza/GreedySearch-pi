@@ -17,10 +17,8 @@ import { dismissConsent, handleVerification } from './consent.mjs';
 const CDP = join(homedir(), '.claude', 'skills', 'chrome-cdp', 'scripts', 'cdp.mjs');
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
 
-const STREAM_POLL_INTERVAL = 700;  // ms between checks
-const STREAM_STABLE_ROUNDS = 3;    // consecutive equal-length polls = done
-const STREAM_TIMEOUT = 60000;      // bail out after 60s
-const MIN_ANSWER_LENGTH = 50;      // don't accept trivial answers
+const COPY_POLL_INTERVAL = 700;
+const COPY_TIMEOUT = 60000;
 
 // ---------------------------------------------------------------------------
 
@@ -55,55 +53,62 @@ async function getOrOpenTab(tabPrefix) {
   return firstLine.slice(0, 8);
 }
 
-async function waitForStreamComplete(tab) {
-  const deadline = Date.now() + STREAM_TIMEOUT;
-  let stableCount = 0;
-  let lastLen = -1;
+async function injectClipboardInterceptor(tab) {
+  await cdp(['eval', tab, `
+    window.__bingClipboard = null;
+    const _origWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
+    navigator.clipboard.writeText = function(text) {
+      window.__bingClipboard = text;
+      return _origWriteText(text);
+    };
+    const _origWrite = navigator.clipboard.write.bind(navigator.clipboard);
+    navigator.clipboard.write = async function(items) {
+      try {
+        for (const item of items) {
+          if (item.types && item.types.includes('text/plain')) {
+            const blob = await item.getType('text/plain');
+            window.__bingClipboard = await blob.text();
+            break;
+          }
+        }
+      } catch(e) {}
+      return _origWrite(items);
+    };
+  `]);
+}
 
+async function waitForCopyButton(tab) {
+  const deadline = Date.now() + COPY_TIMEOUT;
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, STREAM_POLL_INTERVAL));
-
-    // Poll the last non-empty ai-message-item (item[1] is always an empty placeholder)
-    const lenStr = await cdp(['eval', tab,
-      `(function(){
-        var items = Array.from(document.querySelectorAll('[class*="ai-message-item"]'));
-        var filled = items.filter(el => (el.innerText?.length || 0) > 0);
-        var last = filled[filled.length - 1];
-        return (last?.innerText?.length || 0) + '';
-      })()`
-    ]).catch(() => '0');
-
-    const len = parseInt(lenStr) || 0;
-
-    if (len >= MIN_ANSWER_LENGTH && len === lastLen) {
-      stableCount++;
-      if (stableCount >= STREAM_STABLE_ROUNDS) return len;
-    } else {
-      stableCount = 0;
-      lastLen = len;
-    }
+    await new Promise(r => setTimeout(r, COPY_POLL_INTERVAL));
+    const found = await cdp(['eval', tab,
+      `!!document.querySelector('button[data-testid="copy-ai-message-button"]')`
+    ]).catch(() => 'false');
+    if (found === 'true') return;
   }
-
-  if (lastLen >= MIN_ANSWER_LENGTH) return lastLen;
-  throw new Error(`Copilot answer did not stabilise within ${STREAM_TIMEOUT}ms`);
+  throw new Error(`Copilot copy button did not appear within ${COPY_TIMEOUT}ms`);
 }
 
 async function extractAnswer(tab) {
+  await cdp(['eval', tab, `document.querySelector('button[data-testid="copy-ai-message-button"]')?.click()`]);
+  await new Promise(r => setTimeout(r, 400));
+
+  const answer = await cdp(['eval', tab, `window.__bingClipboard || ''`]);
+  if (!answer) throw new Error('Clipboard interceptor returned empty text');
+
   const raw = await cdp(['eval', tab, `
     (function() {
-      var items = Array.from(document.querySelectorAll('[class*="ai-message-item"]'));
-      var el = items.filter(e => (e.innerText?.length || 0) > 0).pop();
-      if (!el) return JSON.stringify({ answer: '', sources: [] });
-      var answer = el.innerText.trim();
       var sources = Array.from(document.querySelectorAll('a[href^="http"][target="_blank"]'))
         .map(a => ({ url: a.href, title: a.innerText?.trim().split('\\n')[0] || a.title || '' }))
         .filter(s => s.url && !s.url.includes('copilot.microsoft.com'))
         .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
         .slice(0, 10);
-      return JSON.stringify({ answer, sources });
+      return JSON.stringify(sources);
     })()
-  `]);
-  return JSON.parse(raw);
+  `]).catch(() => '[]');
+  const sources = JSON.parse(raw);
+
+  return { answer: answer.trim(), sources };
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +147,7 @@ async function main() {
     }
     await new Promise(r => setTimeout(r, 300));
 
+    await injectClipboardInterceptor(tab);
     // Find input and type query
     await cdp(['click', tab, '#userInput']);
     await new Promise(r => setTimeout(r, 400));
@@ -153,7 +159,7 @@ async function main() {
       `document.querySelector('#userInput')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,keyCode:13})), 'ok'`
     ]);
 
-    await waitForStreamComplete(tab);
+    await waitForCopyButton(tab);
 
     const { answer, sources } = await extractAnswer(tab);
     if (!answer) throw new Error('No answer extracted — Copilot may not have responded');
