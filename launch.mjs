@@ -2,8 +2,8 @@
 // launch.mjs — start a dedicated Chrome instance for GreedySearch
 //
 // This Chrome instance uses --disable-features=DevToolsPrivacyUI which suppresses
-// the "Allow remote debugging?" dialog entirely. It runs on port 9223 so it doesn't
-// conflict with your main Chrome session.
+// the "Allow remote debugging?" dialog entirely. It runs on port 9222 so it doesn't
+// conflict with your main Chrome session (which may use port 9223).
 //
 // On launch, it overwrites the DevToolsActivePort file that cdp.mjs reads so all
 // extractors automatically target the GreedySearch Chrome, with no code changes.
@@ -20,7 +20,7 @@ import { tmpdir, homedir, platform } from 'os';
 import { join } from 'path';
 import http from 'http';
 
-const PORT        = 9223;
+const PORT        = 9222;
 const PROFILE_DIR = join(tmpdir(), 'greedysearch-chrome-profile');
 const ACTIVE_PORT = join(PROFILE_DIR, 'DevToolsActivePort');
 const PID_FILE    = join(tmpdir(), 'greedysearch-chrome.pid');

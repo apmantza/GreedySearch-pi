@@ -38,6 +38,16 @@ function getDevToolsActivePortPath() {
 }
 
 function getWsUrl() {
+  // If CDP_PROFILE_DIR is set (by search.mjs), prefer that profile's port file
+  // so GreedySearch targets its own Chrome, not the user's main session.
+  const profileDir = process.env.CDP_PROFILE_DIR;
+  if (profileDir) {
+    const p = profileDir.replace(/\\/g, '/') + '/DevToolsActivePort';
+    if (existsSync(p)) {
+      const lines = readFileSync(p, 'utf8').trim().split('\n');
+      return `ws://127.0.0.1:${lines[0]}${lines[1]}`;
+    }
+  }
   const portFile = getDevToolsActivePortPath();
   const lines = readFileSync(portFile, 'utf8').trim().split('\n');
   return `ws://127.0.0.1:${lines[0]}${lines[1]}`;
