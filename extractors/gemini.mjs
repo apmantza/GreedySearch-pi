@@ -10,19 +10,17 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { spawn } from 'child_process';
-import { tmpdir } from 'os';
+import { tmpdir, homedir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { dismissConsent, handleVerification } from './consent.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const CDP = join(__dir, '..', 'cdp.mjs');
+const CDP = join(homedir(), '.claude', 'skills', 'chrome-cdp', 'scripts', 'cdp.mjs');
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
 
-const STREAM_POLL_INTERVAL = 600;
-const STREAM_STABLE_ROUNDS = 3;
-const STREAM_TIMEOUT = 60000;
-const MIN_ANSWER_LENGTH = 20;
+const COPY_POLL_INTERVAL = 600;
+const COPY_TIMEOUT = 120000;    // wait up to 2 min for copy button to appear
 
 // ---------------------------------------------------------------------------
 
@@ -64,58 +62,66 @@ async function typeIntoGemini(tab, text) {
   `]);
 }
 
-async function waitForStreamComplete(tab) {
-  // Wait for Stop button to appear (streaming started), then disappear (streaming done)
-  const deadline = Date.now() + STREAM_TIMEOUT;
-  let streamingStarted = false;
-  let stableCount = 0;
-  let lastLen = -1;
+async function injectClipboardInterceptor(tab) {
+  // Override both clipboard APIs — Gemini uses clipboard.write(ClipboardItem) for rich copy.
+  await cdp(['eval', tab, `
+    window.__geminiClipboard = null;
+    const _origWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
+    navigator.clipboard.writeText = function(text) {
+      window.__geminiClipboard = text;
+      return _origWriteText(text);
+    };
+    const _origWrite = navigator.clipboard.write.bind(navigator.clipboard);
+    navigator.clipboard.write = async function(items) {
+      try {
+        for (const item of items) {
+          if (item.types && item.types.includes('text/plain')) {
+            const blob = await item.getType('text/plain');
+            window.__geminiClipboard = await blob.text();
+            break;
+          }
+        }
+      } catch(e) {}
+      return _origWrite(items);
+    };
+  `]);
+}
 
+async function waitForCopyButton(tab) {
+  // The "Copy response" button appears only after streaming is complete.
+  const deadline = Date.now() + COPY_TIMEOUT;
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, STREAM_POLL_INTERVAL));
-
-    const stopVisible = await cdp(['eval', tab,
-      `!!document.querySelector('button[aria-label*="Stop"]')`
+    await new Promise(r => setTimeout(r, COPY_POLL_INTERVAL));
+    const found = await cdp(['eval', tab,
+      `!!document.querySelector('button[aria-label="Copy"]')`
     ]).catch(() => 'false');
-
-    if (stopVisible === 'true') {
-      streamingStarted = true;
-    } else if (streamingStarted) {
-      // Stop button gone — streaming finished. Confirm with stable text length.
-      const lenStr = await cdp(['eval', tab,
-        `(function(){var els=document.querySelectorAll('model-response .markdown');var last=els[els.length-1];return (last?.innerText?.length||0)+''})()`
-      ]).catch(() => '0');
-      const len = parseInt(lenStr) || 0;
-      if (len >= MIN_ANSWER_LENGTH && len === lastLen) {
-        stableCount++;
-        if (stableCount >= STREAM_STABLE_ROUNDS) return len;
-      } else {
-        stableCount = 0;
-        lastLen = len;
-      }
-    }
+    if (found === 'true') return;
   }
-
-  if (lastLen >= MIN_ANSWER_LENGTH) return lastLen;
-  throw new Error(`Gemini answer did not stabilise within ${STREAM_TIMEOUT}ms`);
+  throw new Error(`Gemini copy button did not appear within ${COPY_TIMEOUT}ms`);
 }
 
 async function extractAnswer(tab) {
+  // Click copy button → our interceptor captures the text.
+  await cdp(['eval', tab, `document.querySelector('button[aria-label="Copy"]')?.click()`]);
+  await new Promise(r => setTimeout(r, 400));
+
+  const answer = await cdp(['eval', tab, `window.__geminiClipboard || ''`]);
+  if (!answer) throw new Error('Clipboard interceptor returned empty text');
+
+  // Sources: links rendered in the page (best-effort; Shadow DOM may hide some)
   const raw = await cdp(['eval', tab, `
     (function() {
-      var els = document.querySelectorAll('model-response .markdown');
-      var last = els[els.length - 1];
-      if (!last) return JSON.stringify({ answer: '', sources: [] });
-      var answer = last.innerText.trim();
-      var sources = Array.from(document.querySelectorAll('model-response a[href^="http"]'))
+      var sources = Array.from(document.querySelectorAll('a[href^="http"]'))
         .map(a => ({ url: a.href.split('#')[0], title: a.innerText?.trim().split('\\n')[0] || '' }))
-        .filter(s => s.url && !s.url.includes('gemini.google') && !s.url.includes('gstatic'))
+        .filter(s => s.url && !s.url.includes('gemini.google') && !s.url.includes('gstatic') && !s.url.includes('google.com/search'))
         .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
         .slice(0, 8);
-      return JSON.stringify({ answer, sources });
+      return JSON.stringify(sources);
     })()
-  `]);
-  return JSON.parse(raw);
+  `]).catch(() => '[]');
+  const sources = JSON.parse(raw);
+
+  return { answer: answer.trim(), sources };
 }
 
 // ---------------------------------------------------------------------------
@@ -154,15 +160,16 @@ async function main() {
     }
     await new Promise(r => setTimeout(r, 300));
 
+    await injectClipboardInterceptor(tab);
     await typeIntoGemini(tab, query);
     await new Promise(r => setTimeout(r, 400));
 
     await cdp(['eval', tab, `document.querySelector('button[aria-label*="Send"]')?.click()`]);
 
-    await waitForStreamComplete(tab);
+    await waitForCopyButton(tab);
 
     const { answer, sources } = await extractAnswer(tab);
-    if (!answer) throw new Error('No answer extracted from Gemini');
+    if (!answer) throw new Error('No answer captured from Gemini clipboard');
     const out = short ? answer.slice(0, 300).replace(/\s+\S*$/, '') + '…' : answer;
 
     const finalUrl = await cdp(['eval', tab, 'document.location.href']).catch(() => 'https://gemini.google.com/app');
