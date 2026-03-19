@@ -1,6 +1,6 @@
 # GreedySearch for Pi
 
-Pi extension that adds a `greedy_search` tool — fans out queries to Perplexity, Bing Copilot, and Google AI simultaneously and returns synthesized AI answers.
+Pi extension that adds a `greedy_search` tool — fans out queries to Perplexity, Bing Copilot, and Google AI simultaneously and returns synthesized AI answers. Gemini can act as an optional synthesizer via `synthesize: true`, deduplicating sources across engines and returning a single grounded answer.
 
 Forked from [GreedySearch-claude](https://github.com/apmantza/GreedySearch-claude).
 
@@ -26,11 +26,22 @@ You can also invoke it directly:
 greedy_search({ query: "best way to handle auth in Next.js 15", engine: "all" })
 ```
 
+With Gemini synthesis:
+
+```
+greedy_search({ query: "best way to handle auth in Next.js 15", engine: "all", synthesize: true })
+```
+
 **Engines:**
 - `all` — fan-out to all three in parallel (default, highest confidence)
-- `perplexity` — best for technical Q&A
-- `bing` — best for recent news and Microsoft ecosystem
-- `google` — best for broad coverage
+- `perplexity` / `p` — best for technical Q&A
+- `bing` / `b` — best for recent news and Microsoft ecosystem
+- `google` / `g` — best for broad coverage
+- `gemini` / `gem` — Gemini standalone query
+
+**`synthesize: true`**
+
+Deduplicates sources across engines by consensus, feeds them to Gemini, and returns a single grounded answer instead of three separate responses. Adds ~30s to the request but reduces downstream token usage when passing results to a model.
 
 ## Requirements
 
@@ -56,4 +67,4 @@ node ~/.pi/agent/git/GreedySearch-pi/launch.mjs --kill
 - `index.ts` — Pi extension, registers `greedy_search` tool
 - `search.mjs` — CLI runner, spawns extractors in parallel
 - `launch.mjs` — launches dedicated Chrome on port 9223
-- `extractors/` — per-engine CDP scrapers (Perplexity, Bing Copilot, Google AI)
+- `extractors/` — per-engine CDP scrapers (Perplexity, Bing Copilot, Google AI, Gemini)
