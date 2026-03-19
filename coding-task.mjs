@@ -101,26 +101,29 @@ const ENGINES = {
       while (Date.now() < deadline) {
         await new Promise(r => setTimeout(r, STREAM_POLL_INTERVAL));
         const stopVisible = await cdp(['eval', tab, `!!document.querySelector('button[aria-label*="Stop"]')`]).catch(() => 'false');
-        if (stopVisible === 'true') { started = true; continue; }
-        if (!started) continue;
+        if (stopVisible === 'true') { started = true; }
 
+        // Use p/li/h* — reliable even when message-content has aria-busy="true"
         const lenStr = await cdp(['eval', tab,
-          `(function(){var els=document.querySelectorAll('model-response .markdown');var l=els[els.length-1];return(l?.innerText?.length||0)+''})()`,
+          `(function(){var els=document.querySelectorAll('model-response p,model-response li,model-response h1,model-response h2,model-response h3');return Array.from(els).reduce(function(a,e){return a+(e.innerText?.length||0)},0)+''})()`,
         ]).catch(() => '0');
         const len = parseInt(lenStr) || 0;
-        if (len >= MIN_RESPONSE_LENGTH && len === lastLen) {
+        if (len >= 10) started = true;
+        if (!started) continue;
+        if (len >= 10 && len === lastLen && stopVisible === 'false') {
           if (++stableCount >= STREAM_STABLE_ROUNDS) return;
         } else { stableCount = 0; lastLen = len; }
       }
-      if (lastLen >= MIN_RESPONSE_LENGTH) return;
+      if (lastLen >= 10) return;
       throw new Error('Gemini response did not stabilise');
     },
 
     async extract(tab) {
       return cdp(['eval', tab, `
         (function(){
-          var els = document.querySelectorAll('model-response .markdown');
-          return els[els.length-1]?.innerText?.trim() || '';
+          var UI_LABELS = /^(Gemini said|Query successful|Show code|Analysis|Hide code|Run code|View code)$/i;
+          var els = document.querySelectorAll('model-response p,model-response li,model-response h1,model-response h2,model-response h3');
+          return Array.from(els).map(function(e){return e.innerText?.trim()}).filter(function(t){return t && !UI_LABELS.test(t)}).join('\\n') || '';
         })()
       `]);
     },

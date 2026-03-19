@@ -114,7 +114,18 @@ function redirectCdpToGreedySearch() {
     copyFileSync(SYSTEM_PORT, SYSTEM_BACKUP);
   }
   // Point cdp.mjs to our dedicated Chrome's port
-  copyFileSync(ACTIVE_PORT, SYSTEM_PORT);
+  // On Windows, main Chrome may hold a lock on SYSTEM_PORT (EBUSY).
+  // Fall back to writeFileSync which uses CreateFile/WriteFile instead of CopyFile.
+  try {
+    copyFileSync(ACTIVE_PORT, SYSTEM_PORT);
+  } catch (e) {
+    if (e.code !== 'EBUSY') throw e;
+    try {
+      writeFileSync(SYSTEM_PORT, readFileSync(ACTIVE_PORT, 'utf8'), 'utf8');
+    } catch {
+      console.warn('Warning: could not redirect DevToolsActivePort (file busy) — cdp.mjs will use existing port.');
+    }
+  }
 }
 
 function restoreCdpToMainChrome() {
