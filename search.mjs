@@ -174,6 +174,80 @@ function pickTopSource(out) {
   return null;
 }
 
+function deduplicateSources(out) {
+  const seen = new Map(); // url -> { title, engines }
+  const engineOrder = ['perplexity', 'bing', 'google'];
+  
+  for (const engine of engineOrder) {
+    const r = out[engine];
+    if (!r?.sources) continue;
+    for (const s of r.sources) {
+      const url = s.url?.split('#')[0]?.replace(/\/$/, '');
+      if (!url || url.length < 10) continue;
+      if (!seen.has(url)) {
+        seen.set(url, { url: s.url, title: s.title || '', engines: [engine] });
+      } else {
+        const existing = seen.get(url);
+        if (!existing.engines.includes(engine)) {
+          existing.engines.push(engine);
+        }
+        if (!existing.title && s.title) existing.title = s.title;
+      }
+    }
+  }
+  
+  // Sort by consensus (most engines = highest confidence)
+  return Array.from(seen.values())
+    .sort((a, b) => b.engines.length - a.engines.length)
+    .slice(0, 10);
+}
+
+async function synthesizeWithGemini(query, results) {
+  // Build a prompt that includes all engine results
+  const sources = deduplicateSources(results);
+  
+  let prompt = `Based on the following search results from multiple AI engines, provide a single, synthesized answer to the user's question. Combine the information, resolve any conflicts, and present the most accurate and complete answer.\n\n`;
+  prompt += `User's question: "${query}"\n\n`;
+  
+  for (const engine of ['perplexity', 'bing', 'google']) {
+    const r = results[engine];
+    if (r?.error) {
+      prompt += `## ${engine} (failed)\nError: ${r.error}\n\n`;
+    } else if (r?.answer) {
+      prompt += `## ${engine}\n${r.answer.slice(0, 2000)}\n\n`;
+    }
+  }
+  
+  prompt += `Provide a synthesized answer that:\n`;
+  prompt += `1. Combines the best information from all sources\n`;
+  prompt += `2. Notes where sources agree or disagree\n`;
+  prompt += `3. Is clear and well-structured\n`;
+  prompt += `4. Includes key sources at the end\n`;
+  
+  // Run the query through Gemini extractor
+  return new Promise((resolve, reject) => {
+    const proc = spawn('node', [join(__dir, 'extractors', 'gemini.mjs'), prompt, '--short'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    let err = '';
+    proc.stdout.on('data', d => out += d);
+    proc.stderr.on('data', d => err += d);
+    const t = setTimeout(() => {
+      proc.kill();
+      reject(new Error('Gemini synthesis timed out after 120s'));
+    }, 120000);
+    proc.on('close', code => {
+      clearTimeout(t);
+      if (code !== 0) reject(new Error(err.trim() || 'gemini extractor failed'));
+      else {
+        try { resolve(JSON.parse(out.trim())); }
+        catch { reject(new Error(`bad JSON from gemini: ${out.slice(0, 100)}`)); }
+      }
+    });
+  });
+}
+
 function writeOutput(data, outFile) {
   const json = JSON.stringify(data, null, 2) + '\n';
   if (outFile) {
@@ -257,12 +331,14 @@ async function main() {
   const full        = args.includes('--full');
   const short       = !full;   // brief by default; --full opts into complete answers
   const fetchSource = args.includes('--fetch-top-source');
+  const synthesize  = args.includes('--synthesize');
   const outIdx      = args.indexOf('--out');
   const outFile     = outIdx !== -1 ? args[outIdx + 1] : null;
   const rest        = args.filter((a, i) =>
     a !== '--full' &&
     a !== '--short' &&  // keep accepting --short for back-compat
     a !== '--fetch-top-source' &&
+    a !== '--synthesize' &&
     a !== '--out' &&
     (outIdx === -1 || i !== outIdx + 1)
   );
@@ -307,6 +383,25 @@ async function main() {
         out[r.value.engine] = r.value;
       } else {
         out[ALL_ENGINES[i]] = { error: r.reason?.message || 'unknown error' };
+      }
+    }
+
+    // Deduplicate sources across all engines
+    out._sources = deduplicateSources(out);
+
+    // Synthesize with Gemini if requested
+    if (synthesize) {
+      process.stderr.write('[greedysearch] Synthesizing results with Gemini...\n');
+      try {
+        const synthesis = await synthesizeWithGemini(query, out);
+        out._synthesis = {
+          answer: synthesis.answer || '',
+          sources: synthesis.sources || [],
+          synthesized: true,
+        };
+      } catch (e) {
+        process.stderr.write(`[greedysearch] Synthesis failed: ${e.message}\n`);
+        out._synthesis = { error: e.message, synthesized: false };
       }
     }
 
