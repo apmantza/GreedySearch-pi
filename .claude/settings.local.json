@@ -12,7 +12,8 @@
       "Bash(.venv/Scripts/fig-ocr.exe --help)",
       "Bash(.venv/Scripts/fig-ocr.exe tui:*)",
       "Bash(tree:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(npm version:*)"
     ]
   }
 }
