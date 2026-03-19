@@ -27,7 +27,7 @@ import { tmpdir, homedir } from 'os';
 import http from 'http';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const CDP = join(homedir(), '.claude', 'skills', 'chrome-cdp', 'scripts', 'cdp.mjs');
+const CDP = join(__dir, 'cdp.mjs');
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
 
 const GREEDY_PORT = 9222;
