@@ -136,21 +136,44 @@ async function main() {
 
     // Navigate to Copilot homepage and use the chat input
     await cdp(['nav', tab, 'https://copilot.microsoft.com/'], 35000);
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, 2000));
     await dismissConsent(tab, cdp);
-    await handleVerification(tab, cdp, 60000);
+    
+    // Handle verification challenges (Cloudflare Turnstile, Microsoft auth, etc.)
+    const verifyResult = await handleVerification(tab, cdp, 90000);
+    if (verifyResult === 'needs-human') {
+      throw new Error('Copilot verification required — please solve it manually in the browser window');
+    }
+    
+    // After verification, page may have redirected or reloaded — wait for it to settle
+    if (verifyResult === 'clicked') {
+      await new Promise(r => setTimeout(r, 3000));
+      
+      // Re-navigate if we got redirected
+      const currentUrl = await cdp(['eval', tab, 'document.location.href']).catch(() => '');
+      if (!currentUrl.includes('copilot.microsoft.com')) {
+        await cdp(['nav', tab, 'https://copilot.microsoft.com/'], 35000);
+        await new Promise(r => setTimeout(r, 2000));
+        await dismissConsent(tab, cdp);
+      }
+    }
 
-    // Wait for React app to mount #userInput (up to 8s)
-    const deadline = Date.now() + 8000;
-    while (Date.now() < deadline) {
+    // Wait for React app to mount #userInput (up to 15s, longer after verification)
+    const inputDeadline = Date.now() + 15000;
+    while (Date.now() < inputDeadline) {
       const found = await cdp(['eval', tab, `!!document.querySelector('#userInput')`]).catch(() => 'false');
       if (found === 'true') break;
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 500));
     }
     await new Promise(r => setTimeout(r, 300));
 
+    // Verify input is actually there before proceeding
+    const inputReady = await cdp(['eval', tab, `!!document.querySelector('#userInput')`]).catch(() => 'false');
+    if (inputReady !== 'true') {
+      throw new Error('Copilot input not found — verification may have failed or page is in unexpected state');
+    }
+
     await injectClipboardInterceptor(tab);
-    // Find input and type query
     await cdp(['click', tab, '#userInput']);
     await new Promise(r => setTimeout(r, 400));
     await cdp(['type', tab, query]);
