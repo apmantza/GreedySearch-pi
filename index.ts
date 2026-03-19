@@ -20,9 +20,9 @@ function cdpAvailable(): boolean {
 	return existsSync(join(__dir, "cdp.mjs"));
 }
 
-function runSearch(engine: string, query: string): Promise<Record<string, unknown>> {
+function runSearch(engine: string, query: string, flags: string[] = []): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn("node", [__dir + "/search.mjs", engine, query], {
+		const proc = spawn("node", [__dir + "/search.mjs", engine, ...flags, query], {
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let out = "";
@@ -47,6 +47,24 @@ function formatResults(engine: string, data: Record<string, unknown>): string {
 	const lines: string[] = [];
 
 	if (engine === "all") {
+		// Synthesized output: prefer _synthesis + _sources
+		const synthesis = data._synthesis as Record<string, unknown> | undefined;
+		const dedupedSources = data._sources as Array<Record<string, unknown>> | undefined;
+		if (synthesis?.answer) {
+			lines.push("## Synthesis");
+			lines.push(String(synthesis.answer));
+			if (dedupedSources?.length) {
+				lines.push("\n**Top sources by consensus:**");
+				for (const s of dedupedSources.slice(0, 6)) {
+					const engines = (s.engines as string[]) || [];
+					lines.push(`- [${s.title || s.url}](${s.url}) [${engines.length}/3]`);
+				}
+			}
+			lines.push("\n---\n*Synthesized from Perplexity, Bing Copilot, and Google AI*");
+			return lines.join("\n").trim();
+		}
+
+		// Standard output: per-engine answers
 		for (const [eng, result] of Object.entries(data)) {
 			if (eng.startsWith("_")) continue;
 			lines.push(`\n## ${eng.charAt(0).toUpperCase() + eng.slice(1)}`);
@@ -97,8 +115,8 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 		label: "Greedy Search",
 		description:
 			"Search the web using AI-powered engines (Perplexity, Bing Copilot, Google AI) in parallel. " +
-			"Returns synthesized AI answers with sources. Use for current information, library docs, " +
-			"error messages, best practices, or any question where training data may be stale.",
+			"Optionally synthesize results with Gemini — deduplicates sources by consensus and returns one grounded answer. " +
+			"Use for current information, library docs, error messages, best practices, or any question where training data may be stale.",
 		parameters: Type.Object({
 			query: Type.String({ description: "The search query" }),
 			engine: Type.Union(
@@ -107,15 +125,21 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 					Type.Literal("perplexity"),
 					Type.Literal("bing"),
 					Type.Literal("google"),
+					Type.Literal("gemini"),
+					Type.Literal("gem"),
 				],
 				{
-					description: 'Engine to use. "all" fans out to all three in parallel (default).',
+					description: 'Engine to use. "all" fans out to Perplexity, Bing, and Google in parallel (default).',
 					default: "all",
 				},
 			),
+			synthesize: Type.Optional(Type.Boolean({
+				description: 'When true and engine is "all", deduplicates sources across engines and feeds them to Gemini for a single grounded synthesis. Adds ~30s but saves tokens and improves answer quality.',
+				default: false,
+			})),
 		}),
 		execute: async (_toolCallId, params) => {
-			const { query, engine = "all" } = params as { query: string; engine: string };
+			const { query, engine = "all", synthesize = false } = params as { query: string; engine: string; synthesize?: boolean };
 
 			if (!cdpAvailable()) {
 				return {
@@ -124,9 +148,12 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 				};
 			}
 
+			const flags: string[] = [];
+			if (synthesize && engine === "all") flags.push("--synthesize");
+
 			let data: Record<string, unknown>;
 			try {
-				data = await runSearch(engine, query);
+				data = await runSearch(engine, query, flags);
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				return {
