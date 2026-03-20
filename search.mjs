@@ -22,7 +22,7 @@
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
-import { readFileSync, existsSync, writeFileSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir, homedir } from 'os';
 import http from 'http';
 
@@ -248,13 +248,41 @@ async function synthesizeWithGemini(query, results) {
   });
 }
 
-function writeOutput(data, outFile) {
+function slugify(query) {
+  return query.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+}
+
+function resultsDir() {
+  const dir = join(__dir, 'results');
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function writeOutput(data, outFile, { inline = false, synthesize = false, query = '' } = {}) {
   const json = JSON.stringify(data, null, 2) + '\n';
+
   if (outFile) {
     writeFileSync(outFile, json, 'utf8');
     process.stderr.write(`Results written to ${outFile}\n`);
-  } else {
+    return;
+  }
+
+  if (inline) {
     process.stdout.write(json);
+    return;
+  }
+
+  const ts   = new Date().toISOString().replace('T', '_').replace(/[:.]/g, '-').slice(0, 19);
+  const slug = slugify(query);
+  const base = join(resultsDir(), `${ts}_${slug}`);
+
+  writeFileSync(`${base}.json`, json, 'utf8');
+
+  if (synthesize && data._synthesis?.answer) {
+    writeFileSync(`${base}-synthesis.md`, data._synthesis.answer, 'utf8');
+    process.stdout.write(`${base}-synthesis.md\n`);
+  } else {
+    process.stdout.write(`${base}.json\n`);
   }
 }
 
@@ -332,6 +360,7 @@ async function main() {
   const short       = !full;   // brief by default; --full opts into complete answers
   const fetchSource = args.includes('--fetch-top-source');
   const synthesize  = args.includes('--synthesize');
+  const inline      = args.includes('--inline');
   const outIdx      = args.indexOf('--out');
   const outFile     = outIdx !== -1 ? args[outIdx + 1] : null;
   const rest        = args.filter((a, i) =>
@@ -339,6 +368,7 @@ async function main() {
     a !== '--short' &&  // keep accepting --short for back-compat
     a !== '--fetch-top-source' &&
     a !== '--synthesize' &&
+    a !== '--inline' &&
     a !== '--out' &&
     (outIdx === -1 || i !== outIdx + 1)
   );
@@ -410,7 +440,7 @@ async function main() {
       if (top) out._topSource = await fetchTopSource(top.url);
     }
 
-    writeOutput(out, outFile);
+    writeOutput(out, outFile, { inline, synthesize, query });
     return;
   }
 
@@ -425,7 +455,7 @@ async function main() {
     if (fetchSource && result.sources?.length > 0) {
       result.topSource = await fetchTopSource(result.sources[0].url);
     }
-    writeOutput(result, outFile);
+    writeOutput(result, outFile, { inline, synthesize, query });
   } catch (e) {
     process.stderr.write(`Error: ${e.message}\n`);
     process.exit(1);
