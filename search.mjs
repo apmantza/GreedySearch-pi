@@ -155,7 +155,7 @@ async function fetchTopSource(url) {
       (function(){
         var el = document.querySelector('article, [role="main"], main, .post-content, .article-body, #content, .content');
         var text = (el || document.body).innerText;
-        return text.replace(/\\s+/g, ' ').trim().slice(0, 1500);
+        return text.replace(/\\s+/g, ' ').trim();
       })()
     `]);
     return { url, content };
@@ -214,7 +214,7 @@ async function synthesizeWithGemini(query, results) {
     if (r?.error) {
       prompt += `## ${engine} (failed)\nError: ${r.error}\n\n`;
     } else if (r?.answer) {
-      prompt += `## ${engine}\n${r.answer.slice(0, 2000)}\n\n`;
+      prompt += `## ${engine}\n${r.answer}\n\n`;
     }
   }
   
