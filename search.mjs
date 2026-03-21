@@ -9,14 +9,14 @@
 //   perplexity | pplx | p
 //   bing       | copilot | b
 //   google     | g
-//   stackoverflow | so | stack
+//   gemini     | gem
 //   all        — fan-out to all engines in parallel
 //
 // Output: JSON to stdout, errors to stderr
 //
 // Examples:
 //   node search.mjs p "what is memoization"
-//   node search.mjs so "node.js event loop explained"
+//   node search.mjs gem "latest React features"
 //   node search.mjs all "how does TCP congestion control work"
 
 import { spawn } from 'child_process';
@@ -43,19 +43,15 @@ const ENGINES = {
   g:          'google-ai.mjs',
   gemini:     'gemini.mjs',
   gem:        'gemini.mjs',
-  stackoverflow: 'stackoverflow-ai.mjs',
-  so:         'stackoverflow-ai.mjs',
-  stack:      'stackoverflow-ai.mjs',
 };
 
-const ALL_ENGINES = ['perplexity', 'bing', 'google']; // stackoverflow: disabled until polling fix
+const ALL_ENGINES = ['perplexity', 'bing', 'google'];
 
 const ENGINE_DOMAINS = {
   perplexity: 'perplexity.ai',
   bing:       'copilot.microsoft.com',
   google:     'google.com',
   gemini:     'gemini.google.com',
-  stackoverflow: 'stackoverflow.com',
 };
 
 function getTabFromCache(engine) {
@@ -347,7 +343,7 @@ async function main() {
     process.stderr.write([
       'Usage: node search.mjs <engine> "<query>"',
       '',
-      'Engines: perplexity (p), bing (b), google (g), stackoverflow (so), all',
+      'Engines: perplexity (p), bing (b), google (g), gemini (gem), all',
       '',
       'Examples:',
       '  node search.mjs p "what is memoization"',
