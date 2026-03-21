@@ -4,6 +4,7 @@
  * Adds a `greedy_search` tool to Pi that fans out queries to Perplexity,
  * Bing Copilot, and Google AI in parallel, returning synthesized AI answers.
  *
+ * Reports streaming progress as each engine completes.
  * Requires Chrome to be running (or it auto-launches a dedicated instance).
  */
 
@@ -16,20 +17,31 @@ import { Type } from "@sinclair/typebox";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
+const ALL_ENGINES = ["perplexity", "bing", "google"] as const;
+
 function cdpAvailable(): boolean {
 	return existsSync(join(__dir, "cdp.mjs"));
 }
 
-function runSearch(engine: string, query: string, flags: string[] = []): Promise<Record<string, unknown>> {
+function runSearch(engine: string, query: string, flags: string[] = [], signal?: AbortSignal): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
 		const proc = spawn("node", [__dir + "/search.mjs", engine, "--inline", ...flags, query], {
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let out = "";
 		let err = "";
+
+		// Handle abort signal
+		const onAbort = () => {
+			proc.kill("SIGTERM");
+			reject(new Error("Aborted"));
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
+
 		proc.stdout.on("data", (d: Buffer) => (out += d));
 		proc.stderr.on("data", (d: Buffer) => (err += d));
 		proc.on("close", (code: number) => {
+			signal?.removeEventListener("abort", onAbort);
 			if (code !== 0) {
 				reject(new Error(err.trim() || `search.mjs exited with code ${code}`));
 			} else {
@@ -100,6 +112,23 @@ function formatResults(engine: string, data: Record<string, unknown>): string {
 	return lines.join("\n").trim();
 }
 
+function formatPartialProgress(results: Record<string, Record<string, unknown>>, completed: string[], total: number): string {
+	const parts: string[] = [];
+	for (const eng of completed) {
+		const r = results[eng];
+		if (r?.error) {
+			parts.push(`❌ ${eng} failed`);
+		} else {
+			parts.push(`✅ ${eng} done`);
+		}
+	}
+	const remaining = total - completed.length;
+	if (remaining > 0) {
+		parts.push(`⏳ ${remaining} pending...`);
+	}
+	return `**Searching...** ${parts.join(" · ")}`;
+}
+
 export default function greedySearchExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		if (!cdpAvailable()) {
@@ -116,7 +145,9 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 		description:
 			"Search the web using AI-powered engines (Perplexity, Bing Copilot, Google AI) in parallel. " +
 			"Optionally synthesize results with Gemini — deduplicates sources by consensus and returns one grounded answer. " +
+			"Reports streaming progress as each engine completes. " +
 			"Use for current information, library docs, error messages, best practices, or any question where training data may be stale.",
+		promptSnippet: "Multi-engine AI web search with streaming progress",
 		parameters: Type.Object({
 			query: Type.String({ description: "The search query" }),
 			engine: Type.Union(
@@ -142,7 +173,7 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 				default: false,
 			})),
 		}),
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal, onUpdate) => {
 			const { query, engine = "all", synthesize = false, fullAnswer = false } = params as { query: string; engine: string; synthesize?: boolean; fullAnswer?: boolean };
 
 			if (!cdpAvailable()) {
@@ -153,25 +184,118 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 			}
 
 			const flags: string[] = [];
-			if (synthesize && engine === "all") flags.push("--synthesize");
 			if (fullAnswer) flags.push("--full");
 
-			let data: Record<string, unknown>;
-			try {
-				data = await runSearch(engine, query, flags);
-			} catch (e) {
-				const msg = e instanceof Error ? e.message : String(e);
-				return {
-					content: [{ type: "text", text: `Search failed: ${msg}` }],
-					details: {} as { raw?: Record<string, unknown> },
-				};
+			// Single engine: just run it directly
+			if (engine !== "all") {
+				try {
+					const data = await runSearch(engine, query, flags, signal);
+					const text = formatResults(engine, data);
+					return {
+						content: [{ type: "text", text: text || "No results returned." }],
+						details: { raw: data } as { raw?: Record<string, unknown> },
+					};
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : String(e);
+					return {
+						content: [{ type: "text", text: `Search failed: ${msg}` }],
+						details: {} as { raw?: Record<string, unknown> },
+					};
+				}
 			}
 
-			const text = formatResults(engine, data);
+			// engine: "all" — run engines in parallel with streaming progress
+			const results: Record<string, Record<string, unknown>> = {};
+			const completed: string[] = [];
+			let allDone = false;
+
+			const enginePromises = ALL_ENGINES.map(async (eng) => {
+				try {
+					const result = await runSearch(eng, query, flags, signal);
+					results[eng] = result;
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : String(e);
+					results[eng] = { error: msg } as unknown as Record<string, unknown>;
+				}
+				completed.push(eng);
+
+				// Report progress after each engine completes
+				if (!allDone) {
+					const progressText = formatPartialProgress(results, completed, ALL_ENGINES.length);
+					onUpdate?.({
+						content: [{ type: "text", text: progressText }],
+						details: { raw: results, _progress: true },
+					} as any);
+				}
+			});
+
+			// Wait for all engines to complete
+			await Promise.allSettled(enginePromises);
+			allDone = true;
+
+			// Deduplicate sources across all engines
+			const allData = results as Record<string, unknown>;
+			allData._sources = deduplicateSources(results);
+
+			// Optionally synthesize with Gemini
+			if (synthesize && !signal?.aborted) {
+				onUpdate?.({
+					content: [{ type: "text", text: "**Searching...** ✅ perplexity done · ✅ bing done · ✅ google done · 🔄 Synthesizing with Gemini..." }],
+					details: { raw: allData, _progress: true },
+				} as any);
+
+				try {
+					const synthesis = await runSearch("gemini",
+						`Based on the following search results from multiple AI engines, provide a single, synthesized answer to the user's question. Combine the information, resolve any conflicts, and present the most accurate and complete answer.\n\n` +
+						`User's question: "${query}"\n\n` +
+						`## perplexity\n${(results.perplexity as any)?.answer || "failed"}\n\n` +
+						`## bing\n${(results.bing as any)?.answer || "failed"}\n\n` +
+						`## google\n${(results.google as any)?.answer || "failed"}\n\n` +
+						`Provide a synthesized answer that combines the best information, notes where sources agree or disagree, and is clear and well-structured.`,
+						["--short"], signal
+					);
+					allData._synthesis = { answer: synthesis.answer || "", synthesized: true };
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : String(e);
+					allData._synthesis = { error: msg, synthesized: false };
+				}
+			}
+
+			const text = formatResults("all", allData);
 			return {
 				content: [{ type: "text", text: text || "No results returned." }],
-				details: { raw: data } as { raw?: Record<string, unknown> },
+				details: { raw: allData },
 			};
 		},
 	});
+}
+
+function deduplicateSources(results: Record<string, Record<string, unknown>>): Array<Record<string, unknown>> {
+	const seen = new Map();
+	const engineOrder = ["perplexity", "bing", "google"];
+
+	for (const engine of engineOrder) {
+		const r = results[engine] as Record<string, unknown> | undefined;
+		const sources = r?.sources as Array<Record<string, string>> | undefined;
+		if (!sources) continue;
+
+		for (const s of sources) {
+			const url = s.url?.split("#")[0]?.replace(/\/$/, "");
+			if (!url || url.length < 10) continue;
+
+			if (!seen.has(url)) {
+				seen.set(url, { url: s.url, title: s.title || "", engines: [engine] });
+			} else {
+				const existing = seen.get(url);
+				if (!existing.engines.includes(engine)) {
+					existing.engines.push(engine);
+				}
+				if (!existing.title && s.title) existing.title = s.title;
+			}
+		}
+	}
+
+	return Array.from(seen.values())
+		.sort((a: any, b: any) => b.engines.length - a.engines.length)
+		.slice(0, 10);
 }
