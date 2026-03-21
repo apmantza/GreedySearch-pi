@@ -22,7 +22,7 @@ function cdpAvailable(): boolean {
 
 function runSearch(engine: string, query: string, flags: string[] = []): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn("node", [__dir + "/search.mjs", engine, ...flags, query], {
+		const proc = spawn("node", [__dir + "/search.mjs", engine, "--inline", ...flags, query], {
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let out = "";
