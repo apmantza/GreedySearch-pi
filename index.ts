@@ -23,6 +23,39 @@ function cdpAvailable(): boolean {
 	return existsSync(join(__dir, "cdp.mjs"));
 }
 
+async function ensureChrome(signal?: AbortSignal): Promise<void> {
+	// Quick check: is GreedySearch Chrome already running?
+	try {
+		const resp = await fetch("http://localhost:9222/json/version", {
+			signal: AbortSignal.timeout(3000),
+		});
+		if (resp.ok) return; // Already running
+	} catch { /* not running, launch it */ }
+
+	return new Promise((resolve, reject) => {
+		launchChrome(signal, resolve, reject);
+	});
+}
+
+function launchChrome(signal: AbortSignal | undefined, resolve: () => void, reject: (e: Error) => void) {
+	const proc = spawn("node", [__dir + "/launch.mjs"], {
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	let stderr = "";
+	proc.stderr.on("data", (d: Buffer) => (stderr += d));
+
+	const onAbort = () => { proc.kill(); reject(new Error("Aborted")); };
+	signal?.addEventListener("abort", onAbort, { once: true });
+
+	const timeout = setTimeout(() => { proc.kill(); reject(new Error("Chrome launch timed out")); }, 30000);
+	proc.on("close", (code) => {
+		clearTimeout(timeout);
+		signal?.removeEventListener("abort", onAbort);
+		if (code === 0) resolve();
+		else reject(new Error(stderr.trim() || `launch.mjs exited with code ${code}`));
+	});
+}
+
 function runSearch(engine: string, query: string, flags: string[] = [], signal?: AbortSignal): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
 		const proc = spawn("node", [__dir + "/search.mjs", engine, "--inline", ...flags, query], {
@@ -204,7 +237,17 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 				}
 			}
 
-			// engine: "all" — run engines in parallel with streaming progress
+			// engine: "all" — pre-launch Chrome first to avoid race conditions
+			try {
+				await ensureChrome(signal);
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e);
+				return {
+					content: [{ type: "text", text: `Could not connect to Chrome: ${msg}` }],
+					details: {} as { raw?: Record<string, unknown> },
+				};
+			}
+
 			const results: Record<string, Record<string, unknown>> = {};
 			const completed: string[] = [];
 			let allDone = false;
