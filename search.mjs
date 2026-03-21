@@ -41,6 +41,8 @@ const ENGINES = {
   b:          'bing-copilot.mjs',
   google:     'google-ai.mjs',
   g:          'google-ai.mjs',
+  gemini:     'gemini.mjs',
+  gem:        'gemini.mjs',
   stackoverflow: 'stackoverflow-ai.mjs',
   so:         'stackoverflow-ai.mjs',
   stack:      'stackoverflow-ai.mjs',
@@ -52,6 +54,7 @@ const ENGINE_DOMAINS = {
   perplexity: 'perplexity.ai',
   bing:       'copilot.microsoft.com',
   google:     'google.com',
+  gemini:     'gemini.google.com',
   stackoverflow: 'stackoverflow.com',
 };
 

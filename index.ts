@@ -137,9 +137,13 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 				description: 'When true and engine is "all", deduplicates sources across engines and feeds them to Gemini for a single grounded synthesis. Adds ~30s but saves tokens and improves answer quality.',
 				default: false,
 			})),
+			fullAnswer: Type.Optional(Type.Boolean({
+				description: 'When true, returns the complete answer instead of a truncated preview (default: false, answers are shortened to ~300 chars to save tokens).',
+				default: false,
+			})),
 		}),
 		execute: async (_toolCallId, params) => {
-			const { query, engine = "all", synthesize = false } = params as { query: string; engine: string; synthesize?: boolean };
+			const { query, engine = "all", synthesize = false, fullAnswer = false } = params as { query: string; engine: string; synthesize?: boolean; fullAnswer?: boolean };
 
 			if (!cdpAvailable()) {
 				return {
@@ -150,6 +154,7 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 
 			const flags: string[] = [];
 			if (synthesize && engine === "all") flags.push("--synthesize");
+			if (fullAnswer) flags.push("--full");
 
 			let data: Record<string, unknown>;
 			try {
