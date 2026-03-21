@@ -23,40 +23,13 @@ function cdpAvailable(): boolean {
 	return existsSync(join(__dir, "cdp.mjs"));
 }
 
-async function ensureChrome(signal?: AbortSignal): Promise<void> {
-	// Quick check: is GreedySearch Chrome already running?
-	try {
-		const resp = await fetch("http://localhost:9222/json/version", {
-			signal: AbortSignal.timeout(3000),
-		});
-		if (resp.ok) return; // Already running
-	} catch { /* not running, launch it */ }
-
-	return new Promise((resolve, reject) => {
-		launchChrome(signal, resolve, reject);
-	});
-}
-
-function launchChrome(signal: AbortSignal | undefined, resolve: () => void, reject: (e: Error) => void) {
-	const proc = spawn("node", [__dir + "/launch.mjs"], {
-		stdio: ["ignore", "pipe", "pipe"],
-	});
-	let stderr = "";
-	proc.stderr.on("data", (d: Buffer) => (stderr += d));
-
-	const onAbort = () => { proc.kill(); reject(new Error("Aborted")); };
-	signal?.addEventListener("abort", onAbort, { once: true });
-
-	const timeout = setTimeout(() => { proc.kill(); reject(new Error("Chrome launch timed out")); }, 30000);
-	proc.on("close", (code) => {
-		clearTimeout(timeout);
-		signal?.removeEventListener("abort", onAbort);
-		if (code === 0) resolve();
-		else reject(new Error(stderr.trim() || `launch.mjs exited with code ${code}`));
-	});
-}
-
-function runSearch(engine: string, query: string, flags: string[] = [], signal?: AbortSignal): Promise<Record<string, unknown>> {
+function runSearch(
+	engine: string,
+	query: string,
+	flags: string[] = [],
+	signal?: AbortSignal,
+	onProgress?: (engine: string, status: "done" | "error") => void,
+): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
 		const proc = spawn("node", [__dir + "/search.mjs", engine, "--inline", ...flags, query], {
 			stdio: ["ignore", "pipe", "pipe"],
@@ -64,15 +37,22 @@ function runSearch(engine: string, query: string, flags: string[] = [], signal?:
 		let out = "";
 		let err = "";
 
-		// Handle abort signal
-		const onAbort = () => {
-			proc.kill("SIGTERM");
-			reject(new Error("Aborted"));
-		};
+		const onAbort = () => { proc.kill("SIGTERM"); reject(new Error("Aborted")); };
 		signal?.addEventListener("abort", onAbort, { once: true });
 
+		// Watch stderr for progress events (PROGRESS:engine:done|error)
+		proc.stderr.on("data", (d: Buffer) => {
+			err += d;
+			const lines = d.toString().split("\n");
+			for (const line of lines) {
+				const match = line.match(/^PROGRESS:(\w+):(done|error)$/);
+				if (match && onProgress) {
+					onProgress(match[1], match[2] as "done" | "error");
+				}
+			}
+		});
+
 		proc.stdout.on("data", (d: Buffer) => (out += d));
-		proc.stderr.on("data", (d: Buffer) => (err += d));
 		proc.on("close", (code: number) => {
 			signal?.removeEventListener("abort", onAbort);
 			if (code !== 0) {
@@ -145,23 +125,6 @@ function formatResults(engine: string, data: Record<string, unknown>): string {
 	return lines.join("\n").trim();
 }
 
-function formatPartialProgress(results: Record<string, Record<string, unknown>>, completed: string[], total: number): string {
-	const parts: string[] = [];
-	for (const eng of completed) {
-		const r = results[eng];
-		if (r?.error) {
-			parts.push(`❌ ${eng} failed`);
-		} else {
-			parts.push(`✅ ${eng} done`);
-		}
-	}
-	const remaining = total - completed.length;
-	if (remaining > 0) {
-		parts.push(`⏳ ${remaining} pending...`);
-	}
-	return `**Searching...** ${parts.join(" · ")}`;
-}
-
 export default function greedySearchExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		if (!cdpAvailable()) {
@@ -207,7 +170,9 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 			})),
 		}),
 		execute: async (_toolCallId, params, signal, onUpdate) => {
-			const { query, engine = "all", synthesize = false, fullAnswer = false } = params as { query: string; engine: string; synthesize?: boolean; fullAnswer?: boolean };
+			const { query, engine = "all", synthesize = false, fullAnswer = false } = params as {
+				query: string; engine: string; synthesize?: boolean; fullAnswer?: boolean;
+			};
 
 			if (!cdpAvailable()) {
 				return {
@@ -218,127 +183,40 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 
 			const flags: string[] = [];
 			if (fullAnswer) flags.push("--full");
+			if (synthesize && engine === "all") flags.push("--synthesize");
 
-			// Single engine: just run it directly
-			if (engine !== "all") {
-				try {
-					const data = await runSearch(engine, query, flags, signal);
-					const text = formatResults(engine, data);
-					return {
-						content: [{ type: "text", text: text || "No results returned." }],
-						details: { raw: data } as { raw?: Record<string, unknown> },
-					};
-				} catch (e) {
-					const msg = e instanceof Error ? e.message : String(e);
-					return {
-						content: [{ type: "text", text: `Search failed: ${msg}` }],
-						details: {} as { raw?: Record<string, unknown> },
-					};
+			// Track progress for "all" engine mode
+			const completed = new Set<string>();
+
+			const onProgress = (eng: string, status: "done" | "error") => {
+				completed.add(eng);
+				const parts: string[] = [];
+				for (const e of ALL_ENGINES) {
+					if (completed.has(e)) parts.push(`✅ ${e} done`);
+					else parts.push(`⏳ ${e}`);
 				}
-			}
+				if (synthesize && completed.size >= 3) parts.push("🔄 synthesizing");
 
-			// engine: "all" — pre-launch Chrome first to avoid race conditions
+				onUpdate?.({
+					content: [{ type: "text", text: `**Searching...** ${parts.join(" · ")}` }],
+					details: { _progress: true },
+				} as any);
+			};
+
 			try {
-				await ensureChrome(signal);
+				const data = await runSearch(engine, query, flags, signal, engine === "all" ? onProgress : undefined);
+				const text = formatResults(engine, data);
+				return {
+					content: [{ type: "text", text: text || "No results returned." }],
+					details: { raw: data },
+				};
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				return {
-					content: [{ type: "text", text: `Could not connect to Chrome: ${msg}` }],
+					content: [{ type: "text", text: `Search failed: ${msg}` }],
 					details: {} as { raw?: Record<string, unknown> },
 				};
 			}
-
-			const results: Record<string, Record<string, unknown>> = {};
-			const completed: string[] = [];
-			let allDone = false;
-
-			const enginePromises = ALL_ENGINES.map(async (eng) => {
-				try {
-					const result = await runSearch(eng, query, flags, signal);
-					results[eng] = result;
-				} catch (e) {
-					const msg = e instanceof Error ? e.message : String(e);
-					results[eng] = { error: msg } as unknown as Record<string, unknown>;
-				}
-				completed.push(eng);
-
-				// Report progress after each engine completes
-				if (!allDone) {
-					const progressText = formatPartialProgress(results, completed, ALL_ENGINES.length);
-					onUpdate?.({
-						content: [{ type: "text", text: progressText }],
-						details: { raw: results, _progress: true },
-					} as any);
-				}
-			});
-
-			// Wait for all engines to complete
-			await Promise.allSettled(enginePromises);
-			allDone = true;
-
-			// Deduplicate sources across all engines
-			const allData = results as Record<string, unknown>;
-			allData._sources = deduplicateSources(results);
-
-			// Optionally synthesize with Gemini
-			if (synthesize && !signal?.aborted) {
-				onUpdate?.({
-					content: [{ type: "text", text: "**Searching...** ✅ perplexity done · ✅ bing done · ✅ google done · 🔄 Synthesizing with Gemini..." }],
-					details: { raw: allData, _progress: true },
-				} as any);
-
-				try {
-					const synthesis = await runSearch("gemini",
-						`Based on the following search results from multiple AI engines, provide a single, synthesized answer to the user's question. Combine the information, resolve any conflicts, and present the most accurate and complete answer.\n\n` +
-						`User's question: "${query}"\n\n` +
-						`## perplexity\n${(results.perplexity as any)?.answer || "failed"}\n\n` +
-						`## bing\n${(results.bing as any)?.answer || "failed"}\n\n` +
-						`## google\n${(results.google as any)?.answer || "failed"}\n\n` +
-						`Provide a synthesized answer that combines the best information, notes where sources agree or disagree, and is clear and well-structured.`,
-						["--short"], signal
-					);
-					allData._synthesis = { answer: synthesis.answer || "", synthesized: true };
-				} catch (e) {
-					const msg = e instanceof Error ? e.message : String(e);
-					allData._synthesis = { error: msg, synthesized: false };
-				}
-			}
-
-			const text = formatResults("all", allData);
-			return {
-				content: [{ type: "text", text: text || "No results returned." }],
-				details: { raw: allData },
-			};
 		},
 	});
-}
-
-function deduplicateSources(results: Record<string, Record<string, unknown>>): Array<Record<string, unknown>> {
-	const seen = new Map();
-	const engineOrder = ["perplexity", "bing", "google"];
-
-	for (const engine of engineOrder) {
-		const r = results[engine] as Record<string, unknown> | undefined;
-		const sources = r?.sources as Array<Record<string, string>> | undefined;
-		if (!sources) continue;
-
-		for (const s of sources) {
-			const url = s.url?.split("#")[0]?.replace(/\/$/, "");
-			if (!url || url.length < 10) continue;
-
-			if (!seen.has(url)) {
-				seen.set(url, { url: s.url, title: s.title || "", engines: [engine] });
-			} else {
-				const existing = seen.get(url);
-				if (!existing.engines.includes(engine)) {
-					existing.engines.push(engine);
-				}
-				if (!existing.title && s.title) existing.title = s.title;
-			}
-		}
-	}
-
-	return Array.from(seen.values())
-		.sort((a: any, b: any) => b.engines.length - a.engines.length)
-		.slice(0, 10);
 }

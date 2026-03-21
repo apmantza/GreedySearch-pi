@@ -405,7 +405,15 @@ async function main() {
     // All tabs assigned — run extractors in parallel
     const results = await Promise.allSettled(
       ALL_ENGINES.map((e, i) =>
-        runExtractor(ENGINES[e], query, tabs[i], short).then(r => ({ engine: e, ...r }))
+        runExtractor(ENGINES[e], query, tabs[i], short)
+          .then(r => {
+            process.stderr.write(`PROGRESS:${e}:done\n`);
+            return { engine: e, ...r };
+          })
+          .catch(err => {
+            process.stderr.write(`PROGRESS:${e}:error\n`);
+            throw err;
+          })
       )
     );
 
@@ -424,6 +432,7 @@ async function main() {
 
     // Synthesize with Gemini if requested
     if (synthesize) {
+      process.stderr.write('PROGRESS:synthesis:start\n');
       process.stderr.write('[greedysearch] Synthesizing results with Gemini...\n');
       try {
         const synthesis = await synthesizeWithGemini(query, out);
@@ -432,6 +441,7 @@ async function main() {
           sources: synthesis.sources || [],
           synthesized: true,
         };
+        process.stderr.write('PROGRESS:synthesis:done\n');
       } catch (e) {
         process.stderr.write(`[greedysearch] Synthesis failed: ${e.message}\n`);
         out._synthesis = { error: e.message, synthesized: false };
