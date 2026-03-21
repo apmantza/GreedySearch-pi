@@ -14,6 +14,7 @@ import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { dismissConsent, handleVerification } from './consent.mjs';
+import { SELECTORS } from './selectors.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const CDP = join(__dir, '..', 'cdp.mjs');
@@ -21,6 +22,8 @@ const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
 
 const COPY_POLL_INTERVAL = 700;
 const COPY_TIMEOUT = 60000;
+
+const S = SELECTORS.bing;
 
 // ---------------------------------------------------------------------------
 
@@ -84,7 +87,7 @@ async function waitForCopyButton(tab) {
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, COPY_POLL_INTERVAL));
     const found = await cdp(['eval', tab,
-      `!!document.querySelector('button[data-testid="copy-ai-message-button"]')`
+      `!!document.querySelector('${S.copyButton}')`
     ]).catch(() => 'false');
     if (found === 'true') return;
   }
@@ -92,7 +95,7 @@ async function waitForCopyButton(tab) {
 }
 
 async function extractAnswer(tab) {
-  await cdp(['eval', tab, `document.querySelector('button[data-testid="copy-ai-message-button"]')?.click()`]);
+  await cdp(['eval', tab, `document.querySelector('${S.copyButton}')?.click()`]);
   await new Promise(r => setTimeout(r, 400));
 
   const answer = await cdp(['eval', tab, `window.__bingClipboard || ''`]);
@@ -100,9 +103,9 @@ async function extractAnswer(tab) {
 
   const raw = await cdp(['eval', tab, `
     (function() {
-      var sources = Array.from(document.querySelectorAll('a[href^="http"][target="_blank"]'))
+      var sources = Array.from(document.querySelectorAll('${S.sourceLink}'))
         .map(a => ({ url: a.href, title: a.innerText?.trim().split('\\n')[0] || a.title || '' }))
-        .filter(s => s.url && !s.url.includes('copilot.microsoft.com'))
+        .filter(s => s.url && !s.url.includes('${S.sourceExclude}'))
         .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
         .slice(0, 10);
       return JSON.stringify(sources);
@@ -158,30 +161,30 @@ async function main() {
       }
     }
 
-    // Wait for React app to mount #userInput (up to 15s, longer after verification)
+    // Wait for React app to mount input (up to 15s, longer after verification)
     const inputDeadline = Date.now() + 15000;
     while (Date.now() < inputDeadline) {
-      const found = await cdp(['eval', tab, `!!document.querySelector('#userInput')`]).catch(() => 'false');
+      const found = await cdp(['eval', tab, `!!document.querySelector('${S.input}')`]).catch(() => 'false');
       if (found === 'true') break;
       await new Promise(r => setTimeout(r, 500));
     }
     await new Promise(r => setTimeout(r, 300));
 
     // Verify input is actually there before proceeding
-    const inputReady = await cdp(['eval', tab, `!!document.querySelector('#userInput')`]).catch(() => 'false');
+    const inputReady = await cdp(['eval', tab, `!!document.querySelector('${S.input}')`]).catch(() => 'false');
     if (inputReady !== 'true') {
       throw new Error('Copilot input not found — verification may have failed or page is in unexpected state');
     }
 
     await injectClipboardInterceptor(tab);
-    await cdp(['click', tab, '#userInput']);
+    await cdp(['click', tab, S.input]);
     await new Promise(r => setTimeout(r, 400));
     await cdp(['type', tab, query]);
     await new Promise(r => setTimeout(r, 400));
 
     // Submit with Enter (most reliable across locales and Chrome instances)
     await cdp(['eval', tab,
-      `document.querySelector('#userInput')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,keyCode:13})), 'ok'`
+      `document.querySelector('${S.input}')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,keyCode:13})), 'ok'`
     ]);
 
     await waitForCopyButton(tab);

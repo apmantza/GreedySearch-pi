@@ -14,6 +14,7 @@ import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { dismissConsent, handleVerification } from './consent.mjs';
+import { SELECTORS } from './selectors.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const CDP = join(__dir, '..', 'cdp.mjs');
@@ -23,6 +24,8 @@ const STREAM_POLL_INTERVAL = 600;
 const STREAM_STABLE_ROUNDS = 3;
 const STREAM_TIMEOUT = 45000;
 const MIN_ANSWER_LENGTH = 50;
+
+const S = SELECTORS.google;
 
 // ---------------------------------------------------------------------------
 
@@ -66,7 +69,7 @@ async function waitForStreamComplete(tab) {
     await new Promise(r => setTimeout(r, STREAM_POLL_INTERVAL));
 
     const lenStr = await cdp(['eval', tab,
-      `(document.querySelector('.pWvJNd')?.innerText?.length || 0) + ''`
+      `(document.querySelector('${S.answerContainer}')?.innerText?.length || 0) + ''`
     ]).catch(() => '0');
 
     const len = parseInt(lenStr) || 0;
@@ -85,14 +88,15 @@ async function waitForStreamComplete(tab) {
 }
 
 async function extractAnswer(tab) {
+  const excludeFilter = S.sourceExclude.map(e => `!a.href.includes('${e}')`).join(' && ');
   const raw = await cdp(['eval', tab, `
     (function() {
-      var el = document.querySelector('.pWvJNd');
+      var el = document.querySelector('${S.answerContainer}');
       if (!el) return JSON.stringify({ answer: '', sources: [] });
       var answer = el.innerText.trim();
-      var sources = Array.from(document.querySelectorAll('a[href^="http"]'))
-        .filter(a => !a.href.includes('google.') && !a.href.includes('gstatic') && !a.href.includes('googleapis'))
-        .map(a => ({ url: a.href.split('#')[0], title: (a.closest('[data-snhf]')?.querySelector('h3, [role=heading]')?.innerText || a.innerText?.trim().split('\\n')[0] || '').slice(0, 100) }))
+      var sources = Array.from(document.querySelectorAll('${S.sourceLink}'))
+        .filter(a => ${excludeFilter})
+        .map(a => ({ url: a.href.split('#')[0], title: (a.closest('${S.sourceHeadingParent}')?.querySelector('h3, [role=heading]')?.innerText || a.innerText?.trim().split('\\n')[0] || '').slice(0, 100) }))
         .filter(s => s.url && s.url.length > 10)
         .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
         .slice(0, 10);

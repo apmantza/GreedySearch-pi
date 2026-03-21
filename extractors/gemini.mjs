@@ -14,13 +14,16 @@ import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { dismissConsent, handleVerification } from './consent.mjs';
+import { SELECTORS } from './selectors.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const CDP = join(__dir, '..', 'cdp.mjs');
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
 
 const COPY_POLL_INTERVAL = 600;
-const COPY_TIMEOUT = 120000;    // wait up to 2 min for copy button to appear
+const COPY_TIMEOUT = 120000;
+
+const S = SELECTORS.gemini;
 
 // ---------------------------------------------------------------------------
 
@@ -53,7 +56,7 @@ async function getOrOpenTab(tabPrefix) {
 async function typeIntoGemini(tab, text) {
   await cdp(['eval', tab, `
     (function(t) {
-      var el = document.querySelector('rich-textarea .ql-editor');
+      var el = document.querySelector('${S.input}');
       if (!el) return false;
       el.focus();
       document.execCommand('insertText', false, t);
@@ -93,7 +96,7 @@ async function waitForCopyButton(tab) {
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, COPY_POLL_INTERVAL));
     const found = await cdp(['eval', tab,
-      `!!document.querySelector('button[aria-label="Copy"]')`
+      `!!document.querySelector('${S.copyButton}')`
     ]).catch(() => 'false');
     if (found === 'true') return;
   }
@@ -102,16 +105,17 @@ async function waitForCopyButton(tab) {
 
 async function extractAnswer(tab) {
   // Click copy button → our interceptor captures the text.
-  await cdp(['eval', tab, `document.querySelector('button[aria-label="Copy"]')?.click()`]);
+  await cdp(['eval', tab, `document.querySelector('${S.copyButton}')?.click()`]);
   await new Promise(r => setTimeout(r, 400));
 
   const answer = await cdp(['eval', tab, `window.__geminiClipboard || ''`]);
   if (!answer) throw new Error('Clipboard interceptor returned empty text');
 
   // Click "Sources" button to open the sidebar with proper source cards
+  const sourceExcludeFilter = S.sourcesExclude.map(e => `!s.url.includes('${e}')`).join(' && ');
   await cdp(['eval', tab, `
     (function() {
-      var btn = document.querySelector('button.legacy-sources-sidebar-button, button.mdс-button--outline');
+      var btn = document.querySelector('${S.sourcesSidebarButton}');
       if (!btn) btn = Array.from(document.querySelectorAll('button')).find(b => b.innerText?.trim() === 'Sources');
       if (btn) { btn.click(); return 'clicked'; }
       return 'not-found';
@@ -131,17 +135,17 @@ async function extractAnswer(tab) {
         var container = sourceHeading.closest('.container') || sourceHeading.parentElement;
         var links = Array.from(container.querySelectorAll('a[href^="http"]'))
           .map(a => ({ url: a.href.split('#')[0], title: a.innerText?.trim().split('\\n')[0] || '' }))
-          .filter(s => s.url && !s.url.includes('gemini.google') && !s.url.includes('gstatic') && !s.url.includes('google.com/search'))
+          .filter(s => s.url && ${sourceExcludeFilter})
           .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
           .slice(0, 8);
         return JSON.stringify(links);
       }
       // Fallback: inline source cards with aria-labels
-      var cards = Array.from(document.querySelectorAll('button[aria-label*="citation from"]'));
+      var cards = Array.from(document.querySelectorAll('${S.citationButtonPattern}'));
       if (cards.length) {
         return JSON.stringify(cards.map(b => {
           var label = b.getAttribute('aria-label') || '';
-          var name = label.match(/from\\s+(.+?)\\.\\s/)?.[1] || label;
+          var name = label.match(${S.citationNameRegex})?.[1] || label;
           return { url: '', title: name };
         }));
       }
@@ -188,7 +192,7 @@ async function main() {
     // Wait for input to be ready
     const deadline = Date.now() + 10000;
     while (Date.now() < deadline) {
-      const ready = await cdp(['eval', tab, `!!document.querySelector('rich-textarea .ql-editor')`]).catch(() => 'false');
+      const ready = await cdp(['eval', tab, `!!document.querySelector('${S.input}')`]).catch(() => 'false');
       if (ready === 'true') break;
       await new Promise(r => setTimeout(r, 400));
     }
@@ -198,7 +202,7 @@ async function main() {
     await typeIntoGemini(tab, query);
     await new Promise(r => setTimeout(r, 400));
 
-    await cdp(['eval', tab, `document.querySelector('button[aria-label*="Send"]')?.click()`]);
+    await cdp(['eval', tab, `document.querySelector('${S.sendButton}')?.click()`]);
 
     await waitForCopyButton(tab);
 
