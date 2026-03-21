@@ -108,15 +108,49 @@ async function extractAnswer(tab) {
   const answer = await cdp(['eval', tab, `window.__geminiClipboard || ''`]);
   if (!answer) throw new Error('Clipboard interceptor returned empty text');
 
-  // Sources: links rendered in the page (best-effort; Shadow DOM may hide some)
+  // Click "Sources" button to open the sidebar with proper source cards
+  await cdp(['eval', tab, `
+    (function() {
+      var btn = document.querySelector('button.legacy-sources-sidebar-button, button.mdс-button--outline');
+      if (!btn) btn = Array.from(document.querySelectorAll('button')).find(b => b.innerText?.trim() === 'Sources');
+      if (btn) { btn.click(); return 'clicked'; }
+      return 'not-found';
+    })()
+  `]).catch(() => 'not-found');
+
+  // Wait for the sources sidebar to populate
+  await new Promise(r => setTimeout(r, 1500));
+
+  // Extract sources from the sidebar panel (has proper URLs + titles)
   const raw = await cdp(['eval', tab, `
     (function() {
-      var sources = Array.from(document.querySelectorAll('a[href^="http"]'))
+      // Find the Sources sidebar container by heading
+      var headings = Array.from(document.querySelectorAll('h1, h2, h3, [class*="header"]'));
+      var sourceHeading = headings.find(h => h.innerText?.trim() === 'Sources');
+      if (sourceHeading) {
+        var container = sourceHeading.closest('.container') || sourceHeading.parentElement;
+        var links = Array.from(container.querySelectorAll('a[href^="http"]'))
+          .map(a => ({ url: a.href.split('#')[0], title: a.innerText?.trim().split('\\n')[0] || '' }))
+          .filter(s => s.url && !s.url.includes('gemini.google') && !s.url.includes('gstatic') && !s.url.includes('google.com/search'))
+          .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
+          .slice(0, 8);
+        return JSON.stringify(links);
+      }
+      // Fallback: inline source cards with aria-labels
+      var cards = Array.from(document.querySelectorAll('button[aria-label*="citation from"]'));
+      if (cards.length) {
+        return JSON.stringify(cards.map(b => {
+          var label = b.getAttribute('aria-label') || '';
+          var name = label.match(/from\\s+(.+?)\\.\\s/)?.[1] || label;
+          return { url: '', title: name };
+        }));
+      }
+      // Last resort: page-wide links (may include footer junk)
+      return JSON.stringify(Array.from(document.querySelectorAll('a[href^="http"]'))
         .map(a => ({ url: a.href.split('#')[0], title: a.innerText?.trim().split('\\n')[0] || '' }))
         .filter(s => s.url && !s.url.includes('gemini.google') && !s.url.includes('gstatic') && !s.url.includes('google.com/search'))
         .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
-        .slice(0, 8);
-      return JSON.stringify(sources);
+        .slice(0, 8));
     })()
   `]).catch(() => '[]');
   const sources = JSON.parse(raw);
