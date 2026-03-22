@@ -4,6 +4,13 @@ Pi extension that adds a `greedy_search` tool — fans out queries to Perplexity
 
 Forked from [GreedySearch-claude](https://github.com/apmantza/GreedySearch-claude).
 
+## What's New (v1.2.0)
+
+- **Fixed parallel search race condition** — multiple `greedy_search` calls can now run concurrently without tab conflicts
+- **Improved Bing Copilot verification** — better auto-handling of Turnstile challenges and modal dialogs
+- **Added test suite** — run `./test.sh` to verify all modes work correctly
+- **Atomic port file writes** — prevents corruption when multiple processes connect to Chrome
+
 ## Install
 
 ```bash
@@ -128,6 +135,22 @@ Check status:
 node ~/.pi/agent/git/GreedySearch-pi/launch.mjs --status
 ```
 
+## Testing
+
+Run the test suite to verify everything works:
+
+```bash
+./test.sh           # full suite (~3-4 min)
+./test.sh quick     # skip parallel tests (~1 min)
+./test.sh parallel  # parallel race condition tests only
+```
+
+Tests verify:
+- Single engine mode (perplexity, bing, google)
+- Sequential "all" mode searches
+- Parallel "all" mode (5 concurrent searches) — detects tab race conditions
+- Synthesis mode with Gemini
+
 ## Troubleshooting
 
 ### "Chrome not found"
@@ -144,7 +167,10 @@ node ~/.pi/agent/git/GreedySearch-pi/launch.mjs
 ```
 
 ### Google / Bing "verify you're human"
-The extension auto-clicks simple verification buttons. For CAPTCHAs, solve manually in the Chrome window that opens.
+The extension auto-clicks verification buttons and Cloudflare Turnstile challenges. For hard CAPTCHAs (image puzzles), solve manually in the Chrome window that opens.
+
+### Parallel searches failing
+Earlier versions shared Chrome tabs between concurrent searches, causing `ERR_ABORTED` errors. Version 1.2.0+ creates fresh tabs for each search, allowing safe parallel execution.
 
 ### Search hangs
 Chrome may be unresponsive. Restart it with `launch.mjs --kill` then `launch.mjs`.
