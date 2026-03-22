@@ -22,7 +22,7 @@
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'fs';
 import { tmpdir, homedir } from 'os';
 import http from 'http';
 
@@ -305,7 +305,39 @@ function probeGreedyChrome(timeoutMs = 3000) {
 
 // Write (or refresh) the DevToolsActivePort file for the GreedySearch Chrome so
 // cdp.mjs always connects to the right port rather than the user's main Chrome.
+// Uses atomic write (write to temp + rename) to prevent corruption from parallel processes.
 async function refreshPortFile() {
+  const LOCK_FILE = ACTIVE_PORT_FILE + '.lock';
+  const TEMP_FILE = ACTIVE_PORT_FILE + '.tmp';
+  
+  // Simple file-based lock with timeout (prevents parallel writes from corrupting the port file)
+  const lockAcquired = await new Promise((resolve) => {
+    const start = Date.now();
+    const tryLock = () => {
+      try {
+        writeFileSync(LOCK_FILE, `${process.pid}`, 'utf8');
+        resolve(true);
+      } catch {
+        // Lock file exists - check if stale (older than 5 seconds)
+        try {
+          const lockTime = parseInt(readFileSync(LOCK_FILE, 'utf8'));
+          if (Date.now() - lockTime > 5000) {
+            // Stale lock - overwrite
+            writeFileSync(LOCK_FILE, `${process.pid}`, 'utf8');
+            resolve(true);
+          } else if (Date.now() - start < 1000) {
+            setTimeout(tryLock, 50);
+          } else {
+            resolve(false); // Give up after 1s
+          }
+        } catch {
+          setTimeout(tryLock, 50);
+        }
+      }
+    };
+    tryLock();
+  });
+
   try {
     const body = await new Promise((res, rej) => {
       const req = http.get(`http://localhost:${GREEDY_PORT}/json/version`, r => {
@@ -318,8 +350,19 @@ async function refreshPortFile() {
     });
     const { webSocketDebuggerUrl } = JSON.parse(body);
     const wsPath = new URL(webSocketDebuggerUrl).pathname;
-    writeFileSync(ACTIVE_PORT_FILE, `${GREEDY_PORT}\n${wsPath}`, 'utf8');
+    
+    // Atomic write: write to temp file, then rename
+    if (lockAcquired) {
+      writeFileSync(TEMP_FILE, `${GREEDY_PORT}\n${wsPath}`, 'utf8');
+      try { unlinkSync(ACTIVE_PORT_FILE); } catch {}
+      renameSync(TEMP_FILE, ACTIVE_PORT_FILE);
+    }
   } catch { /* best-effort — launch.mjs already wrote the file on first start */ }
+  finally {
+    if (lockAcquired) {
+      try { unlinkSync(LOCK_FILE); } catch {}
+    }
+  }
 }
 
 async function ensureChrome() {
@@ -377,25 +420,14 @@ async function main() {
   if (engine === 'all') {
     await cdp(['list']); // refresh pages cache
 
-    // Assign tabs: reuse existing engine tabs from cache, open new ones where needed.
-    // Engine tabs are never closed — keeping them alive preserves session cookies and
-    // reduces the chance of verification challenges on subsequent searches.
+    // PARALLEL-SAFE: Always create fresh tabs for each engine to avoid race conditions
+    // when multiple "all" searches run concurrently. Previously, reusing cached tabs
+    // caused ERR_ABORTED and Uncaught errors as multiple processes fought over the same tab.
     const tabs = [];
-    let blankReused = false;
-
-    for (const e of ALL_ENGINES) {
-      const existing = getTabFromCache(e);
-      if (existing) {
-        tabs.push(existing);
-      } else if (!blankReused) {
-        const tab = await getOrReuseBlankTab();
-        tabs.push(tab);
-        blankReused = true;
-      } else {
-        await new Promise(r => setTimeout(r, 500));
-        const tab = await openNewTab();
-        tabs.push(tab);
-      }
+    for (let i = 0; i < ALL_ENGINES.length; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 300)); // small delay between tab opens
+      const tab = await openNewTab();
+      tabs.push(tab);
     }
 
     // All tabs assigned — run extractors in parallel
