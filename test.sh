@@ -75,7 +75,7 @@ if [[ "$1" != "parallel" ]]; then
   
   for engine in perplexity bing google; do
     outfile="$RESULTS_DIR/single_${engine}.json"
-    node search.mjs "$engine" "test $engine query" --out "$outfile" 2>/dev/null
+    node search.mjs "$engine" "explain $engine attention mechanism" --out "$outfile" 2>/dev/null
     if [[ $? -eq 0 && -f "$outfile" ]]; then
       errors=$(check_no_errors "$outfile")
       if [[ -z "$errors" ]]; then
@@ -95,7 +95,7 @@ if [[ "$1" != "parallel" ]]; then
   
   for i in 1 2 3; do
     outfile="$RESULTS_DIR/seq_${i}.json"
-    query="sequential test query $i"
+    query="LLM inference optimization techniques $i"
     node search.mjs all "$query" --out "$outfile" 2>/dev/null
     
     if [[ $? -eq 0 && -f "$outfile" ]]; then
@@ -123,11 +123,11 @@ if [[ "$1" != "quick" && "$1" != "sequential" ]]; then
   echo -e "\nTest 3: Parallel 'all' mode (5 concurrent searches)"
   
   PARALLEL_QUERIES=(
-    "quantum computing basics"
-    "explain blockchain technology"
-    "how does TLS encryption work"
-    "what is distributed systems"
-    "machine learning fundamentals"
+    "what are transformer architectures in LLMs"
+    "explain RLHF fine-tuning process"
+    "difference between GPT and BERT models"
+    "how does chain of thought prompting work"
+    "what is retrieval augmented generation"
   )
   
   PIDS=()
@@ -186,7 +186,7 @@ if [[ "$1" != "parallel" && "$1" != "quick" ]]; then
   echo -e "\nTest 4: Synthesis mode"
   
   outfile="$RESULTS_DIR/synthesis.json"
-  node search.mjs all "what is web assembly" --synthesize --out "$outfile" 2>/dev/null
+  node search.mjs all "what is Mixture of Experts in neural networks" --synthesize --out "$outfile" 2>/dev/null
   
   if [[ $? -eq 0 && -f "$outfile" ]]; then
     has_synthesis=$(node -e "
