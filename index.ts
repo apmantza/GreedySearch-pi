@@ -68,31 +68,164 @@ function runSearch(
 	});
 }
 
+function formatEngineName(engine: string): string {
+	if (engine === "bing") return "Bing Copilot";
+	if (engine === "google") return "Google AI";
+	return engine.charAt(0).toUpperCase() + engine.slice(1);
+}
+
+function humanizeSourceType(sourceType: string): string {
+	if (!sourceType) return "";
+	if (sourceType === "official-docs") return "official docs";
+	return sourceType.replace(/-/g, " ");
+}
+
+function sourceUrl(source: Record<string, unknown>): string {
+	return String(source.displayUrl || source.canonicalUrl || source.url || "");
+}
+
+function sourceLabel(source: Record<string, unknown>): string {
+	return String(source.title || source.domain || sourceUrl(source) || "Untitled source");
+}
+
+function sourceConsensus(source: Record<string, unknown>): number {
+	if (typeof source.engineCount === "number") return source.engineCount;
+	const engines = Array.isArray(source.engines) ? (source.engines as string[]) : [];
+	return engines.length;
+}
+
+function formatAgreementLevel(level: string): string {
+	if (!level) return "Mixed";
+	return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
+function getSourceMap(sources: Array<Record<string, unknown>>): Map<string, Record<string, unknown>> {
+	return new Map(
+		sources
+			.map((source) => [String(source.id || ""), source] as const)
+			.filter(([id]) => id),
+	);
+}
+
+function formatSourceLine(source: Record<string, unknown>): string {
+	const id = String(source.id || "?");
+	const url = sourceUrl(source);
+	const title = sourceLabel(source);
+	const domain = String(source.domain || "");
+	const engines = Array.isArray(source.engines) ? (source.engines as string[]) : [];
+	const consensus = sourceConsensus(source);
+	const typeLabel = humanizeSourceType(String(source.sourceType || ""));
+	const fetch = source.fetch as Record<string, unknown> | undefined;
+	const fetchStatus = fetch?.ok ? `fetched ${fetch.status || 200}` : fetch?.attempted ? "fetch failed" : "";
+	const pieces = [
+		`${id} - [${title}](${url})`,
+		domain,
+		typeLabel,
+		engines.length ? `cited by ${engines.map(formatEngineName).join(", ")} (${consensus}/3)` : `${consensus}/3`,
+		fetchStatus,
+	].filter(Boolean);
+	return `- ${pieces.join(" - ")}`;
+}
+
+function renderSourceEvidence(lines: string[], source: Record<string, unknown>): void {
+	const fetch = source.fetch as Record<string, unknown> | undefined;
+	if (!fetch?.attempted) return;
+
+	const snippet = String(fetch.snippet || "").trim();
+	const lastModified = String(fetch.lastModified || "").trim();
+	if (snippet) lines.push(`  Evidence: ${snippet}`);
+	if (lastModified) lines.push(`  Last-Modified: ${lastModified}`);
+	if (fetch.error) lines.push(`  Fetch error: ${String(fetch.error)}`);
+}
+
+function pickSources(
+	sources: Array<Record<string, unknown>>,
+	recommendedIds: string[] = [],
+	max = 6,
+): Array<Record<string, unknown>> {
+	if (!sources.length) return [];
+	const sourceMap = getSourceMap(sources);
+	const recommended = recommendedIds
+		.map((id) => sourceMap.get(id))
+		.filter((source): source is Record<string, unknown> => Boolean(source));
+	if (recommended.length > 0) return recommended.slice(0, max);
+	return sources.slice(0, max);
+}
+
+function renderSynthesis(
+	lines: string[],
+	synthesis: Record<string, unknown>,
+	sources: Array<Record<string, unknown>>,
+	maxSources = 6,
+): void {
+	if (synthesis.answer) {
+		lines.push("## Answer");
+		lines.push(String(synthesis.answer));
+		lines.push("");
+	}
+
+	const agreement = synthesis.agreement as Record<string, unknown> | undefined;
+	const agreementSummary = String(agreement?.summary || "").trim();
+	const agreementLevel = String(agreement?.level || "").trim();
+	if (agreementSummary || agreementLevel) {
+		lines.push("## Consensus");
+		lines.push(`- ${formatAgreementLevel(agreementLevel)}${agreementSummary ? ` - ${agreementSummary}` : ""}`);
+		lines.push("");
+	}
+
+	const differences = Array.isArray(synthesis.differences) ? (synthesis.differences as string[]) : [];
+	if (differences.length > 0) {
+		lines.push("## Where Engines Differ");
+		for (const difference of differences) lines.push(`- ${difference}`);
+		lines.push("");
+	}
+
+	const caveats = Array.isArray(synthesis.caveats) ? (synthesis.caveats as string[]) : [];
+	if (caveats.length > 0) {
+		lines.push("## Caveats");
+		for (const caveat of caveats) lines.push(`- ${caveat}`);
+		lines.push("");
+	}
+
+	const claims = Array.isArray(synthesis.claims)
+		? (synthesis.claims as Array<Record<string, unknown>>)
+		: [];
+	if (claims.length > 0) {
+		lines.push("## Key Claims");
+		for (const claim of claims) {
+			const sourceIds = Array.isArray(claim.sourceIds) ? (claim.sourceIds as string[]) : [];
+			const support = String(claim.support || "moderate");
+			lines.push(`- ${String(claim.claim || "")} [${support}${sourceIds.length ? `; ${sourceIds.join(", ")}` : ""}]`);
+		}
+		lines.push("");
+	}
+
+	const recommendedIds = Array.isArray(synthesis.recommendedSources)
+		? (synthesis.recommendedSources as string[])
+		: [];
+	const topSources = pickSources(sources, recommendedIds, maxSources);
+	if (topSources.length > 0) {
+		lines.push("## Top Sources");
+		for (const source of topSources) lines.push(formatSourceLine(source));
+		lines.push("");
+	}
+}
+
 function formatResults(engine: string, data: Record<string, unknown>): string {
 	const lines: string[] = [];
 
 	if (engine === "all") {
-		// Synthesized output: prefer _synthesis + _sources
 		const synthesis = data._synthesis as Record<string, unknown> | undefined;
 		const dedupedSources = data._sources as Array<Record<string, unknown>> | undefined;
 		if (synthesis?.answer) {
-			lines.push("## Synthesis");
-			lines.push(String(synthesis.answer));
-			if (dedupedSources?.length) {
-				lines.push("\n**Top sources by consensus:**");
-				for (const s of dedupedSources.slice(0, 6)) {
-					const engines = (s.engines as string[]) || [];
-					lines.push(`- [${s.title || s.url}](${s.url}) [${engines.length}/3]`);
-				}
-			}
-			lines.push("\n---\n*Synthesized from Perplexity, Bing Copilot, and Google AI*");
+			renderSynthesis(lines, synthesis, dedupedSources || [], 6);
+			lines.push("*Synthesized from Perplexity, Bing Copilot, and Google AI*\n");
 			return lines.join("\n").trim();
 		}
 
-		// Standard output: per-engine answers
 		for (const [eng, result] of Object.entries(data)) {
 			if (eng.startsWith("_")) continue;
-			lines.push(`\n## ${eng.charAt(0).toUpperCase() + eng.slice(1)}`);
+			lines.push(`\n## ${formatEngineName(eng)}`);
 			const r = result as Record<string, unknown>;
 			if (r.error) {
 				lines.push(`Error: ${r.error}`);
@@ -128,33 +261,42 @@ function formatResults(engine: string, data: Record<string, unknown>): string {
 function formatDeepResearch(data: Record<string, unknown>): string {
 	const lines: string[] = [];
 	const confidence = data._confidence as Record<string, unknown> | undefined;
-	const fetchedSources = data._fetchedSources as Array<Record<string, unknown>> | undefined;
 	const dedupedSources = data._sources as Array<Record<string, unknown>> | undefined;
+	const synthesis = data._synthesis as Record<string, unknown> | undefined;
 
 	lines.push("# Deep Research Report\n");
 
-	// Confidence summary
 	if (confidence) {
 		const enginesResponded = (confidence.enginesResponded as string[]) || [];
 		const enginesFailed = (confidence.enginesFailed as string[]) || [];
-		const consensusScore = confidence.consensusScore || 0;
+		const agreementLevel = String(confidence.agreementLevel || "mixed");
+		const firstPartySourceCount = Number(confidence.firstPartySourceCount || 0);
+		const sourceTypeBreakdown = confidence.sourceTypeBreakdown as Record<string, number> | undefined;
 
 		lines.push("## Confidence\n");
-		lines.push(`- **Engines responded:** ${enginesResponded.join(", ") || "none"}`);
+		lines.push(`- Agreement: ${formatAgreementLevel(agreementLevel)}`);
+		lines.push(`- Engines responded: ${enginesResponded.map(formatEngineName).join(", ") || "none"}`);
 		if (enginesFailed.length > 0) {
-			lines.push(`- **Engines failed:** ${enginesFailed.join(", ")}`);
+			lines.push(`- Engines failed: ${enginesFailed.map(formatEngineName).join(", ")}`);
 		}
-		lines.push(`- **Top source consensus:** ${consensusScore}/3 engines`);
-		lines.push(`- **Total unique sources:** ${confidence.sourcesCount || 0}`);
+		lines.push(`- Top source consensus: ${confidence.topSourceConsensus || 0}/3 engines`);
+		lines.push(`- Total unique sources: ${confidence.sourcesCount || 0}`);
+		lines.push(`- Official sources: ${confidence.officialSourceCount || 0}`);
+		lines.push(`- First-party sources: ${firstPartySourceCount}`);
+		lines.push(`- Fetch success rate: ${confidence.fetchedSourceSuccessRate || 0}`);
+		if (sourceTypeBreakdown && Object.keys(sourceTypeBreakdown).length > 0) {
+			lines.push(`- Source mix: ${Object.entries(sourceTypeBreakdown).map(([type, count]) => `${humanizeSourceType(type)} ${count}`).join(", ")}`);
+		}
 		lines.push("");
 	}
 
-	// Per-engine answers
-	lines.push("## Findings\n");
+	if (synthesis?.answer) renderSynthesis(lines, synthesis, dedupedSources || [], 8);
+
+	lines.push("## Engine Perspectives\n");
 	for (const engine of ["perplexity", "bing", "google"]) {
 		const r = data[engine] as Record<string, unknown> | undefined;
 		if (!r) continue;
-		lines.push(`### ${engine.charAt(0).toUpperCase() + engine.slice(1)}`);
+		lines.push(`### ${formatEngineName(engine)}`);
 		if (r.error) {
 			lines.push(`⚠️ Error: ${r.error}`);
 		} else if (r.answer) {
@@ -163,39 +305,13 @@ function formatDeepResearch(data: Record<string, unknown>): string {
 		lines.push("");
 	}
 
-	// Synthesis
-	const synthesis = data._synthesis as Record<string, unknown> | undefined;
-	if (synthesis?.answer) {
-		lines.push("## Synthesized Answer\n");
-		lines.push(String(synthesis.answer));
-		lines.push("");
-	}
-
-	// Deduplicated sources by consensus
 	if (dedupedSources && dedupedSources.length > 0) {
-		lines.push("## Sources (Ranked by Consensus)\n");
-		for (const s of dedupedSources) {
-			const engines = (s.engines as string[]) || [];
-			const consensus = engines.length;
-			lines.push(`- **[${consensus}/3]** [${s.title || "Untitled"}](${s.url})`);
+		lines.push("## Source Registry\n");
+		for (const source of dedupedSources) {
+			lines.push(formatSourceLine(source));
+			renderSourceEvidence(lines, source);
 		}
 		lines.push("");
-	}
-
-	// Fetched source content
-	if (fetchedSources && fetchedSources.length > 0) {
-		lines.push("## Source Content (Top Matches)\n");
-		for (const fs of fetchedSources) {
-			lines.push(`### ${fs.title || fs.url}`);
-			lines.push(`*Source: ${fs.url}*`);
-			lines.push("");
-			if (fs.content) {
-				lines.push(String(fs.content).slice(0, 3000));
-			} else if (fs.error) {
-				lines.push(`⚠️ Could not fetch: ${fs.error}`);
-			}
-			lines.push("\n---\n");
-		}
 	}
 
 	return lines.join("\n").trim();

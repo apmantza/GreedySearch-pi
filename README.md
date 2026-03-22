@@ -4,12 +4,13 @@ Pi extension that adds a `greedy_search` tool — fans out queries to Perplexity
 
 Forked from [GreedySearch-claude](https://github.com/apmantza/GreedySearch-claude).
 
-## What's New (v1.2.0)
+## What's New (v1.4.0)
 
-- **Fixed parallel search race condition** — multiple `greedy_search` calls can now run concurrently without tab conflicts
-- **Improved Bing Copilot verification** — better auto-handling of Turnstile challenges and modal dialogs
-- **Added test suite** — run `./test.sh` to verify all modes work correctly
-- **Atomic port file writes** — prevents corruption when multiple processes connect to Chrome
+- **Grounded synthesis** — Gemini now receives a normalized source registry with stable source IDs, agreement summaries, caveats, and cited claims
+- **Real deep research** — top sources are fetched before synthesis so deep research answers are grounded in fetched evidence, not just engine summaries
+- **Richer source metadata** — source output now includes canonical URLs, domains, source types, per-engine attribution, and confidence metadata
+- **Cleaner tab lifecycle** — temporary Perplexity, Bing, and Google tabs are closed after each fan-out search, and synthesis finishes on the Gemini tab
+- **Isolated Chrome targeting** — GreedySearch now refuses to fall back to your normal Chrome session, preventing stray remote-debugging prompts
 
 ## Install
 
@@ -69,7 +70,15 @@ For complex research questions, use `synthesize: true` with `engine: "all"`:
 greedy_search({ query: "best auth patterns for SaaS in 2026", engine: "all", synthesize: true })
 ```
 
-This deduplicates sources across engines and feeds them to Gemini for one clean, synthesized answer. Adds ~30s but produces the highest quality output with deduped sources showing consensus scores (`[2/3]`, `[3/3]`).
+This deduplicates sources across engines, builds a normalized source registry, and feeds that context to Gemini for one clean synthesized answer. Adds ~30s but now returns agreement summaries, caveats, key claims, and better-labeled top sources.
+
+For the most grounded mode, use deep research from the CLI:
+
+```bash
+node search.mjs all "best auth patterns for SaaS in 2026" --deep-research
+```
+
+Deep research fetches top source pages before synthesis and reports source confidence metadata such as agreement level, fetched-source success rate, and source mix.
 
 **Use synthesis when:**
 - You need one definitive answer, not multiple perspectives
@@ -112,7 +121,7 @@ greedy_search({ query: "Error: Cannot find module 'react-dom/client' Next.js 15"
 
 ## Requirements
 
-- **Chrome** — must be installed. The extension auto-launches a dedicated Chrome instance on port 9222 (separate from your main browser session).
+- **Chrome** — must be installed. The extension auto-launches a dedicated Chrome instance on port 9222 with its own isolated profile and DevTools port file, separate from your main browser session.
 - **Node.js 22+** — for built-in `fetch` and WebSocket support.
 
 ## Setup (first time)
