@@ -165,6 +165,75 @@ async function fetchTopSource(url) {
   }
 }
 
+async function fetchSourceContent(url, maxChars = 5000) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+    clearTimeout(timeout);
+    
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    
+    const html = await res.text();
+    
+    // Simple HTML extraction - remove tags and extract text
+    const content = html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<nav[\s\S]*?<\/nav>/gi, '')
+      .replace(/<header[\s\S]*?<\/header>/gi, '')
+      .replace(/<footer[\s\S]*?<\/footer>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&[a-z]+;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, maxChars);
+    
+    // Extract title
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const title = titleMatch ? titleMatch[1].trim() : '';
+    
+    return { url, title, content };
+  } catch (e) {
+    return { url, title: '', content: null, error: e.message };
+  }
+}
+
+async function fetchMultipleSources(sources, maxSources = 5, maxChars = 5000) {
+  process.stderr.write(`[greedysearch] Fetching content from ${Math.min(sources.length, maxSources)} sources...\n`);
+  
+  // Fetch sources sequentially (CDP doesn't handle parallel tab operations well)
+  const toFetch = sources.slice(0, maxSources);
+  const fetched = [];
+  
+  for (let i = 0; i < toFetch.length; i++) {
+    const s = toFetch[i];
+    process.stderr.write(`[greedysearch] Fetching ${i + 1}/${toFetch.length}: ${s.url.slice(0, 60)}...\n`);
+    try {
+      const result = await fetchSourceContent(s.url, maxChars);
+      if (result.content && result.content.length > 100) {
+        fetched.push(result);
+        process.stderr.write(`[greedysearch] ✓ Got ${result.content.length} chars\n`);
+      } else {
+        process.stderr.write(`[greedysearch] ✗ Empty or too short\n`);
+      }
+    } catch (e) {
+      process.stderr.write(`[greedysearch] ✗ Failed: ${e.message.slice(0, 80)}\n`);
+    }
+    process.stderr.write(`PROGRESS:fetch:${i + 1}/${toFetch.length}\n`);
+  }
+  
+  return fetched;
+}
+
 function pickTopSource(out) {
   for (const engine of ['perplexity', 'google', 'bing']) {
     const r = out[engine];
@@ -234,8 +303,8 @@ async function synthesizeWithGemini(query, results) {
     proc.stderr.on('data', d => err += d);
     const t = setTimeout(() => {
       proc.kill();
-      reject(new Error('Gemini synthesis timed out after 120s'));
-    }, 120000);
+      reject(new Error('Gemini synthesis timed out after 180s'));
+    }, 180000);
     proc.on('close', code => {
       clearTimeout(t);
       if (code !== 0) reject(new Error(err.trim() || 'gemini extractor failed'));
@@ -388,28 +457,37 @@ async function main() {
       '',
       'Engines: perplexity (p), bing (b), google (g), gemini (gem), all',
       '',
+      'Flags:',
+      '  --full              Return complete answers (~3000+ chars)',
+      '  --synthesize        Synthesize results via Gemini (adds ~30s)',
+      '  --deep-research     Full research: full answers + source fetching + synthesis',
+      '  --fetch-top-source  Fetch content from top source',
+      '  --inline            Output JSON to stdout (for piping)',
+      '',
       'Examples:',
       '  node search.mjs p "what is memoization"',
-      '  node search.mjs so "node.js event loop explained"',
       '  node search.mjs all "TCP congestion control"',
+      '  node search.mjs all "RAG vs fine-tuning" --deep-research',
     ].join('\n') + '\n');
     process.exit(1);
   }
 
   await ensureChrome();
 
-  const full        = args.includes('--full');
-  const short       = !full;   // brief by default; --full opts into complete answers
-  const fetchSource = args.includes('--fetch-top-source');
-  const synthesize  = args.includes('--synthesize');
-  const inline      = args.includes('--inline');
-  const outIdx      = args.indexOf('--out');
-  const outFile     = outIdx !== -1 ? args[outIdx + 1] : null;
-  const rest        = args.filter((a, i) =>
+  const full          = args.includes('--full') || args.includes('--deep-research');
+  const short         = !full;
+  const fetchSource   = args.includes('--fetch-top-source');
+  const synthesize    = args.includes('--synthesize') || args.includes('--deep-research');
+  const deepResearch  = args.includes('--deep-research');
+  const inline        = args.includes('--inline');
+  const outIdx        = args.indexOf('--out');
+  const outFile       = outIdx !== -1 ? args[outIdx + 1] : null;
+  const rest          = args.filter((a, i) =>
     a !== '--full' &&
-    a !== '--short' &&  // keep accepting --short for back-compat
+    a !== '--short' &&
     a !== '--fetch-top-source' &&
     a !== '--synthesize' &&
+    a !== '--deep-research' &&
     a !== '--inline' &&
     a !== '--out' &&
     (outIdx === -1 || i !== outIdx + 1)
@@ -479,6 +557,31 @@ async function main() {
     if (fetchSource) {
       const top = pickTopSource(out);
       if (top) out._topSource = await fetchTopSource(top.url);
+    }
+
+    // Deep research mode: fetch top sources and return structured document
+    if (deepResearch) {
+      process.stderr.write('PROGRESS:deep-research:start\n');
+      
+      // Get top sources by consensus
+      const topSources = out._sources || [];
+      
+      if (topSources.length > 0) {
+        // Fetch content from top sources
+        out._fetchedSources = await fetchMultipleSources(topSources, 5, 8000);
+        process.stderr.write('PROGRESS:deep-research:done\n');
+      } else {
+        out._fetchedSources = [];
+        process.stderr.write('PROGRESS:deep-research:no-sources\n');
+      }
+      
+      // Build confidence scores
+      out._confidence = {
+        sourcesCount: topSources.length,
+        consensusScore: topSources.length > 0 ? topSources[0]?.engines?.length || 0 : 0,
+        enginesResponded: ALL_ENGINES.filter(e => out[e]?.answer && !out[e]?.error),
+        enginesFailed: ALL_ENGINES.filter(e => out[e]?.error),
+      };
     }
 
     writeOutput(out, outFile, { inline, synthesize, query });

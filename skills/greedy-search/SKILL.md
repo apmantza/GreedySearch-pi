@@ -1,11 +1,84 @@
 ---
 name: greedy-search
-description: Multi-engine AI web search — Perplexity, Bing Copilot, Google AI in parallel with optional Gemini synthesis. Use for high-quality research where training data may be stale or single-engine results are insufficient.
+description: Multi-engine AI web search — greedy_search, deep_research, and coding_task. Use for high-quality research where training data may be stale or single-engine results are insufficient.
 ---
 
-# Greedy Search
+# GreedySearch Tools
 
-Use `greedy_search` when you need high-quality, multi-perspective answers from the web.
+## Tool Overview
+
+| Tool | Speed | Use for |
+|------|-------|---------|
+| `greedy_search` | 15-90s | Quick lookups, comparisons, debugging errors |
+| `deep_research` | 60-120s | Architecture decisions, thorough research, source-backed answers |
+| `coding_task` | 60-180s | Second opinions on code, reviews, debugging tricky issues |
+
+## When to Use Which
+
+- **`greedy_search`** — Default. Fast enough for most things. Use when you need current info.
+- **`deep_research`** — When the answer *matters*. Gives you a structured document with confidence scores, deduplicated sources ranked by consensus, Gemini synthesis, AND actual content from top sources.
+- **`coding_task`** — When you need a "second opinion" on hard problems. Best for `debug` and `plan` modes on tricky issues.
+
+---
+
+# greedy_search
+
+Multi-engine AI web search with streaming progress.
+
+```greedy_search({ query: "what changed in React 19", engine: "all" })```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | required | The search question |
+| `engine` | string | `"all"` | `all`, `perplexity`, `bing`, `google`, `gemini` |
+| `synthesize` | boolean | `false` | Synthesize via Gemini |
+| `fullAnswer` | boolean | `false` | Complete answer vs ~300 char summary |
+
+**When to use:** Quick lookups, error messages, comparing tools, "what's new in X".
+
+---
+
+# deep_research
+
+Comprehensive research with source fetching and synthesis. Returns a structured document.
+
+```deep_research({ query: "RAG vs fine-tuning for production" })```
+
+Returns:
+- Full answers from all 3 engines (Perplexity, Bing, Google)
+- Gemini synthesis combining all perspectives
+- Deduplicated sources ranked by consensus (3/3 > 2/3 > 1/3)
+- Fetched content from top 5 sources (no CDP — uses native fetch)
+- Confidence metadata (which engines responded, consensus score)
+
+**When to use:** Architecture decisions, "which library should I use", research for a writeup, anything where you need source-backed confidence.
+
+---
+
+# coding_task
+
+Browser-based coding assistant using Gemini and/or Copilot.
+
+```coding_task({ task: "debug this race condition", mode: "debug", engine: "all" })```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `task` | string | required | The coding task/question |
+| `engine` | string | `"gemini"` | `gemini`, `copilot`, or `all` |
+| `mode` | string | `"code"` | See modes below |
+| `context` | string | — | Code snippet to include |
+
+**Modes:**
+
+| Mode | Use when |
+|------|----------|
+| `debug` | Stuck on a tricky bug. Fresh eyes catch different failure modes. |
+| `plan` | About to refactor something big. Gemini plays devil's advocate. |
+| `review` | Code review before merge. High-stakes code benefits from second opinion. |
+| `test` | Need edge cases the author missed. |
+| `code` | Just need the code written (but you can probably do this yourself faster). |
+
+**When to use:** Debugging tricky issues, planning major refactors, security-critical reviews. **Skip for** simple code generation — you're faster.
 
 ## Greedy Search vs Built-in Web Search
 
