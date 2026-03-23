@@ -4,6 +4,10 @@ Pi extension that adds a `greedy_search` tool — fans out queries to Perplexity
 
 Forked from [GreedySearch-claude](https://github.com/apmantza/GreedySearch-claude).
 
+## What's New (v1.4.1)
+
+- **Fixed parallel synthesis** — multiple `greedy_search` calls with `synthesize: true` now run safely in parallel. Each search creates a fresh Gemini tab that gets cleaned up after synthesis, preventing tab conflicts and "Uncaught" errors.
+
 ## What's New (v1.4.0)
 
 - **Grounded synthesis** — Gemini now receives a normalized source registry with stable source IDs, agreement summaries, caveats, and cited claims
