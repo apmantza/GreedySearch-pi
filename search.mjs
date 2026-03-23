@@ -946,10 +946,11 @@ async function main() {
         process.stderr.write('PROGRESS:synthesis:start\n');
         process.stderr.write('[greedysearch] Synthesizing results with Gemini...\n');
         try {
-          const geminiTab = await getOrOpenEngineTab('gemini');
+          // Create fresh Gemini tab per search (not cached) to avoid conflicts in parallel searches
+          const geminiTab = await openNewTab();
+          tabs.push(geminiTab);  // ensure cleanup in finally block
           await activateTab(geminiTab);
           const synthesis = await synthesizeWithGemini(query, out, { grounded: deepResearch, tabPrefix: geminiTab });
-          await activateTab(geminiTab);
           out._synthesis = {
             ...synthesis,
             synthesized: true,
