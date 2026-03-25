@@ -44,21 +44,15 @@ function cdp(args, timeoutMs = 30000) {
 }
 
 async function getOrOpenTab(tabPrefix) {
-  // If caller specified a tab, use it
   if (tabPrefix) return tabPrefix;
-
-  // Otherwise look for an existing Perplexity tab
-  if (existsSync(PAGES_CACHE)) {
-    const pages = JSON.parse(readFileSync(PAGES_CACHE, 'utf8'));
-    const existing = pages.find(p => p.url.includes('perplexity.ai'));
-    if (existing) return existing.targetId.slice(0, 8);
-  }
-
-  // Fall back to first available tab
+  // Always open a fresh tab to avoid SPA navigation issues
   const list = await cdp(['list']);
-  const firstLine = list.split('\n')[0];
-  if (!firstLine) throw new Error('No Chrome tabs found. Is Chrome running with --remote-debugging-port=9222?');
-  return firstLine.slice(0, 8);
+  const anchor = list.split('\n')[0]?.slice(0, 8);
+  if (!anchor) throw new Error('No Chrome tabs found. Is Chrome running with --remote-debugging-port=9222?');
+  const raw = await cdp(['evalraw', anchor, 'Target.createTarget', '{"url":"about:blank"}']);
+  const { targetId } = JSON.parse(raw);
+  await cdp(['list']); // refresh cache so cdp nav can find the new tab
+  return targetId.slice(0, 8);
 }
 
 async function injectClipboardInterceptor(tab) {
@@ -85,16 +79,25 @@ async function injectClipboardInterceptor(tab) {
   `]);
 }
 
-async function waitForCopyButton(tab) {
+async function waitForGenerationToFinish(tab) {
   const deadline = Date.now() + COPY_TIMEOUT;
+  let lastLen = -1;
+  let stableCount = 0;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, COPY_POLL_INTERVAL));
-    const found = await cdp(['eval', tab,
-      `!!document.querySelector('${S.copyButton}')`
-    ]).catch(() => 'false');
-    if (found === 'true') return;
+    const lenStr = await cdp(['eval', tab, 'document.body.innerText.length']).catch(() => '0');
+    const currentLen = parseInt(lenStr) || 0;
+    if (currentLen > 0) {
+      if (currentLen === lastLen) {
+        stableCount++;
+        if (stableCount >= 3) return;
+      } else {
+        lastLen = currentLen;
+        stableCount = 0;
+      }
+    }
   }
-  throw new Error(`Perplexity copy button did not appear within ${COPY_TIMEOUT}ms`);
+  throw new Error(`Perplexity generation did not finish within ${COPY_TIMEOUT}ms`);
 }
 
 async function extractAnswer(tab) {
@@ -104,17 +107,11 @@ async function extractAnswer(tab) {
   const answer = await cdp(['eval', tab, `window.__pplxClipboard || ''`]);
   if (!answer) throw new Error('Clipboard interceptor returned empty text');
 
-  const raw = await cdp(['eval', tab, `
-    (function() {
-      var sources = Array.from(document.querySelectorAll('${S.sourceItem}'))
-        .map(el => ({ url: el.getAttribute('data-pplx-citation-url'), title: el.querySelector('${S.sourceLink}')?.innerText?.trim() || '' }))
-        .filter(s => s.url)
-        .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
-        .slice(0, 10);
-      return JSON.stringify(sources);
-    })()
-  `]).catch(() => '[]');
-  const sources = JSON.parse(raw);
+  // Regex parse Markdown links from clipboard — robust against DOM changes
+  const sources = Array.from(answer.matchAll(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g))
+    .map(m => ({ title: m[1], url: m[2] }))
+    .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
+    .slice(0, 10);
 
   return { answer: answer.trim(), sources };
 }
@@ -166,7 +163,7 @@ async function main() {
       `document.querySelector('${S.input}')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,keyCode:13})), 'ok'`
     ]);
 
-    await waitForCopyButton(tab);
+    await waitForGenerationToFinish(tab);
 
     const { answer, sources } = await extractAnswer(tab);
 

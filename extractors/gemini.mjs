@@ -44,13 +44,14 @@ function cdp(args, timeoutMs = 30000) {
 
 async function getOrOpenTab(tabPrefix) {
   if (tabPrefix) return tabPrefix;
-  if (existsSync(PAGES_CACHE)) {
-    const pages = JSON.parse(readFileSync(PAGES_CACHE, 'utf8'));
-    const existing = pages.find(p => p.url.includes('gemini.google.com'));
-    if (existing) return existing.targetId.slice(0, 8);
-  }
+  // Always open a fresh tab to avoid SPA navigation issues
   const list = await cdp(['list']);
-  return list.split('\n')[0].slice(0, 8);
+  const anchor = list.split('\n')[0]?.slice(0, 8);
+  if (!anchor) throw new Error('No Chrome tabs found. Is Chrome running with --remote-debugging-port=9222?');
+  const raw = await cdp(['evalraw', anchor, 'Target.createTarget', '{"url":"about:blank"}']);
+  const { targetId } = JSON.parse(raw);
+  await cdp(['list']); // refresh cache
+  return targetId.slice(0, 8);
 }
 
 async function typeIntoGemini(tab, text) {
@@ -111,53 +112,11 @@ async function extractAnswer(tab) {
   const answer = await cdp(['eval', tab, `window.__geminiClipboard || ''`]);
   if (!answer) throw new Error('Clipboard interceptor returned empty text');
 
-  // Click "Sources" button to open the sidebar with proper source cards
-  const sourceExcludeFilter = S.sourcesExclude.map(e => `!s.url.includes('${e}')`).join(' && ');
-  await cdp(['eval', tab, `
-    (function() {
-      var btn = document.querySelector('${S.sourcesSidebarButton}');
-      if (!btn) btn = Array.from(document.querySelectorAll('button')).find(b => b.innerText?.trim() === 'Sources');
-      if (btn) { btn.click(); return 'clicked'; }
-      return 'not-found';
-    })()
-  `]).catch(() => 'not-found');
-
-  // Wait for the sources sidebar to populate
-  await new Promise(r => setTimeout(r, 1500));
-
-  // Extract sources from the sidebar panel (has proper URLs + titles)
-  const raw = await cdp(['eval', tab, `
-    (function() {
-      // Find the Sources sidebar container by heading
-      var headings = Array.from(document.querySelectorAll('h1, h2, h3, [class*="header"]'));
-      var sourceHeading = headings.find(h => h.innerText?.trim() === 'Sources');
-      if (sourceHeading) {
-        var container = sourceHeading.closest('.container') || sourceHeading.parentElement;
-        var links = Array.from(container.querySelectorAll('a[href^="http"]'))
-          .map(a => ({ url: a.href.split('#')[0], title: a.innerText?.trim().split('\\n')[0] || '' }))
-          .filter(s => s.url && ${sourceExcludeFilter})
-          .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
-          .slice(0, 8);
-        return JSON.stringify(links);
-      }
-      // Fallback: inline source cards with aria-labels
-      var cards = Array.from(document.querySelectorAll('${S.citationButtonPattern}'));
-      if (cards.length) {
-        return JSON.stringify(cards.map(b => {
-          var label = b.getAttribute('aria-label') || '';
-          var name = label.match(${S.citationNameRegex})?.[1] || label;
-          return { url: '', title: name };
-        }));
-      }
-      // Last resort: page-wide links (may include footer junk)
-      return JSON.stringify(Array.from(document.querySelectorAll('a[href^="http"]'))
-        .map(a => ({ url: a.href.split('#')[0], title: a.innerText?.trim().split('\\n')[0] || '' }))
-        .filter(s => s.url && !s.url.includes('gemini.google') && !s.url.includes('gstatic') && !s.url.includes('google.com/search'))
-        .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
-        .slice(0, 8));
-    })()
-  `]).catch(() => '[]');
-  const sources = JSON.parse(raw);
+  // Regex parse Markdown links from clipboard — robust against DOM changes
+  const sources = Array.from(answer.matchAll(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g))
+    .map(m => ({ title: m[1], url: m[2] }))
+    .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
+    .slice(0, 10);
 
   return { answer: answer.trim(), sources };
 }

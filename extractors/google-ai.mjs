@@ -47,17 +47,14 @@ function cdp(args, timeoutMs = 30000) {
 
 async function getOrOpenTab(tabPrefix) {
   if (tabPrefix) return tabPrefix;
-
-  if (existsSync(PAGES_CACHE)) {
-    const pages = JSON.parse(readFileSync(PAGES_CACHE, 'utf8'));
-    const existing = pages.find(p => p.url.includes('google.com'));
-    if (existing) return existing.targetId.slice(0, 8);
-  }
-
+  // Always open a fresh tab to avoid SPA navigation issues
   const list = await cdp(['list']);
-  const firstLine = list.split('\n')[0];
-  if (!firstLine) throw new Error('No Chrome tabs found. Is Chrome running with --remote-debugging-port=9222?');
-  return firstLine.slice(0, 8);
+  const anchor = list.split('\n')[0]?.slice(0, 8);
+  if (!anchor) throw new Error('No Chrome tabs found. Is Chrome running with --remote-debugging-port=9222?');
+  const raw = await cdp(['evalraw', anchor, 'Target.createTarget', '{"url":"about:blank"}']);
+  const { targetId } = JSON.parse(raw);
+  await cdp(['list']); // refresh cache
+  return targetId.slice(0, 8);
 }
 
 async function waitForStreamComplete(tab) {

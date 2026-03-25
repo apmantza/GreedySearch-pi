@@ -45,17 +45,14 @@ function cdp(args, timeoutMs = 30000) {
 
 async function getOrOpenTab(tabPrefix) {
   if (tabPrefix) return tabPrefix;
-
-  if (existsSync(PAGES_CACHE)) {
-    const pages = JSON.parse(readFileSync(PAGES_CACHE, 'utf8'));
-    const existing = pages.find(p => p.url.includes('copilot.microsoft.com'));
-    if (existing) return existing.targetId.slice(0, 8);
-  }
-
+  // Always open a fresh tab to avoid SPA navigation issues
   const list = await cdp(['list']);
-  const firstLine = list.split('\n')[0];
-  if (!firstLine) throw new Error('No Chrome tabs found. Is Chrome running with --remote-debugging-port=9222?');
-  return firstLine.slice(0, 8);
+  const anchor = list.split('\n')[0]?.slice(0, 8);
+  if (!anchor) throw new Error('No Chrome tabs found. Is Chrome running with --remote-debugging-port=9222?');
+  const raw = await cdp(['evalraw', anchor, 'Target.createTarget', '{"url":"about:blank"}']);
+  const { targetId } = JSON.parse(raw);
+  await cdp(['list']); // refresh cache
+  return targetId.slice(0, 8);
 }
 
 async function injectClipboardInterceptor(tab) {
@@ -101,17 +98,11 @@ async function extractAnswer(tab) {
   const answer = await cdp(['eval', tab, `window.__bingClipboard || ''`]);
   if (!answer) throw new Error('Clipboard interceptor returned empty text');
 
-  const raw = await cdp(['eval', tab, `
-    (function() {
-      var sources = Array.from(document.querySelectorAll('${S.sourceLink}'))
-        .map(a => ({ url: a.href, title: a.innerText?.trim().split('\\n')[0] || a.title || '' }))
-        .filter(s => s.url && !s.url.includes('${S.sourceExclude}'))
-        .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
-        .slice(0, 10);
-      return JSON.stringify(sources);
-    })()
-  `]).catch(() => '[]');
-  const sources = JSON.parse(raw);
+  // Regex parse Markdown links from clipboard — robust against DOM changes
+  const sources = Array.from(answer.matchAll(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g))
+    .map(m => ({ title: m[1], url: m[2] }))
+    .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
+    .slice(0, 10);
 
   return { answer: answer.trim(), sources };
 }

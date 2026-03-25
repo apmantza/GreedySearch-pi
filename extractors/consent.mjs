@@ -102,8 +102,12 @@ const VERIFY_DETECT_JS = `
   
   // --- Generic verification buttons (catch-all) ---
   var btns = Array.from(document.querySelectorAll('button, input[type=submit], a[role=button]'));
-  var verify = btns.find(b => /^(verify|verification|verify you are human|i am human|not a robot|continue|proceed)$/i.test(b.innerText?.trim() || b.value || ''));
-  if (verify && !document.querySelector('iframe[src*="recaptcha"]')) {
+  var verify = btns.find(b => {
+    var t = (b.innerText?.trim() || b.value || '').toLowerCase();
+    return (t.includes('verify') || t.includes('human') || t.includes('robot') || t.includes('continue') || t.includes('proceed')) &&
+           !t.includes('verified') && !document.querySelector('iframe[src*="recaptcha"]');
+  });
+  if (verify) {
     verify.click();
     return 'clicked-verify:' + (verify.innerText?.trim() || verify.value);
   }
@@ -131,7 +135,10 @@ const VERIFY_RETRY_JS = `
   
   // Try clicking any verify/continue button again
   var btns = Array.from(document.querySelectorAll('button, input[type=submit], a[role=button]'));
-  var btn = btns.find(b => /^(verify|continue|next|i am human|not a robot|submit)$/i.test(b.innerText?.trim() || b.value || ''));
+  var btn = btns.find(b => {
+    var t = (b.innerText?.trim() || b.value || '').toLowerCase();
+    return t.includes('verify') || t.includes('human') || t.includes('robot') || t.includes('continue') || t.includes('next') || t.includes('submit');
+  });
   if (btn) { btn.click(); return 'clicked:' + (btn.innerText?.trim() || btn.value); }
   
   // Try Turnstile checkbox
