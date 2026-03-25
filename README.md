@@ -4,18 +4,6 @@ Pi extension that adds a `greedy_search` tool — fans out queries to Perplexity
 
 Forked from [GreedySearch-claude](https://github.com/apmantza/GreedySearch-claude).
 
-## What's New (v1.4.1)
-
-- **Fixed parallel synthesis** — multiple `greedy_search` calls with `synthesize: true` now run safely in parallel. Each search creates a fresh Gemini tab that gets cleaned up after synthesis, preventing tab conflicts and "Uncaught" errors.
-
-## What's New (v1.4.0)
-
-- **Grounded synthesis** — Gemini now receives a normalized source registry with stable source IDs, agreement summaries, caveats, and cited claims
-- **Real deep research** — top sources are fetched before synthesis so deep research answers are grounded in fetched evidence, not just engine summaries
-- **Richer source metadata** — source output now includes canonical URLs, domains, source types, per-engine attribution, and confidence metadata
-- **Cleaner tab lifecycle** — temporary Perplexity, Bing, and Google tabs are closed after each fan-out search, and synthesis finishes on the Gemini tab
-- **Isolated Chrome targeting** — GreedySearch now refuses to fall back to your normal Chrome session, preventing stray remote-debugging prompts
-
 ## Install
 
 ```bash
@@ -74,15 +62,7 @@ For complex research questions, use `synthesize: true` with `engine: "all"`:
 greedy_search({ query: "best auth patterns for SaaS in 2026", engine: "all", synthesize: true })
 ```
 
-This deduplicates sources across engines, builds a normalized source registry, and feeds that context to Gemini for one clean synthesized answer. Adds ~30s but now returns agreement summaries, caveats, key claims, and better-labeled top sources.
-
-For the most grounded mode, use deep research from the CLI:
-
-```bash
-node search.mjs all "best auth patterns for SaaS in 2026" --deep-research
-```
-
-Deep research fetches top source pages before synthesis and reports source confidence metadata such as agreement level, fetched-source success rate, and source mix.
+This deduplicates sources across engines, builds a normalized source registry, and feeds that context to Gemini for one clean synthesized answer. Adds ~30s but returns agreement summaries, caveats, key claims, and better-labeled top sources.
 
 **Use synthesis when:**
 - You need one definitive answer, not multiple perspectives
@@ -104,21 +84,25 @@ greedy_search({ query: "explain the React compiler", engine: "perplexity", fullA
 ## Examples
 
 **Quick technical lookup:**
+
 ```
 greedy_search({ query: "How to use async await in Python", engine: "perplexity" })
 ```
 
 **Compare tools (see where engines agree/disagree):**
+
 ```
 greedy_search({ query: "Prisma vs Drizzle in 2026", engine: "all" })
 ```
 
 **Research with synthesis:**
+
 ```
 greedy_search({ query: "Best practices for monorepo structure", engine: "all", synthesize: true })
 ```
 
 **Debug an error:**
+
 ```
 greedy_search({ query: "Error: Cannot find module 'react-dom/client' Next.js 15", engine: "all" })
 ```
@@ -167,32 +151,37 @@ Tests verify:
 ## Troubleshooting
 
 ### "Chrome not found"
+
 Set the path explicitly:
+
 ```bash
 export CHROME_PATH="/path/to/chrome"
 ```
 
 ### "CDP timeout" or "Chrome may have crashed"
+
 Restart GreedySearch Chrome:
+
 ```bash
 node ~/.pi/agent/git/GreedySearch-pi/launch.mjs --kill
 node ~/.pi/agent/git/GreedySearch-pi/launch.mjs
 ```
 
 ### Google / Bing "verify you're human"
-The extension auto-clicks verification buttons and Cloudflare Turnstile challenges. For hard CAPTCHAs (image puzzles), solve manually in the Chrome window that opens.
+
+The extension auto-clicks verification buttons and Cloudflare Turnstile challenges using broad keyword matching — resilient to variations like "Verify you are human" or localised button text. For hard CAPTCHAs (image puzzles), solve manually in the Chrome window that opens.
 
 ### Parallel searches failing
-Earlier versions shared Chrome tabs between concurrent searches, causing `ERR_ABORTED` errors. Version 1.2.0+ creates fresh tabs for each search, allowing safe parallel execution.
+
+Each search creates a fresh isolated browser tab that is closed after completion, allowing safe parallel execution without tab state conflicts.
 
 ### Search hangs
+
 Chrome may be unresponsive. Restart it with `launch.mjs --kill` then `launch.mjs`.
 
-### Sources are junk links
-This was a known issue with Gemini sources. If you're on an older version, update:
-```bash
-pi install npm:@apmantza/greedysearch-pi
-```
+### Sources are empty or junk links
+
+Sources are now extracted by regex-parsing Markdown links (`[title](url)`) from the clipboard text captured after each engine responds — not from DOM selectors that break when the engine's UI updates. If sources are empty, the engine's clipboard copy didn't include formatted links (Bing Copilot currently falls into this category).
 
 ## How It Works
 
@@ -202,6 +191,28 @@ pi install npm:@apmantza/greedysearch-pi
 - `extractors/` — per-engine CDP scrapers (Perplexity, Bing Copilot, Google AI, Gemini)
 - `cdp.mjs` — Chrome DevTools Protocol CLI for browser automation
 - `skills/greedy-search/SKILL.md` — skill file that guides the model on when/how to use greedy_search
+
+## Changelog
+
+### v1.4.2 (2026-03-25)
+
+- **Fresh isolated tabs** — each search now always creates a new `about:blank` tab via `Target.createTarget` and refreshes the CDP page cache immediately after, preventing SPA navigation failures and stale DOM state from prior queries
+- **Regex-based citation extraction** — all extractors (Perplexity, Bing, Gemini) now parse sources from clipboard Markdown links (`[title](url)`) instead of DOM selectors that break on UI updates
+- **Relaxed verification detection** — `consent.mjs` now uses broad keyword matching (`includes('verify')`, `includes('human')`) instead of anchored regexes, correctly catching button text variants like "Verify you are human" across Cloudflare, Microsoft, and generic modals
+
+---
+
+### v1.4.1
+
+- **Fixed parallel synthesis** — multiple `greedy_search` calls with `synthesize: true` now run safely in parallel. Each search creates a fresh Gemini tab that gets cleaned up after synthesis, preventing tab conflicts and "Uncaught" errors.
+
+### v1.4.0
+
+- **Grounded synthesis** — Gemini now receives a normalized source registry with stable source IDs, agreement summaries, caveats, and cited claims
+- **Real deep research** — top sources are fetched before synthesis so deep research answers are grounded in fetched evidence, not just engine summaries
+- **Richer source metadata** — source output now includes canonical URLs, domains, source types, per-engine attribution, and confidence metadata
+- **Cleaner tab lifecycle** — temporary Perplexity, Bing, and Google tabs are closed after each fan-out search, and synthesis finishes on the Gemini tab
+- **Isolated Chrome targeting** — GreedySearch now refuses to fall back to your normal Chrome session, preventing stray remote-debugging prompts
 
 ## License
 
