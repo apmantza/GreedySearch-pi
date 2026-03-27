@@ -45,13 +45,13 @@ function getWsUrl() {
     const p = profileDir.replace(/\\/g, '/') + '/DevToolsActivePort';
     if (existsSync(p)) {
       const lines = readFileSync(p, 'utf8').trim().split('\n');
-      return `ws://127.0.0.1:${lines[0]}${lines[1]}`;
+      return `ws://localhost:${lines[0]}${lines[1]}`;
     }
     throw new Error(`GreedySearch DevToolsActivePort not found at ${p}. Refusing to fall back to the main Chrome session.`);
   }
   const portFile = getDevToolsActivePortPath();
   const lines = readFileSync(portFile, 'utf8').trim().split('\n');
-  return `ws://127.0.0.1:${lines[0]}${lines[1]}`;
+  return `ws://localhost:${lines[0]}${lines[1]}`;
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));

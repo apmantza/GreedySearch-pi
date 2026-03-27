@@ -13,11 +13,12 @@
 //   node launch.mjs --kill   — stop and restore original DevToolsActivePort
 //   node launch.mjs --status — check if running
 
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { existsSync, writeFileSync, readFileSync, mkdirSync, unlinkSync } from 'fs';
 import { tmpdir, platform } from 'os';
 import { join } from 'path';
 import http from 'http';
+import net from 'net';
 
 const PORT        = 9222;
 const PROFILE_DIR = join(tmpdir(), 'greedysearch-chrome-profile');
@@ -63,6 +64,74 @@ function isRunning() {
   try { process.kill(pid, 0); return pid; } catch { return false; }
 }
 
+// Get the PID of the process listening on a port (Windows + Unix)
+function getPortPid(port) {
+  try {
+    const os = platform();
+    if (os === 'win32') {
+      // Windows: netstat -ano returns PID in last column
+      const out = execSync(`netstat -ano -p TCP 2>nul`, { encoding: 'utf8' });
+      // Match lines like: TCP    127.0.0.1:9222    0.0.0.0:0    LISTENING    12345
+      const regex = new RegExp(`TCP\\s+[^\\s]*:${port}\\s+[^\\s]*:0\\s+LISTENING\\s+(\\d+)`, 'i');
+      const match = out.match(regex);
+      return match ? parseInt(match[1]) : null;
+    } else {
+      // Unix: use lsof or ss
+      try {
+        const out = execSync(`lsof -i :${port} -t 2>/dev/null`, { encoding: 'utf8' }).trim();
+        return out ? parseInt(out.split('\n')[0]) : null;
+      } catch {
+        const out = execSync(`ss -tlnp 2>/dev/null | grep :${port}`, { encoding: 'utf8' });
+        const match = out.match(/pid=(\d+)/);
+        return match ? parseInt(match[1]) : null;
+      }
+    }
+  } catch {
+    return null;
+  }
+}
+
+// Kill a process by PID (with Windows/Unix compatibility)
+function killProcess(pid) {
+  try {
+    if (platform() === 'win32') {
+      execSync(`taskkill //F //PID ${pid}`, { stdio: 'ignore' });
+    } else {
+      process.kill(pid, 'SIGTERM');
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Clean up ghost Chrome on port 9222 that isn't tracked by our PID file
+function cleanupGhostChrome() {
+  const portPid = getPortPid(PORT);
+  if (!portPid) return; // Nothing on port 9222, all good
+
+  const trackedPid = isRunning();
+
+  if (trackedPid && portPid === trackedPid) {
+    return; // Port 9222 is our Chrome, all good
+  }
+
+  // Ghost Chrome detected — something on 9222 that isn't ours
+  if (trackedPid && portPid !== trackedPid) {
+    console.log(`Ghost Chrome detected: port ${PORT} has pid ${portPid}, but our PID file says ${trackedPid}.`);
+  } else if (!trackedPid) {
+    console.log(`Ghost Chrome detected: unknown process ${portPid} on port ${PORT} (no PID file).`);
+  }
+
+  console.log(`Killing ghost Chrome (pid ${portPid})...`);
+  killProcess(portPid);
+
+  // Clean up stale files
+  try { unlinkSync(PID_FILE); } catch {}
+  try { unlinkSync(ACTIVE_PORT); } catch {}
+  console.log('Cleaned up stale Chrome files.');
+}
+
 function httpGet(url, timeoutMs = 1000) {
   return new Promise(resolve => {
     const req = http.get(url, res => {
@@ -102,11 +171,15 @@ async function writePortFile(timeoutMs = 15000) {
 async function main() {
   const arg = process.argv[2];
 
+  // Clean up any ghost Chrome on port 9222 before doing anything else
+  cleanupGhostChrome();
+
   if (arg === '--kill') {
     const pid = isRunning();
     if (pid) {
-      try { process.kill(pid, 'SIGTERM'); console.log(`Stopped Chrome (pid ${pid}).`); }
-      catch (e) { console.error(`Failed: ${e.message}`); }
+      const ok = killProcess(pid);
+      if (ok) console.log(`Stopped Chrome (pid ${pid}).`);
+      else console.error(`Failed to stop pid ${pid}.`);
     } else {
       console.log('GreedySearch Chrome is not running.');
     }
