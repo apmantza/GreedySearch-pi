@@ -12,7 +12,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { cdp } from "./extractors/common.mjs";
+import { cdp, injectClipboardInterceptor } from "./extractors/common.mjs";
 import { dismissConsent, handleVerification } from "./extractors/consent.mjs";
 
 const __dir = fileURLToPath(new URL(".", import.meta.url));
@@ -103,55 +103,29 @@ const ENGINES = {
 			throw new Error("Gemini input never appeared");
 		},
 
-		async waitStream(tab) {
+		async waitForCopyButton(tab) {
 			const deadline = Date.now() + STREAM_TIMEOUT;
-			let started = false,
-				stableCount = 0,
-				lastLen = -1;
-
 			while (Date.now() < deadline) {
 				await new Promise((r) => setTimeout(r, STREAM_POLL_INTERVAL));
-				const stopVisible = await cdp([
+				const found = await cdp([
 					"eval",
 					tab,
-					`!!document.querySelector('button[aria-label*="Stop"]')`,
+					`!!document.querySelector('button[aria-label="Copy"]')`,
 				]).catch(() => "false");
-				if (stopVisible === "true") {
-					started = true;
-				}
-
-				// Use p/li/h* — reliable even when message-content has aria-busy="true"
-				const lenStr = await cdp([
-					"eval",
-					tab,
-					`(function(){var els=document.querySelectorAll('model-response p,model-response li,model-response h1,model-response h2,model-response h3');return Array.from(els).reduce(function(a,e){return a+(e.innerText?.length||0)},0)+''})()`,
-				]).catch(() => "0");
-				const len = parseInt(lenStr, 10) || 0;
-				if (len >= 10) started = true;
-				if (!started) continue;
-				if (len >= 10 && len === lastLen && stopVisible === "false") {
-					if (++stableCount >= STREAM_STABLE_ROUNDS) return;
-				} else {
-					stableCount = 0;
-					lastLen = len;
-				}
+				if (found === "true") return;
 			}
-			if (lastLen >= 10) return;
-			throw new Error("Gemini response did not stabilise");
+			throw new Error("Gemini copy button did not appear within timeout");
 		},
 
 		async extract(tab) {
-			return cdp([
+			// Click copy button → clipboard interceptor captures the markdown
+			await cdp([
 				"eval",
 				tab,
-				`
-        (function(){
-          var UI_LABELS = /^(Gemini said|Query successful|Show code|Analysis|Hide code|Run code|View code)$/i;
-          var els = document.querySelectorAll('model-response p,model-response li,model-response h1,model-response h2,model-response h3');
-          return Array.from(els).map(function(e){return e.innerText?.trim()}).filter(function(t){return t && !UI_LABELS.test(t)}).join('\\n') || '';
-        })()
-      `,
+				`document.querySelector('button[aria-label="Copy"]')?.click()`,
 			]);
+			await new Promise((r) => setTimeout(r, 400));
+			return cdp(["eval", tab, "window.__codingTaskClipboard || ''"]);
 		},
 	},
 
@@ -187,47 +161,29 @@ const ENGINES = {
 			throw new Error("Copilot input never appeared");
 		},
 
-		async waitStream(tab) {
+		async waitForCopyButton(tab) {
 			const deadline = Date.now() + STREAM_TIMEOUT;
-			let stableCount = 0,
-				lastLen = -1;
 			while (Date.now() < deadline) {
 				await new Promise((r) => setTimeout(r, STREAM_POLL_INTERVAL));
-				const lenStr = await cdp([
+				const found = await cdp([
 					"eval",
 					tab,
-					`
-          (function(){
-            var items = Array.from(document.querySelectorAll('[class*="ai-message-item"]'));
-            var filled = items.filter(el => (el.innerText?.length||0) > 0);
-            var last = filled[filled.length-1];
-            return (last?.innerText?.length||0)+'';
-          })()`,
-				]).catch(() => "0");
-				const len = parseInt(lenStr, 10) || 0;
-				if (len >= MIN_RESPONSE_LENGTH && len === lastLen) {
-					if (++stableCount >= STREAM_STABLE_ROUNDS) return;
-				} else {
-					stableCount = 0;
-					lastLen = len;
-				}
+					`!!document.querySelector('button[data-testid="copy-ai-message-button"]')`,
+				]).catch(() => "false");
+				if (found === "true") return;
 			}
-			if (lastLen >= MIN_RESPONSE_LENGTH) return;
-			throw new Error("Copilot response did not stabilise");
+			throw new Error("Copilot copy button did not appear within timeout");
 		},
 
 		async extract(tab) {
-			return cdp([
+			// Click copy button → clipboard interceptor captures the markdown
+			await cdp([
 				"eval",
 				tab,
-				`
-        (function(){
-          var items = Array.from(document.querySelectorAll('[class*="ai-message-item"]'));
-          var last = items.filter(e=>(e.innerText?.length||0)>0).pop();
-          return last?.innerText?.trim()||'';
-        })()
-      `,
+				`document.querySelector('button[data-testid="copy-ai-message-button"]')?.click()`,
 			]);
+			await new Promise((r) => setTimeout(r, 400));
+			return cdp(["eval", tab, "window.__codingTaskClipboard || ''"]);
 		},
 	},
 };
@@ -293,6 +249,9 @@ async function runEngine(engineName, task, context, mode, tabPrefix) {
 	await engine.waitReady(tab);
 	await new Promise((r) => setTimeout(r, 300));
 
+	// Inject clipboard interceptor to capture markdown when copy button clicked
+	await injectClipboardInterceptor(tab, "__codingTaskClipboard");
+
 	// Build the prompt
 	const preamble = MODE_PROMPTS[mode] || null;
 	const body = context
@@ -303,7 +262,7 @@ async function runEngine(engineName, task, context, mode, tabPrefix) {
 	await engine.type(tab, prompt);
 	await new Promise((r) => setTimeout(r, 400));
 	await engine.send(tab);
-	await engine.waitStream(tab);
+	await engine.waitForCopyButton(tab);
 
 	const raw = await engine.extract(tab);
 	if (!raw) throw new Error(`No response from ${engineName}`);
