@@ -18,6 +18,10 @@ import { dismissConsent, handleVerification } from "./extractors/consent.mjs";
 const __dir = fileURLToPath(new URL(".", import.meta.url));
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, "/")}/cdp-pages.json`;
 
+// Target the dedicated GreedySearch Chrome instance (port 9222)
+const GREEDY_PROFILE_DIR = `${tmpdir().replace(/\\/g, "/")}/greedysearch-chrome-profile`;
+process.env.CDP_PROFILE_DIR = GREEDY_PROFILE_DIR;
+
 // Mode system prompts — prepended to the user's task
 const MODE_PROMPTS = {
 	code: null, // no preamble — default behaviour
@@ -49,7 +53,9 @@ async function openNewTab() {
 		"Target.createTarget",
 		'{"url":"about:blank"}',
 	]);
-	return JSON.parse(raw).targetId;
+	const { targetId } = JSON.parse(raw);
+	await cdp(["list"]); // refresh cache so cdp nav can find the new tab
+	return targetId.slice(0, 8);
 }
 
 // ---------------------------------------------------------------------------
