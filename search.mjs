@@ -657,6 +657,7 @@ function runExtractor(
 			[join(__dir, "extractors", script), query, ...extraArgs],
 			{
 				stdio: ["ignore", "pipe", "pipe"],
+				env: { ...process.env, CDP_PROFILE_DIR: GREEDY_PROFILE_DIR },
 			},
 		);
 		let out = "";
@@ -838,6 +839,7 @@ async function synthesizeWithGemini(
 			[join(__dir, "extractors", "gemini.mjs"), prompt, ...extraArgs],
 			{
 				stdio: ["ignore", "pipe", "pipe"],
+				env: { ...process.env, CDP_PROFILE_DIR: GREEDY_PROFILE_DIR },
 			},
 		);
 		let out = "";
