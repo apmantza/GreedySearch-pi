@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.5.1 (2026-03-29)
+
+- **Fixed npm package** — added `.pi-lens/` and test files to `.npmignore` to reduce package size
+
 ## v1.5.0 (2026-03-29)
 
 ### Features

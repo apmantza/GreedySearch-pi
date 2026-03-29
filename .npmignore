@@ -1,4 +1,8 @@
 .claude/
+.pi-lens/
 node_modules/
 *.bak
 results/
+test.mjs
+test.sh
+.git/

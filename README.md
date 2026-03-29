@@ -200,6 +200,9 @@ Sources are now extracted by regex-parsing Markdown links (`[title](url)`) from 
 
 ## Changelog
 
+### v1.5.1 (2026-03-29)
+- Fixed npm package — added `.pi-lens/` and test files to `.npmignore`
+
 ### v1.5.0 (2026-03-29)
 
 - **Code extraction fixed** — `coding_task` now uses clipboard interception to preserve markdown code blocks (was losing them via DOM scraping)
