@@ -10,7 +10,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -31,13 +31,20 @@ function runSearch(
 	onProgress?: (engine: string, status: "done" | "error") => void,
 ): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn("node", [__dir + "/search.mjs", engine, "--inline", ...flags, query], {
-			stdio: ["ignore", "pipe", "pipe"],
-		});
+		const proc = spawn(
+			"node",
+			[`${__dir}/search.mjs`, engine, "--inline", ...flags, query],
+			{
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
 		let out = "";
 		let err = "";
 
-		const onAbort = () => { proc.kill("SIGTERM"); reject(new Error("Aborted")); };
+		const onAbort = () => {
+			proc.kill("SIGTERM");
+			reject(new Error("Aborted"));
+		};
 		signal?.addEventListener("abort", onAbort, { once: true });
 
 		// Watch stderr for progress events (PROGRESS:engine:done|error)
@@ -61,7 +68,9 @@ function runSearch(
 				try {
 					resolve(JSON.parse(out.trim()));
 				} catch {
-					reject(new Error(`Invalid JSON from search.mjs: ${out.slice(0, 200)}`));
+					reject(
+						new Error(`Invalid JSON from search.mjs: ${out.slice(0, 200)}`),
+					);
 				}
 			}
 		});
@@ -85,12 +94,16 @@ function sourceUrl(source: Record<string, unknown>): string {
 }
 
 function sourceLabel(source: Record<string, unknown>): string {
-	return String(source.title || source.domain || sourceUrl(source) || "Untitled source");
+	return String(
+		source.title || source.domain || sourceUrl(source) || "Untitled source",
+	);
 }
 
 function sourceConsensus(source: Record<string, unknown>): number {
 	if (typeof source.engineCount === "number") return source.engineCount;
-	const engines = Array.isArray(source.engines) ? (source.engines as string[]) : [];
+	const engines = Array.isArray(source.engines)
+		? (source.engines as string[])
+		: [];
 	return engines.length;
 }
 
@@ -99,7 +112,9 @@ function formatAgreementLevel(level: string): string {
 	return level.charAt(0).toUpperCase() + level.slice(1);
 }
 
-function getSourceMap(sources: Array<Record<string, unknown>>): Map<string, Record<string, unknown>> {
+function getSourceMap(
+	sources: Array<Record<string, unknown>>,
+): Map<string, Record<string, unknown>> {
 	return new Map(
 		sources
 			.map((source) => [String(source.id || ""), source] as const)
@@ -112,22 +127,33 @@ function formatSourceLine(source: Record<string, unknown>): string {
 	const url = sourceUrl(source);
 	const title = sourceLabel(source);
 	const domain = String(source.domain || "");
-	const engines = Array.isArray(source.engines) ? (source.engines as string[]) : [];
+	const engines = Array.isArray(source.engines)
+		? (source.engines as string[])
+		: [];
 	const consensus = sourceConsensus(source);
 	const typeLabel = humanizeSourceType(String(source.sourceType || ""));
 	const fetch = source.fetch as Record<string, unknown> | undefined;
-	const fetchStatus = fetch?.ok ? `fetched ${fetch.status || 200}` : fetch?.attempted ? "fetch failed" : "";
+	const fetchStatus = fetch?.ok
+		? `fetched ${fetch.status || 200}`
+		: fetch?.attempted
+			? "fetch failed"
+			: "";
 	const pieces = [
 		`${id} - [${title}](${url})`,
 		domain,
 		typeLabel,
-		engines.length ? `cited by ${engines.map(formatEngineName).join(", ")} (${consensus}/3)` : `${consensus}/3`,
+		engines.length
+			? `cited by ${engines.map(formatEngineName).join(", ")} (${consensus}/3)`
+			: `${consensus}/3`,
 		fetchStatus,
 	].filter(Boolean);
 	return `- ${pieces.join(" - ")}`;
 }
 
-function renderSourceEvidence(lines: string[], source: Record<string, unknown>): void {
+function renderSourceEvidence(
+	lines: string[],
+	source: Record<string, unknown>,
+): void {
 	const fetch = source.fetch as Record<string, unknown> | undefined;
 	if (!fetch?.attempted) return;
 
@@ -169,18 +195,24 @@ function renderSynthesis(
 	const agreementLevel = String(agreement?.level || "").trim();
 	if (agreementSummary || agreementLevel) {
 		lines.push("## Consensus");
-		lines.push(`- ${formatAgreementLevel(agreementLevel)}${agreementSummary ? ` - ${agreementSummary}` : ""}`);
+		lines.push(
+			`- ${formatAgreementLevel(agreementLevel)}${agreementSummary ? ` - ${agreementSummary}` : ""}`,
+		);
 		lines.push("");
 	}
 
-	const differences = Array.isArray(synthesis.differences) ? (synthesis.differences as string[]) : [];
+	const differences = Array.isArray(synthesis.differences)
+		? (synthesis.differences as string[])
+		: [];
 	if (differences.length > 0) {
 		lines.push("## Where Engines Differ");
 		for (const difference of differences) lines.push(`- ${difference}`);
 		lines.push("");
 	}
 
-	const caveats = Array.isArray(synthesis.caveats) ? (synthesis.caveats as string[]) : [];
+	const caveats = Array.isArray(synthesis.caveats)
+		? (synthesis.caveats as string[])
+		: [];
 	if (caveats.length > 0) {
 		lines.push("## Caveats");
 		for (const caveat of caveats) lines.push(`- ${caveat}`);
@@ -193,9 +225,13 @@ function renderSynthesis(
 	if (claims.length > 0) {
 		lines.push("## Key Claims");
 		for (const claim of claims) {
-			const sourceIds = Array.isArray(claim.sourceIds) ? (claim.sourceIds as string[]) : [];
+			const sourceIds = Array.isArray(claim.sourceIds)
+				? (claim.sourceIds as string[])
+				: [];
 			const support = String(claim.support || "moderate");
-			lines.push(`- ${String(claim.claim || "")} [${support}${sourceIds.length ? `; ${sourceIds.join(", ")}` : ""}]`);
+			lines.push(
+				`- ${String(claim.claim || "")} [${support}${sourceIds.length ? `; ${sourceIds.join(", ")}` : ""}]`,
+			);
 		}
 		lines.push("");
 	}
@@ -216,10 +252,14 @@ function formatResults(engine: string, data: Record<string, unknown>): string {
 
 	if (engine === "all") {
 		const synthesis = data._synthesis as Record<string, unknown> | undefined;
-		const dedupedSources = data._sources as Array<Record<string, unknown>> | undefined;
+		const dedupedSources = data._sources as
+			| Array<Record<string, unknown>>
+			| undefined;
 		if (synthesis?.answer) {
 			renderSynthesis(lines, synthesis, dedupedSources || [], 6);
-			lines.push("*Synthesized from Perplexity, Bing Copilot, and Google AI*\n");
+			lines.push(
+				"*Synthesized from Perplexity, Bing Copilot, and Google AI*\n",
+			);
 			return lines.join("\n").trim();
 		}
 
@@ -261,7 +301,9 @@ function formatResults(engine: string, data: Record<string, unknown>): string {
 function formatDeepResearch(data: Record<string, unknown>): string {
 	const lines: string[] = [];
 	const confidence = data._confidence as Record<string, unknown> | undefined;
-	const dedupedSources = data._sources as Array<Record<string, unknown>> | undefined;
+	const dedupedSources = data._sources as
+		| Array<Record<string, unknown>>
+		| undefined;
 	const synthesis = data._synthesis as Record<string, unknown> | undefined;
 
 	lines.push("# Deep Research Report\n");
@@ -271,26 +313,41 @@ function formatDeepResearch(data: Record<string, unknown>): string {
 		const enginesFailed = (confidence.enginesFailed as string[]) || [];
 		const agreementLevel = String(confidence.agreementLevel || "mixed");
 		const firstPartySourceCount = Number(confidence.firstPartySourceCount || 0);
-		const sourceTypeBreakdown = confidence.sourceTypeBreakdown as Record<string, number> | undefined;
+		const sourceTypeBreakdown = confidence.sourceTypeBreakdown as
+			| Record<string, number>
+			| undefined;
 
 		lines.push("## Confidence\n");
 		lines.push(`- Agreement: ${formatAgreementLevel(agreementLevel)}`);
-		lines.push(`- Engines responded: ${enginesResponded.map(formatEngineName).join(", ") || "none"}`);
+		lines.push(
+			`- Engines responded: ${enginesResponded.map(formatEngineName).join(", ") || "none"}`,
+		);
 		if (enginesFailed.length > 0) {
-			lines.push(`- Engines failed: ${enginesFailed.map(formatEngineName).join(", ")}`);
+			lines.push(
+				`- Engines failed: ${enginesFailed.map(formatEngineName).join(", ")}`,
+			);
 		}
-		lines.push(`- Top source consensus: ${confidence.topSourceConsensus || 0}/3 engines`);
+		lines.push(
+			`- Top source consensus: ${confidence.topSourceConsensus || 0}/3 engines`,
+		);
 		lines.push(`- Total unique sources: ${confidence.sourcesCount || 0}`);
 		lines.push(`- Official sources: ${confidence.officialSourceCount || 0}`);
 		lines.push(`- First-party sources: ${firstPartySourceCount}`);
-		lines.push(`- Fetch success rate: ${confidence.fetchedSourceSuccessRate || 0}`);
+		lines.push(
+			`- Fetch success rate: ${confidence.fetchedSourceSuccessRate || 0}`,
+		);
 		if (sourceTypeBreakdown && Object.keys(sourceTypeBreakdown).length > 0) {
-			lines.push(`- Source mix: ${Object.entries(sourceTypeBreakdown).map(([type, count]) => `${humanizeSourceType(type)} ${count}`).join(", ")}`);
+			lines.push(
+				`- Source mix: ${Object.entries(sourceTypeBreakdown)
+					.map(([type, count]) => `${humanizeSourceType(type)} ${count}`)
+					.join(", ")}`,
+			);
 		}
 		lines.push("");
 	}
 
-	if (synthesis?.answer) renderSynthesis(lines, synthesis, dedupedSources || [], 8);
+	if (synthesis?.answer)
+		renderSynthesis(lines, synthesis, dedupedSources || [], 8);
 
 	lines.push("## Engine Perspectives\n");
 	for (const engine of ["perplexity", "bing", "google"]) {
@@ -317,18 +374,22 @@ function formatDeepResearch(data: Record<string, unknown>): string {
 	return lines.join("\n").trim();
 }
 
-function formatCodingTask(data: Record<string, unknown> | Record<string, Record<string, unknown>>): string {
+function formatCodingTask(
+	data: Record<string, unknown> | Record<string, Record<string, unknown>>,
+): string {
 	const lines: string[] = [];
 
 	// Check if it's multi-engine result
 	const hasMultipleEngines = "gemini" in data || "copilot" in data;
-	
+
 	if (hasMultipleEngines) {
 		// Multi-engine result
 		for (const [engineName, result] of Object.entries(data)) {
 			const r = result as Record<string, unknown>;
-			lines.push(`## ${engineName.charAt(0).toUpperCase() + engineName.slice(1)}\n`);
-			
+			lines.push(
+				`## ${engineName.charAt(0).toUpperCase() + engineName.slice(1)}\n`,
+			);
+
 			if (r.error) {
 				lines.push(`⚠️ Error: ${r.error}\n`);
 			} else {
@@ -390,27 +451,47 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 					Type.Literal("gem"),
 				],
 				{
-					description: 'Engine to use. "all" fans out to Perplexity, Bing, and Google in parallel (default).',
+					description:
+						'Engine to use. "all" fans out to Perplexity, Bing, and Google in parallel (default).',
 					default: "all",
 				},
 			),
-			synthesize: Type.Optional(Type.Boolean({
-				description: 'When true and engine is "all", deduplicates sources across engines and feeds them to Gemini for a single grounded synthesis. Adds ~30s but saves tokens and improves answer quality.',
-				default: false,
-			})),
-			fullAnswer: Type.Optional(Type.Boolean({
-				description: 'When true, returns the complete answer instead of a truncated preview (default: false, answers are shortened to ~300 chars to save tokens).',
-				default: false,
-			})),
+			synthesize: Type.Optional(
+				Type.Boolean({
+					description:
+						'When true and engine is "all", deduplicates sources across engines and feeds them to Gemini for a single grounded synthesis. Adds ~30s but saves tokens and improves answer quality.',
+					default: false,
+				}),
+			),
+			fullAnswer: Type.Optional(
+				Type.Boolean({
+					description:
+						"When true, returns the complete answer instead of a truncated preview (default: false, answers are shortened to ~300 chars to save tokens).",
+					default: false,
+				}),
+			),
 		}),
 		execute: async (_toolCallId, params, signal, onUpdate) => {
-			const { query, engine = "all", synthesize = false, fullAnswer = false } = params as {
-				query: string; engine: string; synthesize?: boolean; fullAnswer?: boolean;
+			const {
+				query,
+				engine = "all",
+				synthesize = false,
+				fullAnswer = false,
+			} = params as {
+				query: string;
+				engine: string;
+				synthesize?: boolean;
+				fullAnswer?: boolean;
 			};
 
 			if (!cdpAvailable()) {
 				return {
-					content: [{ type: "text", text: "cdp.mjs missing — try reinstalling: pi install git:github.com/apmantza/GreedySearch-pi" }],
+					content: [
+						{
+							type: "text",
+							text: "cdp.mjs missing — try reinstalling: pi install git:github.com/apmantza/GreedySearch-pi",
+						},
+					],
 					details: {} as { raw?: Record<string, unknown> },
 				};
 			}
@@ -422,7 +503,7 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 			// Track progress for "all" engine mode
 			const completed = new Set<string>();
 
-			const onProgress = (eng: string, status: "done" | "error") => {
+			const onProgress = (eng: string, _status: "done" | "error") => {
 				completed.add(eng);
 				const parts: string[] = [];
 				for (const e of ALL_ENGINES) {
@@ -432,13 +513,21 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 				if (synthesize && completed.size >= 3) parts.push("🔄 synthesizing");
 
 				onUpdate?.({
-					content: [{ type: "text", text: `**Searching...** ${parts.join(" · ")}` }],
+					content: [
+						{ type: "text", text: `**Searching...** ${parts.join(" · ")}` },
+					],
 					details: { _progress: true },
 				} as any);
 			};
 
 			try {
-				const data = await runSearch(engine, query, flags, signal, engine === "all" ? onProgress : undefined);
+				const data = await runSearch(
+					engine,
+					query,
+					flags,
+					signal,
+					engine === "all" ? onProgress : undefined,
+				);
 				const text = formatResults(engine, data);
 				return {
 					content: [{ type: "text", text: text || "No results returned." }],
@@ -464,7 +553,8 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 			"deduplicates and ranks sources by consensus, fetches content from top sources, " +
 			"and synthesizes via Gemini. Returns a structured research document with confidence scores. " +
 			"Use for architecture decisions, library comparisons, best practices, or any research where the answer matters.",
-		promptSnippet: "Deep multi-engine research with source deduplication and synthesis",
+		promptSnippet:
+			"Deep multi-engine research with source deduplication and synthesis",
 		parameters: Type.Object({
 			query: Type.String({ description: "The research question" }),
 		}),
@@ -473,14 +563,16 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 
 			if (!cdpAvailable()) {
 				return {
-					content: [{ type: "text", text: "cdp.mjs missing — try reinstalling." }],
+					content: [
+						{ type: "text", text: "cdp.mjs missing — try reinstalling." },
+					],
 					details: {} as { raw?: Record<string, unknown> },
 				};
 			}
 
 			const completed = new Set<string>();
 
-			const onProgress = (eng: string, status: "done" | "error") => {
+			const onProgress = (eng: string, _status: "done" | "error") => {
 				completed.add(eng);
 				const parts: string[] = [];
 				for (const e of ALL_ENGINES) {
@@ -490,14 +582,22 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 				if (completed.size >= 3) parts.push("🔄 synthesizing");
 
 				onUpdate?.({
-					content: [{ type: "text", text: `**Researching...** ${parts.join(" · ")}` }],
+					content: [
+						{ type: "text", text: `**Researching...** ${parts.join(" · ")}` },
+					],
 					details: { _progress: true },
 				} as any);
 			};
 
 			try {
 				// Run deep research (includes full answers, synthesis, and source fetching)
-				const data = await runSearch("all", query, ["--deep-research"], signal, onProgress);
+				const data = await runSearch(
+					"all",
+					query,
+					["--deep-research"],
+					signal,
+					onProgress,
+				);
 				const text = formatDeepResearch(data);
 				return {
 					content: [{ type: "text", text: text || "No results returned." }],
@@ -529,13 +629,10 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			task: Type.String({ description: "The coding task or question" }),
 			engine: Type.Union(
-				[
-					Type.Literal("all"),
-					Type.Literal("gemini"),
-					Type.Literal("copilot"),
-				],
+				[Type.Literal("all"), Type.Literal("gemini"), Type.Literal("copilot")],
 				{
-					description: 'Engine to use. "all" runs both Gemini and Copilot in parallel.',
+					description:
+						'Engine to use. "all" runs both Gemini and Copilot in parallel.',
 					default: "gemini",
 				},
 			),
@@ -548,22 +645,35 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 					Type.Literal("debug"),
 				],
 				{
-					description: "Task mode: code (default), review (code review), plan (architect review), test (write tests), debug (root cause analysis)",
+					description:
+						"Task mode: code (default), review (code review), plan (architect review), test (write tests), debug (root cause analysis)",
 					default: "code",
 				},
 			),
-			context: Type.Optional(Type.String({
-				description: "Optional code context/snippet to include with the task",
-			})),
+			context: Type.Optional(
+				Type.String({
+					description: "Optional code context/snippet to include with the task",
+				}),
+			),
 		}),
 		execute: async (_toolCallId, params, signal, onUpdate) => {
-			const { task, engine = "gemini", mode = "code", context } = params as {
-				task: string; engine: string; mode: string; context?: string;
+			const {
+				task,
+				engine = "gemini",
+				mode = "code",
+				context,
+			} = params as {
+				task: string;
+				engine: string;
+				mode: string;
+				context?: string;
 			};
 
 			if (!cdpAvailable()) {
 				return {
-					content: [{ type: "text", text: "cdp.mjs missing — try reinstalling." }],
+					content: [
+						{ type: "text", text: "cdp.mjs missing — try reinstalling." },
+					],
 					details: {} as { raw?: Record<string, unknown> },
 				};
 			}
@@ -573,38 +683,65 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 
 			try {
 				onUpdate?.({
-					content: [{ type: "text", text: `**Coding task...** 🔄 ${engine === "all" ? "Gemini + Copilot" : engine} (${mode} mode)` }],
+					content: [
+						{
+							type: "text",
+							text: `**Coding task...** 🔄 ${engine === "all" ? "Gemini + Copilot" : engine} (${mode} mode)`,
+						},
+					],
 					details: { _progress: true },
 				} as any);
 
-				const data = await new Promise<Record<string, unknown>>((resolve, reject) => {
-					const proc = spawn("node", [__dir + "/coding-task.mjs", task, ...flags], {
-						stdio: ["ignore", "pipe", "pipe"],
-					});
-					let out = "";
-					let err = "";
+				const data = await new Promise<Record<string, unknown>>(
+					(resolve, reject) => {
+						const proc = spawn(
+							"node",
+							[`${__dir}/coding-task.mjs`, task, ...flags],
+							{
+								stdio: ["ignore", "pipe", "pipe"],
+							},
+						);
+						let out = "";
+						let err = "";
 
-					const onAbort = () => { proc.kill("SIGTERM"); reject(new Error("Aborted")); };
-					signal?.addEventListener("abort", onAbort, { once: true });
+						const onAbort = () => {
+							proc.kill("SIGTERM");
+							reject(new Error("Aborted"));
+						};
+						signal?.addEventListener("abort", onAbort, { once: true });
 
-					proc.stdout.on("data", (d: Buffer) => (out += d));
-					proc.stderr.on("data", (d: Buffer) => { err += d; });
-					proc.on("close", (code: number) => {
-						signal?.removeEventListener("abort", onAbort);
-						if (code !== 0) {
-							reject(new Error(err.trim() || `coding-task.mjs exited with code ${code}`));
-						} else {
-							try {
-								resolve(JSON.parse(out.trim()));
-							} catch {
-								reject(new Error(`Invalid JSON from coding-task.mjs: ${out.slice(0, 200)}`));
+						proc.stdout.on("data", (d: Buffer) => (out += d));
+						proc.stderr.on("data", (d: Buffer) => {
+							err += d;
+						});
+						proc.on("close", (code: number) => {
+							signal?.removeEventListener("abort", onAbort);
+							if (code !== 0) {
+								reject(
+									new Error(
+										err.trim() || `coding-task.mjs exited with code ${code}`,
+									),
+								);
+							} else {
+								try {
+									resolve(JSON.parse(out.trim()));
+								} catch {
+									reject(
+										new Error(
+											`Invalid JSON from coding-task.mjs: ${out.slice(0, 200)}`,
+										),
+									);
+								}
 							}
-						}
-					});
+						});
 
-					// Timeout after 3 minutes
-					setTimeout(() => { proc.kill("SIGTERM"); reject(new Error("Coding task timed out after 180s")); }, 180000);
-				});
+						// Timeout after 3 minutes
+						setTimeout(() => {
+							proc.kill("SIGTERM");
+							reject(new Error("Coding task timed out after 180s"));
+						}, 180000);
+					},
+				);
 
 				const text = formatCodingTask(data);
 				return {

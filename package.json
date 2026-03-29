@@ -1,26 +1,26 @@
 {
-  "name": "@apmantza/greedysearch-pi",
-  "version": "1.4.2",
-  "description": "Pi extension: browser-automation tool that searches Perplexity, Bing Copilot, and Google AI in parallel, extracts answers and sources via CDP, with optional Gemini synthesis — grounded AI answers from real browser interactions.",
-  "type": "module",
-  "keywords": [
-    "pi-package"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/apmantza/GreedySearch-pi.git"
-  },
-  "license": "MIT",
-  "pi": {
-    "extensions": [
-      "./index.ts"
-    ],
-    "skills": [
-      "./skills"
-    ]
-  },
-  "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "*"
-  }
+	"name": "@apmantza/greedysearch-pi",
+	"version": "1.4.2",
+	"description": "Pi extension: browser-automation tool that searches Perplexity, Bing Copilot, and Google AI in parallel, extracts answers and sources via CDP, with optional Gemini synthesis — grounded AI answers from real browser interactions.",
+	"type": "module",
+	"keywords": [
+		"pi-package"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/apmantza/GreedySearch-pi.git"
+	},
+	"license": "MIT",
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		],
+		"skills": [
+			"./skills"
+		]
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-coding-agent": "*",
+		"@sinclair/typebox": "*"
+	}
 }
