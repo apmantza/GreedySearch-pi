@@ -456,12 +456,13 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 					default: "all",
 				},
 			),
-			synthesize: Type.Optional(
-				Type.Boolean({
+			depth: Type.Union(
+				[Type.Literal("fast"), Type.Literal("standard"), Type.Literal("deep")],
+				{
 					description:
-						'When true and engine is "all", deduplicates sources across engines and feeds them to Gemini for a single grounded synthesis. Adds ~30s but saves tokens and improves answer quality.',
-					default: false,
-				}),
+						"Search depth: fast (single engine, ~15-30s), standard (3 engines + synthesis, ~30-90s), deep (3 engines + source fetching + synthesis + confidence, ~60-180s). Default: standard.",
+					default: "standard",
+				},
 			),
 			fullAnswer: Type.Optional(
 				Type.Boolean({
@@ -475,12 +476,12 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 			const {
 				query,
 				engine = "all",
-				synthesize = false,
+				depth = "standard",
 				fullAnswer = false,
 			} = params as {
 				query: string;
 				engine: string;
-				synthesize?: boolean;
+				depth?: "fast" | "standard" | "deep";
 				fullAnswer?: boolean;
 			};
 
@@ -498,7 +499,11 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 
 			const flags: string[] = [];
 			if (fullAnswer) flags.push("--full");
-			if (synthesize && engine === "all") flags.push("--synthesize");
+			// Map depth to CLI flags
+			if (depth === "deep") flags.push("--deep");
+			else if (depth === "standard" && engine === "all")
+				flags.push("--synthesize");
+			// For "fast" depth with "all" engine, we run 3 engines but no synthesis (just pick first result)
 
 			// Track progress for "all" engine mode
 			const completed = new Set<string>();
@@ -510,7 +515,8 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 					if (completed.has(e)) parts.push(`✅ ${e} done`);
 					else parts.push(`⏳ ${e}`);
 				}
-				if (synthesize && completed.size >= 3) parts.push("🔄 synthesizing");
+				if (depth !== "fast" && completed.size >= 3)
+					parts.push("🔄 synthesizing");
 
 				onUpdate?.({
 					content: [
@@ -544,17 +550,15 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 	});
 
 	// ─── deep_research ─────────────────────────────────────────────────────────
+	// DEPRECATED: Use greedy_search with depth: "deep" instead.
+	// Kept for backward compatibility — aliases to greedy_search.
 	pi.registerTool({
 		name: "deep_research",
-		label: "Deep Research",
+		label: "Deep Research (legacy)",
 		description:
-			"Comprehensive multi-engine research with source fetching and synthesis. " +
-			"Runs Perplexity, Bing Copilot, and Google AI in parallel with full answers, " +
-			"deduplicates and ranks sources by consensus, fetches content from top sources, " +
-			"and synthesizes via Gemini. Returns a structured research document with confidence scores. " +
-			"Use for architecture decisions, library comparisons, best practices, or any research where the answer matters.",
-		promptSnippet:
-			"Deep multi-engine research with source deduplication and synthesis",
+			"DEPRECATED — Use greedy_search with depth: 'deep' instead. " +
+			"Comprehensive multi-engine research with source fetching and synthesis.",
+		promptSnippet: "Deep multi-engine research (legacy alias to greedy_search)",
 		parameters: Type.Object({
 			query: Type.String({ description: "The research question" }),
 		}),
@@ -590,11 +594,11 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 			};
 
 			try {
-				// Run deep research (includes full answers, synthesis, and source fetching)
+				// Delegate to greedy_search with depth: "deep"
 				const data = await runSearch(
 					"all",
 					query,
-					["--deep-research"],
+					["--deep"],
 					signal,
 					onProgress,
 				);

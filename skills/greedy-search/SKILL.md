@@ -1,48 +1,57 @@
 ---
 name: greedy-search
-description: Multi-engine AI web search — greedy_search, deep_research, and coding_task. Use for high-quality research where training data may be stale or single-engine results are insufficient.
+description: Multi-engine AI web search — greedy_search with three depth levels (fast/standard/deep). Use for high-quality research where training data may be stale or single-engine results are insufficient. NO API KEYS needed.
 ---
 
 # GreedySearch Tools
 
 | Tool | Speed | Use For |
 |------|-------|---------|
-| `greedy_search` | 15-90s | Quick lookups, current info |
-| `deep_research` | 60-120s | Architecture decisions, source-backed research |
+| `greedy_search` | 15-180s | Multi-engine search with depth levels |
 | `coding_task` | 60-180s | Debug, review, plan modes for hard problems |
 
 ## greedy_search
 
-Multi-engine AI search (Perplexity, Bing, Google).
+Multi-engine AI search (Perplexity, Bing, Google) with three depth levels.
 
-```greedy_search({ query: "React 19 changes", engine: "all" })```
+```greedy_search({ query: "React 19 changes", depth: "standard" })```
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | string | required | Search question |
 | `engine` | string | `"all"` | `all`, `perplexity`, `bing`, `google`, `gemini` |
-| `synthesize` | boolean | `false` | Gemini synthesis (+30s, higher quality) |
+| `depth` | string | `"standard"` | `fast`, `standard`, `deep` — see below |
 | `fullAnswer` | boolean | `false` | Complete vs ~300 char summary |
 
-**When to use:** Current info, version changes, comparisons, debugging errors.  
-**vs web_search:** Slower but higher quality — 3 engines cross-verify.
+### Depth Levels
 
-**Engine Selection:**
-- `all` (default): 30-90s, highest confidence
-- `perplexity`: 15-30s, technical Q&A
-- `bing`: 15-30s, recent news
-- `google`: 15-30s, broad coverage
-- `gemini`: 15-30s, different training data
+| Depth | Engines | Synthesis | Source Fetch | Time | Use When |
+|-------|---------|-----------|--------------|------|----------|
+| `fast` | 1 | ❌ | ❌ | 15-30s | Quick lookup, single perspective |
+| `standard` | 3 | ✅ | ❌ | 30-90s | Default — balanced speed/quality |
+| `deep` | 3 | ✅ | ✅ (top 5) | 60-180s | Research that matters — architecture decisions |
 
-## deep_research
+**Standard** (default): Runs 3 engines, deduplicates sources, synthesizes via Gemini.  
+**Deep**: Same + fetches content from top sources for grounded synthesis + confidence scores.
 
-Comprehensive research with source fetching and synthesis.
+### Engine Selection (for fast mode)
 
-```deep_research({ query: "RAG vs fine-tuning tradeoffs" })```
+```greedy_search({ query: "...", engine: "perplexity", depth: "fast" })```
 
-Returns: Full answers + Gemini synthesis + deduplicated sources (ranked by consensus [3/3, 2/3, 1/3]) + fetched content from top sources.
+- `perplexity`: Technical Q&A, citations
+- `bing`: Recent news, Microsoft ecosystem
+- `google`: Broad coverage
+- `gemini`: Different training data
 
-**When to use:** Research that matters — library comparisons, architecture decisions, source-backed confidence.
+### Examples
+
+```greedy_search({ query: "what changed in React 19", depth: "fast" })```
+```greedy_search({ query: "best auth patterns for SaaS", depth: "deep" })```
+```greedy_search({ query: "Prisma vs Drizzle 2026", depth: "standard", fullAnswer: true })```
+
+### Legacy
+
+`deep_research` tool still works — aliases to `greedy_search` with `depth: "deep"`.
 
 ## coding_task
 
@@ -58,17 +67,17 @@ Browser-based coding assistant via Gemini/Copilot.
 | `context` | string | — | Code snippet to include |
 
 **Modes:**
-- `debug`: Stuck on tricky bug — fresh eyes catch different failure modes
-- `plan`: Big refactor coming — Gemini plays devil's advocate
+- `debug`: Tricky bugs — fresh eyes catch different failure modes
+- `plan`: Big refactor — plays devil's advocate on risks
 - `review`: High-stakes code review before merge
 - `test`: Edge cases the author missed
 - `code`: Simple generation (but you're probably faster)
 
 **When to use:** Second opinions on hard problems. Skip for simple code.
 
-## Interpreting Results
+## Result Interpretation
 
-- **All 3 agree** → High confidence, present as fact
-- **2 agree, 1 differs** → Likely correct, note the dissent
-- **All differ** → Present different perspectives
-- **Sources [3/3] or [2/3]** → Cited by multiple engines, higher confidence
+- **All 3 engines agree** → High confidence, present as fact
+- **2 agree, 1 differs** → Likely correct, note dissent
+- **Sources [3/3] or [2/3]** → Multiple engines cite, higher confidence
+- **Deep research confidence scores** → Structured confidence metadata

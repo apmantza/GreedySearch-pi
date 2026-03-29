@@ -24,10 +24,10 @@ pi install git:github.com/apmantza/GreedySearch-pi
 
 ## Quick Start
 
-Once installed, Pi gains a `greedy_search` tool. The model will use it automatically for questions about current libraries, error messages, version-specific docs, etc.
+Once installed, Pi gains a `greedy_search` tool with three depth levels.
 
 ```
-greedy_search({ query: "What's new in React 19?", engine: "all" })
+greedy_search({ query: "What's new in React 19?", depth: "standard" })
 ```
 
 ## Parameters
@@ -35,19 +35,27 @@ greedy_search({ query: "What's new in React 19?", engine: "all" })
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | string | required | The search question |
-| `engine` | string | `"all"` | Engine to use (see below) |
-| `synthesize` | boolean | `false` | Synthesize results into one answer via Gemini |
+| `engine` | string | `"all"` | `all`, `perplexity`, `bing`, `google`, `gemini` |
+| `depth` | string | `"standard"` | `fast` (1 engine), `standard` (3 engines + synthesis), `deep` (3 + fetch + synthesis + confidence) |
 | `fullAnswer` | boolean | `false` | Return complete answer (~3000+ chars) vs truncated preview (~300 chars) |
 
-## Engines
+## Depth Levels
 
-| Engine | Alias | Latency | Best for |
-|--------|-------|---------|----------|
-| `all` | — | 30-90s | Highest confidence — all 3 engines in parallel (default) |
-| `perplexity` | `p` | 15-30s | Technical Q&A, code explanations, documentation |
-| `bing` | `b` | 15-30s | Recent news, Microsoft ecosystem |
-| `google` | `g` | 15-30s | Broad coverage, multiple perspectives |
-| `gemini` | `gem` | 15-30s | Google's AI with different training data |
+| Depth | Engines | Synthesis | Source Fetch | Time | Best For |
+|-------|---------|-----------|--------------|------|----------|
+| `fast` | 1 | — | — | 15-30s | Quick lookup, single perspective |
+| `standard` | 3 | ✅ | — | 30-90s | Default — balanced speed/quality |
+| `deep` | 3 | ✅ | ✅ (top 5) | 60-180s | Research that matters — architecture decisions |
+
+## Engines (for fast mode)
+
+| Engine | Alias | Best for |
+|--------|-------|----------|
+| `all` | — | All 3 engines — but for fast single-engine, pick one below |
+| `perplexity` | `p` | Technical Q&A, code explanations, documentation |
+| `bing` | `b` | Recent news, Microsoft ecosystem |
+| `google` | `g` | Broad coverage, multiple perspectives |
+| `gemini` | `gem` | Google's AI with different training data |
 
 ## Streaming Progress
 
@@ -60,24 +68,21 @@ When using `engine: "all"`, the tool streams progress as each engine completes:
 **Searching...** ✅ perplexity done · ✅ bing done · ✅ google done
 ```
 
-## Synthesis Mode
+## Deep Research Mode
 
-For complex research questions, use `synthesize: true` with `engine: "all"`:
+For research that matters — architecture decisions, library comparisons — use `depth: "deep"`:
 
 ```
-greedy_search({ query: "best auth patterns for SaaS in 2026", engine: "all", synthesize: true })
+greedy_search({ query: "best auth patterns for SaaS in 2026", depth: "deep" })
 ```
 
-This deduplicates sources across engines, builds a normalized source registry, and feeds that context to Gemini for one clean synthesized answer. Adds ~30s but returns agreement summaries, caveats, key claims, and better-labeled top sources.
+Deep mode: 3 engines + source fetching (top 5) + synthesis + confidence scores. ~60-180s but returns grounded synthesis with fetched evidence.
 
-**Use synthesis when:**
-- You need one definitive answer, not multiple perspectives
-- You're researching a topic to write about or make a decision
-- Token efficiency matters (one answer vs three)
+**Standard vs Deep:**
+- `standard` (default): 3 engines + synthesis. Good for most research.
+- `deep`: Same + fetches source content for grounded answers. Use when the answer really matters.
 
-**Skip synthesis when:**
-- You want to see where engines disagree
-- Speed matters
+**Legacy:** `deep_research` tool still works — aliases to `greedy_search` with `depth: "deep"`.
 
 ## Full vs Short Answers
 
@@ -89,28 +94,28 @@ greedy_search({ query: "explain the React compiler", engine: "perplexity", fullA
 
 ## Examples
 
-**Quick technical lookup:**
+**Quick lookup (fast):**
 
 ```
-greedy_search({ query: "How to use async await in Python", engine: "perplexity" })
+greedy_search({ query: "How to use async await in Python", depth: "fast", engine: "perplexity" })
 ```
 
-**Compare tools (see where engines agree/disagree):**
+**Compare tools (standard):**
 
 ```
-greedy_search({ query: "Prisma vs Drizzle in 2026", engine: "all" })
+greedy_search({ query: "Prisma vs Drizzle in 2026", depth: "standard" })
 ```
 
-**Research with synthesis:**
+**Deep research (architecture decision):**
 
 ```
-greedy_search({ query: "Best practices for monorepo structure", engine: "all", synthesize: true })
+greedy_search({ query: "Best practices for monorepo structure", depth: "deep" })
 ```
 
 **Debug an error:**
 
 ```
-greedy_search({ query: "Error: Cannot find module 'react-dom/client' Next.js 15", engine: "all" })
+greedy_search({ query: "Error: Cannot find module 'react-dom/client' Next.js 15", depth: "standard" })
 ```
 
 ## Requirements
@@ -199,6 +204,12 @@ Sources are now extracted by regex-parsing Markdown links (`[title](url)`) from 
 - `skills/greedy-search/SKILL.md` — skill file that guides the model on when/how to use greedy_search
 
 ## Changelog
+
+### v1.6.0 (2026-03-29)
+- **Merged deep_research into greedy_search** — new `depth` parameter: `fast` (1 engine), `standard` (3 engines + synthesis), `deep` (3 engines + fetch + synthesis + confidence)
+- **Simpler API** — one tool with clear speed/quality tradeoffs instead of separate tools with overlapping flags
+- **Backward compatible** — `deep_research` still works as alias, `--synthesize` and `--deep-research` flags still function
+- **Updated documentation** — README and skill docs now use `depth` parameter throughout
 
 ### v1.5.1 (2026-03-29)
 - Fixed npm package — added `.pi-lens/` and test files to `.npmignore`

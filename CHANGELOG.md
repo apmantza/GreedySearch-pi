@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.6.0 (2026-03-29)
+
+### Breaking Changes (Backward Compatible)
+- **Merged deep_research into greedy_search** — new `depth` parameter with three levels:
+  - `fast`: single engine (~15-30s)
+  - `standard`: 3 engines + synthesis (~30-90s, default for `engine: "all"`)
+  - `deep`: 3 engines + source fetching + synthesis + confidence (~60-180s)
+- **Simpler mental model** — one tool with clear speed/quality tradeoffs instead of separate tools with overlapping flags
+- **Deprecated flags still work** — `--synthesize` maps to `depth: "standard"`, `--deep-research` maps to `depth: "deep"`
+- **deep_research tool aliased** — still works, calls `greedy_search` with `depth: "deep"`
+
+### Documentation
+- Updated README with new `depth` parameter and examples
+- Updated skill documentation (SKILL.md) to reflect simplified API
+
 ## v1.5.1 (2026-03-29)
 
 - **Fixed npm package** — added `.pi-lens/` and test files to `.npmignore` to reduce package size

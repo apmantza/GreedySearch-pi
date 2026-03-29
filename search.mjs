@@ -1070,12 +1070,30 @@ async function main() {
 
 	await ensureChrome();
 
-	const full = args.includes("--full") || args.includes("--deep-research");
+	// Parse --depth or fall back to deprecated flags
+	const depthIdx = args.indexOf("--depth");
+	let depth = "fast"; // default for single engine
+	if (depthIdx !== -1 && args[depthIdx + 1]) {
+		depth = args[depthIdx + 1];
+	} else if (args.includes("--deep-research")) {
+		depth = "deep";
+	} else if (args.includes("--synthesize")) {
+		depth = "standard";
+	}
+	// For "all" engine, default to standard if not specified
+	const engineArg = args.find((a) => !a.startsWith("--"))?.toLowerCase();
+	if (
+		engineArg === "all" &&
+		depthIdx === -1 &&
+		!args.includes("--deep-research") &&
+		!args.includes("--synthesize")
+	) {
+		depth = "standard";
+	}
+
+	const full = args.includes("--full") || depth === "deep";
 	const short = !full;
 	const fetchSource = args.includes("--fetch-top-source");
-	const synthesize =
-		args.includes("--synthesize") || args.includes("--deep-research");
-	const deepResearch = args.includes("--deep-research");
 	const inline = args.includes("--inline");
 	const outIdx = args.indexOf("--out");
 	const outFile = outIdx !== -1 ? args[outIdx + 1] : null;
@@ -1087,7 +1105,8 @@ async function main() {
 			a !== "--synthesize" &&
 			a !== "--deep-research" &&
 			a !== "--inline" &&
-			a !== "--out" &&
+			a !== "--depth" &&
+			(depthIdx === -1 || i !== depthIdx + 1) &&
 			(outIdx === -1 || i !== outIdx + 1),
 	);
 	const engine = rest[0].toLowerCase();
@@ -1137,7 +1156,7 @@ async function main() {
 			// Build a canonical source registry across all engines
 			out._sources = buildSourceRegistry(out);
 
-			if (deepResearch) {
+			if (depth === "deep") {
 				process.stderr.write("PROGRESS:deep-research:start\n");
 				const fetchedSources =
 					out._sources.length > 0
@@ -1153,8 +1172,8 @@ async function main() {
 				);
 			}
 
-			// Synthesize with Gemini if requested
-			if (synthesize) {
+			// Synthesize with Gemini for standard and deep modes
+			if (depth !== "fast") {
 				process.stderr.write("PROGRESS:synthesis:start\n");
 				process.stderr.write(
 					"[greedysearch] Synthesizing results with Gemini...\n",
@@ -1165,7 +1184,7 @@ async function main() {
 					tabs.push(geminiTab); // ensure cleanup in finally block
 					await activateTab(geminiTab);
 					const synthesis = await synthesizeWithGemini(query, out, {
-						grounded: deepResearch,
+						grounded: depth === "deep",
 						tabPrefix: geminiTab,
 					});
 					out._synthesis = {
@@ -1187,9 +1206,13 @@ async function main() {
 					out._topSource = await fetchTopSource(top.canonicalUrl || top.url);
 			}
 
-			if (deepResearch) out._confidence = buildConfidence(out);
+			if (depth === "deep") out._confidence = buildConfidence(out);
 
-			writeOutput(out, outFile, { inline, synthesize, query });
+			writeOutput(out, outFile, {
+				inline,
+				synthesize: depth !== "fast",
+				query,
+			});
 			return;
 		} finally {
 			await closeTabs(tabs);
@@ -1209,7 +1232,7 @@ async function main() {
 		if (fetchSource && result.sources?.length > 0) {
 			result.topSource = await fetchTopSource(result.sources[0].url);
 		}
-		writeOutput(result, outFile, { inline, synthesize, query });
+		writeOutput(result, outFile, { inline, synthesize: false, query });
 	} catch (e) {
 		process.stderr.write(`Error: ${e.message}\n`);
 		process.exit(1);
