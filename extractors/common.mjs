@@ -1,0 +1,237 @@
+// extractors/common.mjs — shared utilities for CDP-based extractors
+// Extracts common patterns: cdp wrapper, tab management, clipboard interception, source parsing
+
+import { spawn } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dir = dirname(fileURLToPath(import.meta.url));
+const CDP = join(__dir, "..", "cdp.mjs");
+
+// ============================================================================
+// CDP wrapper
+// ============================================================================
+
+/**
+ * Execute a CDP command through the cdp.mjs CLI
+ * @param {string[]} args - Command arguments
+ * @param {number} [timeoutMs=30000] - Timeout in milliseconds
+ * @returns {Promise<string>} Command output
+ */
+export function cdp(args, timeoutMs = 30000) {
+	return new Promise((resolve, reject) => {
+		const proc = spawn("node", [CDP, ...args], {
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let out = "";
+		let err = "";
+		proc.stdout.on("data", (d) => (out += d));
+		proc.stderr.on("data", (d) => (err += d));
+		const timer = setTimeout(() => {
+			proc.kill();
+			reject(new Error(`cdp timeout: ${args[0]}`));
+		}, timeoutMs);
+		proc.on("close", (code) => {
+			clearTimeout(timer);
+			if (code !== 0) reject(new Error(err.trim() || `cdp exit ${code}`));
+			else resolve(out.trim());
+		});
+	});
+}
+
+// ============================================================================
+// Tab management
+// ============================================================================
+
+/**
+ * Get an existing tab by prefix or open a new one
+ * @param {string|null} tabPrefix - Existing tab prefix, or null to create new
+ * @returns {Promise<string>} Tab identifier
+ */
+export async function getOrOpenTab(tabPrefix) {
+	if (tabPrefix) return tabPrefix;
+	// Always open a fresh tab to avoid SPA navigation issues
+	const list = await cdp(["list"]);
+	const anchor = list.split("\n")[0]?.slice(0, 8);
+	if (!anchor)
+		throw new Error(
+			"No Chrome tabs found. Is Chrome running with --remote-debugging-port=9222?",
+		);
+	const raw = await cdp([
+		"evalraw",
+		anchor,
+		"Target.createTarget",
+		'{"url":"about:blank"}',
+	]);
+	const { targetId } = JSON.parse(raw);
+	await cdp(["list"]); // refresh cache
+	return targetId.slice(0, 8);
+}
+
+// ============================================================================
+// Clipboard interception (for extractors that use copy-to-clipboard)
+// ============================================================================
+
+/**
+ * Inject clipboard interceptor to capture text when copy buttons are clicked.
+ * Each engine uses a unique global variable to avoid conflicts.
+ * @param {string} tab - Tab identifier
+ * @param {string} globalVar - Global variable name (e.g., '__pplxClipboard', '__geminiClipboard')
+ */
+export async function injectClipboardInterceptor(tab, globalVar) {
+	const code = `
+    window.${globalVar} = null;
+    const _origWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
+    navigator.clipboard.writeText = function(text) {
+      window.${globalVar} = text;
+      return _origWriteText(text);
+    };
+    const _origWrite = navigator.clipboard.write.bind(navigator.clipboard);
+    navigator.clipboard.write = async function(items) {
+      try {
+        for (const item of items) {
+          if (item.types && item.types.includes('text/plain')) {
+            const blob = await item.getType('text/plain');
+            window.${globalVar} = await blob.text();
+            break;
+          }
+        }
+      } catch(e) {}
+      return _origWrite(items);
+    };
+  `;
+	await cdp(["eval", tab, code]);
+}
+
+// ============================================================================
+// Source extraction from markdown
+// ============================================================================
+
+/**
+ * Parse Markdown links from text to extract sources
+ * @param {string} text - Text containing Markdown links like [title](url)
+ * @returns {Array<{title: string, url: string}>} Extracted sources
+ */
+export function parseSourcesFromMarkdown(text) {
+	return Array.from(text.matchAll(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g))
+		.map((m) => ({ title: m[1], url: m[2] }))
+		.filter((v, i, arr) => arr.findIndex((x) => x.url === v.url) === i)
+		.slice(0, 10);
+}
+
+// ============================================================================
+// Stream completion detection
+// ============================================================================
+
+/**
+ * Wait for generation/streaming to complete by monitoring text length stability
+ * @param {string} tab - Tab identifier
+ * @param {object} options - Options
+ * @param {number} [options.timeout=30000] - Maximum wait time in ms
+ * @param {number} [options.interval=600] - Polling interval in ms
+ * @param {number} [options.stableRounds=3] - Required stable rounds to consider complete
+ * @param {string} [options.selector='document.body'] - Element to monitor (default: body)
+ * @returns {Promise<number>} Final text length
+ */
+export async function waitForStreamComplete(tab, options = {}) {
+	const {
+		timeout = 30000,
+		interval = 600,
+		stableRounds = 3,
+		selector = "document.body",
+	} = options;
+
+	const deadline = Date.now() + timeout;
+	let lastLen = -1;
+	let stableCount = 0;
+
+	while (Date.now() < deadline) {
+		await new Promise((r) => setTimeout(r, interval));
+		const lenStr = await cdp([
+			"eval",
+			tab,
+			`${selector}?.innerText?.length ?? 0`,
+		]).catch(() => "0");
+		const currentLen = parseInt(lenStr, 10) || 0;
+
+		if (currentLen > 0) {
+			if (currentLen === lastLen) {
+				stableCount++;
+				if (stableCount >= stableRounds) return currentLen;
+			} else {
+				lastLen = currentLen;
+				stableCount = 0;
+			}
+		}
+	}
+
+	throw new Error(`Generation did not stabilise within ${timeout}ms`);
+}
+
+// ============================================================================
+// CLI argument parsing
+// ============================================================================
+
+/**
+ * Parse standard extractor CLI arguments
+ * @param {string[]} args - process.argv.slice(2)
+ * @returns {{query: string, tabPrefix: string|null, short: boolean}}
+ */
+export function parseArgs(args) {
+	const short = args.includes("--short");
+	const rest = args.filter((a) => a !== "--short");
+	const tabFlagIdx = rest.indexOf("--tab");
+	const tabPrefix = tabFlagIdx !== -1 ? rest[tabFlagIdx + 1] : null;
+	const query =
+		tabFlagIdx !== -1
+			? rest
+					.filter((_, i) => i !== tabFlagIdx && i !== tabFlagIdx + 1)
+					.join(" ")
+			: rest.join(" ");
+	return { query, tabPrefix, short };
+}
+
+/**
+ * Validate that a query was provided, show usage and exit if not
+ * @param {string[]} args - process.argv.slice(2)
+ * @param {string} usage - Usage string for error message
+ */
+export function validateQuery(args, usage) {
+	if (!args.length || args[0] === "--help") {
+		process.stderr.write(usage);
+		process.exit(1);
+	}
+}
+
+// ============================================================================
+// Output formatting
+// ============================================================================
+
+/**
+ * Truncate answer if short mode is enabled
+ * @param {string} answer - Full answer text
+ * @param {boolean} short - Whether to truncate
+ * @param {number} [maxLen=300] - Maximum length in short mode
+ * @returns {string} Formatted answer
+ */
+export function formatAnswer(answer, short, maxLen = 300) {
+	if (!short || answer.length <= maxLen) return answer;
+	return `${answer.slice(0, maxLen).replace(/\s+\S*$/, "")}…`;
+}
+
+/**
+ * Output JSON result to stdout
+ * @param {object} data - Data to output
+ */
+export function outputJson(data) {
+	process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
+}
+
+/**
+ * Handle and output error, then exit
+ * @param {Error} error - Error to handle
+ */
+export function handleError(error) {
+	process.stderr.write(`Error: ${error.message}\n`);
+	process.exit(1);
+}

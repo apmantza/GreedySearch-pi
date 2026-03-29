@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 // extractors/google-ai.mjs
 // Navigate Google AI Mode (udm=50), wait for answer, return clean answer + sources.
 //
@@ -8,85 +9,68 @@
 // Output (stdout): JSON { answer, sources, query, url }
 // Errors go to stderr only — stdout is always clean JSON for piping.
 
-import { readFileSync, existsSync } from 'fs';
-import { spawn } from 'child_process';
-import { tmpdir } from 'os';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { dismissConsent, handleVerification } from './consent.mjs';
-import { SELECTORS } from './selectors.mjs';
+import {
+	cdp,
+	formatAnswer,
+	getOrOpenTab,
+	handleError,
+	outputJson,
+	parseArgs,
+	validateQuery,
+} from "./common.mjs";
+import { dismissConsent, handleVerification } from "./consent.mjs";
+import { SELECTORS } from "./selectors.mjs";
 
-const __dir = dirname(fileURLToPath(import.meta.url));
-const CDP = join(__dir, '..', 'cdp.mjs');
-const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
+const S = SELECTORS.google;
 
 const STREAM_POLL_INTERVAL = 600;
 const STREAM_STABLE_ROUNDS = 3;
 const STREAM_TIMEOUT = 45000;
 const MIN_ANSWER_LENGTH = 50;
 
-const S = SELECTORS.google;
+// ============================================================================
+// Google AI-specific helpers
+// ============================================================================
 
-// ---------------------------------------------------------------------------
+async function waitForGoogleStreamComplete(tab) {
+	const deadline = Date.now() + STREAM_TIMEOUT;
+	let stableCount = 0;
+	let lastLen = -1;
 
-function cdp(args, timeoutMs = 30000) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('node', [CDP, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
-    let err = '';
-    proc.stdout.on('data', d => out += d);
-    proc.stderr.on('data', d => err += d);
-    const timer = setTimeout(() => { proc.kill(); reject(new Error(`cdp timeout: ${args[0]}`)); }, timeoutMs);
-    proc.on('close', code => {
-      clearTimeout(timer);
-      if (code !== 0) reject(new Error(err.trim() || `cdp exit ${code}`));
-      else resolve(out.trim());
-    });
-  });
-}
+	while (Date.now() < deadline) {
+		await new Promise((r) => setTimeout(r, STREAM_POLL_INTERVAL));
 
-async function getOrOpenTab(tabPrefix) {
-  if (tabPrefix) return tabPrefix;
-  // Always open a fresh tab to avoid SPA navigation issues
-  const list = await cdp(['list']);
-  const anchor = list.split('\n')[0]?.slice(0, 8);
-  if (!anchor) throw new Error('No Chrome tabs found. Is Chrome running with --remote-debugging-port=9222?');
-  const raw = await cdp(['evalraw', anchor, 'Target.createTarget', '{"url":"about:blank"}']);
-  const { targetId } = JSON.parse(raw);
-  await cdp(['list']); // refresh cache
-  return targetId.slice(0, 8);
-}
+		const lenStr = await cdp([
+			"eval",
+			tab,
+			`(document.querySelector('${S.answerContainer}')?.innerText?.length || 0) + ''`,
+		]).catch(() => "0");
 
-async function waitForStreamComplete(tab) {
-  const deadline = Date.now() + STREAM_TIMEOUT;
-  let stableCount = 0;
-  let lastLen = -1;
+		const len = parseInt(lenStr, 10) || 0;
 
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, STREAM_POLL_INTERVAL));
+		if (len >= MIN_ANSWER_LENGTH && len === lastLen) {
+			stableCount++;
+			if (stableCount >= STREAM_STABLE_ROUNDS) return len;
+		} else {
+			stableCount = 0;
+			lastLen = len;
+		}
+	}
 
-    const lenStr = await cdp(['eval', tab,
-      `(document.querySelector('${S.answerContainer}')?.innerText?.length || 0) + ''`
-    ]).catch(() => '0');
-
-    const len = parseInt(lenStr) || 0;
-
-    if (len >= MIN_ANSWER_LENGTH && len === lastLen) {
-      stableCount++;
-      if (stableCount >= STREAM_STABLE_ROUNDS) return len;
-    } else {
-      stableCount = 0;
-      lastLen = len;
-    }
-  }
-
-  if (lastLen >= MIN_ANSWER_LENGTH) return lastLen;
-  throw new Error(`Google AI answer did not stabilise within ${STREAM_TIMEOUT}ms`);
+	if (lastLen >= MIN_ANSWER_LENGTH) return lastLen;
+	throw new Error(
+		`Google AI answer did not stabilise within ${STREAM_TIMEOUT}ms`,
+	);
 }
 
 async function extractAnswer(tab) {
-  const excludeFilter = S.sourceExclude.map(e => `!a.href.includes('${e}')`).join(' && ');
-  const raw = await cdp(['eval', tab, `
+	const excludeFilter = S.sourceExclude
+		.map((e) => `!a.href.includes('${e}')`)
+		.join(" && ");
+	const raw = await cdp([
+		"eval",
+		tab,
+		`
     (function() {
       var el = document.querySelector('${S.answerContainer}');
       if (!el) return JSON.stringify({ answer: '', sources: [] });
@@ -99,64 +83,74 @@ async function extractAnswer(tab) {
         .slice(0, 10);
       return JSON.stringify({ answer, sources });
     })()
-  `]);
-  return JSON.parse(raw);
+  `,
+	]);
+	return JSON.parse(raw);
 }
 
-// ---------------------------------------------------------------------------
+// ============================================================================
+// Main
+// ============================================================================
+
+const USAGE =
+	'Usage: node extractors/google-ai.mjs "<query>" [--tab <prefix>]\n';
 
 async function main() {
-  const args = process.argv.slice(2);
-  if (!args.length || args[0] === '--help') {
-    process.stderr.write('Usage: node extractors/google-ai.mjs "<query>" [--tab <prefix>]\n');
-    process.exit(1);
-  }
+	const args = process.argv.slice(2);
+	validateQuery(args, USAGE);
 
-  const short = args.includes('--short');
-  const rest  = args.filter(a => a !== '--short');
-  const tabFlagIdx = rest.indexOf('--tab');
-  const tabPrefix = tabFlagIdx !== -1 ? rest[tabFlagIdx + 1] : null;
-  const query = tabFlagIdx !== -1
-    ? rest.filter((_, i) => i !== tabFlagIdx && i !== tabFlagIdx + 1).join(' ')
-    : rest.join(' ');
+	const { query, tabPrefix, short } = parseArgs(args);
 
-  try {
-    await cdp(['list']);
-    const tab = await getOrOpenTab(tabPrefix);
+	try {
+		await cdp(["list"]);
+		const tab = await getOrOpenTab(tabPrefix);
 
-    const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&udm=50`;
-    await cdp(['nav', tab, url], 35000);
-    await new Promise(r => setTimeout(r, 1500));
-    await dismissConsent(tab, cdp);
+		const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&udm=50`;
+		await cdp(["nav", tab, url], 35000);
+		await new Promise((r) => setTimeout(r, 1500));
+		await dismissConsent(tab, cdp);
 
-    // If consent redirected us away, navigate back
-    const currentUrl = await cdp(['eval', tab, 'document.location.href']).catch(() => '');
-    if (!currentUrl.includes('google.com/search')) {
-      await cdp(['nav', tab, url], 35000);
-      await new Promise(r => setTimeout(r, 1500));
-    }
+		// If consent redirected us away, navigate back
+		const currentUrl = await cdp(["eval", tab, "document.location.href"]).catch(
+			() => "",
+		);
+		if (!currentUrl.includes("google.com/search")) {
+			await cdp(["nav", tab, url], 35000);
+			await new Promise((r) => setTimeout(r, 1500));
+		}
 
-    // Handle "verify you're human" — auto-click simple buttons, wait for user on hard CAPTCHA
-    const verifyResult = await handleVerification(tab, cdp, 60000);
-    if (verifyResult === 'needs-human') throw new Error('Google verification required — could not be completed automatically');
-    if (verifyResult === 'clicked' || verifyResult === 'cleared-by-user') {
-      // Re-navigate to the search URL after verification
-      await cdp(['nav', tab, url], 35000);
-      await new Promise(r => setTimeout(r, 1500));
-    }
+		// Handle "verify you're human" — auto-click simple buttons, wait for user on hard CAPTCHA
+		const verifyResult = await handleVerification(tab, cdp, 60000);
+		if (verifyResult === "needs-human")
+			throw new Error(
+				"Google verification required — could not be completed automatically",
+			);
+		if (verifyResult === "clicked" || verifyResult === "cleared-by-user") {
+			// Re-navigate to the search URL after verification
+			await cdp(["nav", tab, url], 35000);
+			await new Promise((r) => setTimeout(r, 1500));
+		}
 
-    await waitForStreamComplete(tab);
+		await waitForGoogleStreamComplete(tab);
 
-    const { answer, sources } = await extractAnswer(tab);
-    if (!answer) throw new Error('No answer extracted — Google AI Mode may not have responded');
-    const out = short ? answer.slice(0, 300).replace(/\s+\S*$/, '') + '…' : answer;
+		const { answer, sources } = await extractAnswer(tab);
+		if (!answer)
+			throw new Error(
+				"No answer extracted — Google AI Mode may not have responded",
+			);
 
-    const finalUrl = await cdp(['eval', tab, 'document.location.href']).catch(() => url);
-    process.stdout.write(JSON.stringify({ query, url: finalUrl, answer: out, sources }, null, 2) + '\n');
-  } catch (e) {
-    process.stderr.write(`Error: ${e.message}\n`);
-    process.exit(1);
-  }
+		const finalUrl = await cdp(["eval", tab, "document.location.href"]).catch(
+			() => url,
+		);
+		outputJson({
+			query,
+			url: finalUrl,
+			answer: formatAnswer(answer, short),
+			sources,
+		});
+	} catch (e) {
+		handleError(e);
+	}
 }
 
 main();

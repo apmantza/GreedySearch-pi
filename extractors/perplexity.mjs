@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 // extractors/perplexity.mjs
 // Navigate Perplexity, wait for streaming to complete, return clean answer + sources.
 //
@@ -8,174 +9,118 @@
 // Output (stdout): JSON { answer, sources, query, url }
 // Errors go to stderr only — stdout is always clean JSON for piping.
 
-import { readFileSync, existsSync } from 'fs';
-import { spawn } from 'child_process';
-import { tmpdir } from 'os';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { dismissConsent } from './consent.mjs';
-import { SELECTORS } from './selectors.mjs';
-
-const __dir = dirname(fileURLToPath(import.meta.url));
-const CDP = join(__dir, '..', 'cdp.mjs');
-const PAGES_CACHE = `${tmpdir().replace(/\\/g, '/')}/cdp-pages.json`;
-
-const COPY_POLL_INTERVAL = 600;
-const COPY_TIMEOUT = 30000;
+import {
+	cdp,
+	formatAnswer,
+	getOrOpenTab,
+	handleError,
+	injectClipboardInterceptor,
+	outputJson,
+	parseArgs,
+	parseSourcesFromMarkdown,
+	validateQuery,
+	waitForStreamComplete,
+} from "./common.mjs";
+import { dismissConsent } from "./consent.mjs";
+import { SELECTORS } from "./selectors.mjs";
 
 const S = SELECTORS.perplexity;
+const GLOBAL_VAR = "__pplxClipboard";
 
-// ---------------------------------------------------------------------------
-
-function cdp(args, timeoutMs = 30000) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('node', [CDP, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
-    let err = '';
-    proc.stdout.on('data', d => out += d);
-    proc.stderr.on('data', d => err += d);
-    const timer = setTimeout(() => { proc.kill(); reject(new Error(`cdp timeout: ${args[0]}`)); }, timeoutMs);
-    proc.on('close', code => {
-      clearTimeout(timer);
-      if (code !== 0) reject(new Error(err.trim() || `cdp exit ${code}`));
-      else resolve(out.trim());
-    });
-  });
-}
-
-async function getOrOpenTab(tabPrefix) {
-  if (tabPrefix) return tabPrefix;
-  // Always open a fresh tab to avoid SPA navigation issues
-  const list = await cdp(['list']);
-  const anchor = list.split('\n')[0]?.slice(0, 8);
-  if (!anchor) throw new Error('No Chrome tabs found. Is Chrome running with --remote-debugging-port=9222?');
-  const raw = await cdp(['evalraw', anchor, 'Target.createTarget', '{"url":"about:blank"}']);
-  const { targetId } = JSON.parse(raw);
-  await cdp(['list']); // refresh cache so cdp nav can find the new tab
-  return targetId.slice(0, 8);
-}
-
-async function injectClipboardInterceptor(tab) {
-  await cdp(['eval', tab, `
-    window.__pplxClipboard = null;
-    const _origWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
-    navigator.clipboard.writeText = function(text) {
-      window.__pplxClipboard = text;
-      return _origWriteText(text);
-    };
-    const _origWrite = navigator.clipboard.write.bind(navigator.clipboard);
-    navigator.clipboard.write = async function(items) {
-      try {
-        for (const item of items) {
-          if (item.types && item.types.includes('text/plain')) {
-            const blob = await item.getType('text/plain');
-            window.__pplxClipboard = await blob.text();
-            break;
-          }
-        }
-      } catch(e) {}
-      return _origWrite(items);
-    };
-  `]);
-}
-
-async function waitForGenerationToFinish(tab) {
-  const deadline = Date.now() + COPY_TIMEOUT;
-  let lastLen = -1;
-  let stableCount = 0;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, COPY_POLL_INTERVAL));
-    const lenStr = await cdp(['eval', tab, 'document.body.innerText.length']).catch(() => '0');
-    const currentLen = parseInt(lenStr) || 0;
-    if (currentLen > 0) {
-      if (currentLen === lastLen) {
-        stableCount++;
-        if (stableCount >= 3) return;
-      } else {
-        lastLen = currentLen;
-        stableCount = 0;
-      }
-    }
-  }
-  throw new Error(`Perplexity generation did not finish within ${COPY_TIMEOUT}ms`);
-}
+// ============================================================================
+// Extraction
+// ============================================================================
 
 async function extractAnswer(tab) {
-  await cdp(['eval', tab, `document.querySelector('${S.copyButton}')?.click()`]);
-  await new Promise(r => setTimeout(r, 400));
+	await cdp([
+		"eval",
+		tab,
+		`document.querySelector('${S.copyButton}')?.click()`,
+	]);
+	await new Promise((r) => setTimeout(r, 400));
 
-  const answer = await cdp(['eval', tab, `window.__pplxClipboard || ''`]);
-  if (!answer) throw new Error('Clipboard interceptor returned empty text');
+	const answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	if (!answer) throw new Error("Clipboard interceptor returned empty text");
 
-  // Regex parse Markdown links from clipboard — robust against DOM changes
-  const sources = Array.from(answer.matchAll(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g))
-    .map(m => ({ title: m[1], url: m[2] }))
-    .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
-    .slice(0, 10);
-
-  return { answer: answer.trim(), sources };
+	const sources = parseSourcesFromMarkdown(answer);
+	return { answer: answer.trim(), sources };
 }
 
-// ---------------------------------------------------------------------------
+// ============================================================================
+// Main
+// ============================================================================
+
+const USAGE =
+	'Usage: node extractors/perplexity.mjs "<query>" [--tab <prefix>]\n';
 
 async function main() {
-  const args = process.argv.slice(2);
-  if (!args.length || args[0] === '--help') {
-    process.stderr.write('Usage: node extractors/perplexity.mjs "<query>" [--tab <prefix>]\n');
-    process.exit(1);
-  }
+	const args = process.argv.slice(2);
+	validateQuery(args, USAGE);
 
-  const short = args.includes('--short');
-  const rest  = args.filter(a => a !== '--short');
-  const tabFlagIdx = rest.indexOf('--tab');
-  const tabPrefix = tabFlagIdx !== -1 ? rest[tabFlagIdx + 1] : null;
-  const query = tabFlagIdx !== -1
-    ? rest.filter((_, i) => i !== tabFlagIdx && i !== tabFlagIdx + 1).join(' ')
-    : rest.join(' ');
+	const { query, tabPrefix, short } = parseArgs(args);
 
+	try {
+		// Refresh page list so cache is current
+		await cdp(["list"]);
 
-  try {
-    // Refresh page list so cache is current
-    await cdp(['list']);
+		const tab = await getOrOpenTab(tabPrefix);
 
-    const tab = await getOrOpenTab(tabPrefix);
+		// Navigate to homepage and use the search box (direct ?q= URLs trigger bot redirect)
+		await cdp(["nav", tab, "https://www.perplexity.ai/"], 35000);
+		await dismissConsent(tab, cdp);
 
-    // Navigate to homepage and use the search box (direct ?q= URLs trigger bot redirect)
-    await cdp(['nav', tab, 'https://www.perplexity.ai/'], 35000);
-    await dismissConsent(tab, cdp);
+		// Wait for React app to mount input (up to 8s)
+		const deadline = Date.now() + 8000;
+		while (Date.now() < deadline) {
+			const found = await cdp([
+				"eval",
+				tab,
+				`!!document.querySelector('${S.input}')`,
+			]).catch(() => "false");
+			if (found === "true") break;
+			await new Promise((r) => setTimeout(r, 400));
+		}
+		await new Promise((r) => setTimeout(r, 300));
 
-    // Wait for React app to mount input (up to 8s)
-    const deadline = Date.now() + 8000;
-    while (Date.now() < deadline) {
-      const found = await cdp(['eval', tab, `!!document.querySelector('${S.input}')`]).catch(() => 'false');
-      if (found === 'true') break;
-      await new Promise(r => setTimeout(r, 400));
-    }
-    await new Promise(r => setTimeout(r, 300));
+		await injectClipboardInterceptor(tab, GLOBAL_VAR);
+		await cdp(["click", tab, S.input]);
+		await new Promise((r) => setTimeout(r, 400));
+		await cdp(["type", tab, query]);
+		await new Promise((r) => setTimeout(r, 400));
 
-    await injectClipboardInterceptor(tab);
-    await cdp(['click', tab, S.input]);
-    await new Promise(r => setTimeout(r, 400));
-    await cdp(['type', tab, query]);
-    await new Promise(r => setTimeout(r, 400));
-    // Submit with Enter (most reliable across Chrome instances)
-    await cdp(['eval', tab,
-      `document.querySelector('${S.input}')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,keyCode:13})), 'ok'`
-    ]);
+		// Submit with Enter (most reliable across Chrome instances)
+		await cdp([
+			"eval",
+			tab,
+			`document.querySelector('${S.input}')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,keyCode:13})), 'ok'`,
+		]);
 
-    await waitForGenerationToFinish(tab);
+		await waitForStreamComplete(tab, {
+			timeout: 30000,
+			interval: 600,
+			stableRounds: 3,
+			selector: "document.body",
+		});
 
-    const { answer, sources } = await extractAnswer(tab);
+		const { answer, sources } = await extractAnswer(tab);
 
-    if (!answer) throw new Error('No answer extracted — Perplexity may not have responded');
-    const out = short ? answer.slice(0, 300).replace(/\s+\S*$/, '') + '…' : answer;
+		if (!answer)
+			throw new Error(
+				"No answer extracted — Perplexity may not have responded",
+			);
 
-    const finalUrl = await cdp(['eval', tab, 'document.location.href']).catch(() => '');
-    process.stdout.write(JSON.stringify({ query, url: finalUrl, answer: out, sources }, null, 2) + '\n');
-  } catch (e) {
-    process.stderr.write(`Error: ${e.message}\n`);
-    process.exit(1);
-  }
+		const finalUrl = await cdp(["eval", tab, "document.location.href"]).catch(
+			() => "",
+		);
+		outputJson({
+			query,
+			url: finalUrl,
+			answer: formatAnswer(answer, short),
+			sources,
+		});
+	} catch (e) {
+		handleError(e);
+	}
 }
 
 main();
