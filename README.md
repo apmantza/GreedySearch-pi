@@ -1,8 +1,14 @@
 # GreedySearch for Pi
 
-Pi extension that adds a `greedy_search` tool — fans out queries to Perplexity, Bing Copilot, and Google AI simultaneously and returns AI-synthesized answers with deduped sources. Streams progress as each engine completes.
+Pi extension that adds `greedy_search`, `deep_research`, and `coding_task` tools — multi-engine AI search via browser automation. **NO API KEYS needed.**
+
+Fans out queries to Perplexity, Bing Copilot, and Google AI simultaneously. Returns AI-synthesized answers with deduped sources. Streams progress as each engine completes.
 
 Forked from [GreedySearch-claude](https://github.com/apmantza/GreedySearch-claude).
+
+## Quick Note
+
+**No API keys required** — this tool uses Chrome DevTools Protocol (CDP) to interact with search engines directly through a browser. It launches its own isolated Chrome instance, so it won't interfere with your main browser session.
 
 ## Install
 
@@ -193,6 +199,14 @@ Sources are now extracted by regex-parsing Markdown links (`[title](url)`) from 
 - `skills/greedy-search/SKILL.md` — skill file that guides the model on when/how to use greedy_search
 
 ## Changelog
+
+### v1.5.0 (2026-03-29)
+
+- **Code extraction fixed** — `coding_task` now uses clipboard interception to preserve markdown code blocks (was losing them via DOM scraping)
+- **Chrome targeting hardened** — all tools now consistently target the dedicated GreedySearch Chrome via `CDP_PROFILE_DIR`, preventing fallback to user's main Chrome session
+- **Shared utilities** — extracted ~220 lines of duplicate code from extractors into `common.mjs` (cdp wrapper, tab management, clipboard interception)
+- **Documentation leaner** — skill documentation reduced 61% (180 → 70 lines) while preserving all decision-making info
+- **NO API KEYS** — updated messaging to emphasize this works via browser automation, no API keys needed
 
 ### v1.4.2 (2026-03-25)
 

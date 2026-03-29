@@ -645,8 +645,12 @@ function runExtractor(
 	query,
 	tabPrefix = null,
 	short = false,
-	timeoutMs = 90000,
+	timeoutMs = null, // null = auto-select based on engine
 ) {
+	// Gemini is slower - use longer timeout
+	if (timeoutMs === null) {
+		timeoutMs = script.includes("gemini") ? 180000 : 90000;
+	}
 	const extraArgs = [
 		...(tabPrefix ? ["--tab", tabPrefix] : []),
 		...(short ? ["--short"] : []),
