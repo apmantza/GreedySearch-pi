@@ -205,6 +205,11 @@ Sources are now extracted by regex-parsing Markdown links (`[title](url)`) from 
 
 ## Changelog
 
+### v1.6.1 (2026-03-31)
+- **Single-engine full answers by default** — `engine: "google"` (or any single engine) now returns complete answers instead of truncated previews. Multi-engine (`all`) still truncates to save tokens during synthesis.
+- **Codebase refactored** — extracted 438 lines from `index.ts` into modular formatters (`src/formatters/`) reducing cognitive complexity from 360 to ~60 and maintainability index from 11.2 to ~40+
+- **Removed codebase search confusion** — clarified that `greedy_search` is WEB SEARCH ONLY (not for searching local code)
+
 ### v1.6.0 (2026-03-29)
 - **Merged deep_research into greedy_search** — new `depth` parameter: `fast` (1 engine), `standard` (3 engines + synthesis), `deep` (3 engines + fetch + synthesis + confidence)
 - **Simpler API** — one tool with clear speed/quality tradeoffs instead of separate tools with overlapping flags

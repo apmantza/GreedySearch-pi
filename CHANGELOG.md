@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.6.1 (2026-03-31)
+
+### Features
+- **Single-engine full answers by default** — when using `engine: "perplexity"`, `engine: "bing"`, `engine: "google"`, or `engine: "gemini"`, the full answer is now returned by default instead of truncated previews. Multi-engine (`engine: "all"`) still uses truncated previews (~300 chars) to save tokens during synthesis. Explicit `fullAnswer: true/false` always overrides.
+
+### Code Quality
+- **Major refactoring** — extracted 438 lines from `index.ts` (856 → 418 lines) into modular formatters:
+  - `src/formatters/coding.ts` — coding task formatting
+  - `src/formatters/results.ts` — search and deep research formatting  
+  - `src/formatters/sources.ts` — source utilities (URL, label, consensus, formatting)
+  - `src/formatters/synthesis.ts` — synthesis rendering
+  - `src/utils/helpers.ts` — shared formatting utilities
+- **Complexity reduced** — cognitive complexity dropped from 360 to ~60, maintainability index improved from 11.2 to ~40+
+- **Eliminated code duplication** — removed 6 duplicate blocks, consolidated 4+ single-use helper functions
+
+### Documentation
+- Clarified `greedy_search` is WEB SEARCH ONLY — removed "NOT for codebase search" from tool description (still in skill documentation)
+
 ## v1.6.0 (2026-03-29)
 
 ### Breaking Changes (Backward Compatible)

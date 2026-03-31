@@ -1,7 +1,30 @@
 ---
 name: greedy-search
-description: Multi-engine AI web search — greedy_search with three depth levels (fast/standard/deep). Use for high-quality research where training data may be stale or single-engine results are insufficient. NO API KEYS needed.
+description: Multi-engine AI **WEB SEARCH** tool — NOT for codebase search. Use greedy_search for high-quality web research where training data may be stale or single-engine results are insufficient. Searches Perplexity, Bing, Google via browser automation. NO API KEYS needed.
 ---
+
+# ⚠️ WEB SEARCH ONLY — NOT CODEBASE SEARCH
+
+**`greedy_search` searches the live web**, not your local codebase.
+
+| Tool | Searches |
+|------|----------|
+| `greedy_search` | **Live web** (Perplexity, Bing, Google) |
+| `ast_grep_search` | **Local codebase** — use this for code patterns |
+| `bash` with `grep/rg` | **Local codebase** — use this for text search |
+
+**DO NOT use `greedy_search` for:**
+- Finding functions in your codebase
+- Searching local files
+- Code review of your project
+- Understanding project structure
+
+**DO use `greedy_search` for:**
+- Library documentation
+- Recent framework changes
+- Error message explanations
+- Best practices research
+- Current events/news
 
 # GreedySearch Tools
 
@@ -43,11 +66,22 @@ Multi-engine AI search (Perplexity, Bing, Google) with three depth levels.
 - `google`: Broad coverage
 - `gemini`: Different training data
 
-### Examples
+### Examples — Web Research Only
 
+**✅ GOOD — Web research:**
 ```greedy_search({ query: "what changed in React 19", depth: "fast" })```
 ```greedy_search({ query: "best auth patterns for SaaS", depth: "deep" })```
 ```greedy_search({ query: "Prisma vs Drizzle 2026", depth: "standard", fullAnswer: true })```
+
+**❌ WRONG — Don't use for codebase search:**
+```javascript
+// DON'T: Searching your own codebase
+// greedy_search({ query: "find UserService class" })  // ❌ Won't find it!
+
+// DO: Use these instead for codebase search:
+// ast_grep_search({ pattern: "class UserService", lang: "typescript" })
+// bash({ command: "rg 'class UserService' --type ts" })
+```
 
 ### Legacy
 

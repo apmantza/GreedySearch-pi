@@ -8,6 +8,8 @@
 //
 // Output (stdout): JSON { answer, sources, query, url }
 // Errors go to stderr only — stdout is always clean JSON for piping.
+//
+// TODO: Refactor - this file has 42 lines duplicated with google-ai.mjs (line 28)
 
 import {
 	cdp,
