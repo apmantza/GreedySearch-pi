@@ -11,6 +11,13 @@
 		"url": "git+https://github.com/apmantza/GreedySearch-pi.git"
 	},
 	"license": "MIT",
+	"files": [
+		"index.ts",
+		"src/",
+		"skills/",
+		"CHANGELOG.md",
+		"README.md"
+	],
 	"pi": {
 		"extensions": [
 			"./index.ts"

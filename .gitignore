@@ -2,7 +2,9 @@ node_modules/
 results/
 .pi-lens/
 .claude/
-newfeaturesideas.md
+
+# Compiled JavaScript files (TypeScript source is what matters)
+*.mjs
 
 # OS files
 .DS_Store
