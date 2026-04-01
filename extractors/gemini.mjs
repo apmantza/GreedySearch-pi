@@ -48,8 +48,29 @@ async function typeIntoGemini(tab, text) {
 
 async function waitForCopyButton(tab, timeout = 120000) {
 	const deadline = Date.now() + timeout;
+	let scrollCount = 0;
 	while (Date.now() < deadline) {
 		await new Promise((r) => setTimeout(r, 600));
+
+		// Gentle scroll every ~6 seconds to keep page "active" (anti-bot evasion)
+		if (++scrollCount % 10 === 0) {
+			await cdp([
+				"eval",
+				tab,
+				`
+				(function() {
+					const chat = document.querySelector('chat-window, [role="main"], main') || document.body;
+					const currentScroll = chat.scrollTop || window.scrollY || 0;
+					const scrollHeight = chat.scrollHeight || document.body.scrollHeight || 0;
+					// Small random scroll movement to mimic human reading
+					const jitter = Math.floor(Math.random() * 50) - 25;
+					const targetScroll = Math.min(scrollHeight, Math.max(0, currentScroll + jitter));
+					chat.scrollTo ? chat.scrollTo({ top: targetScroll, behavior: 'smooth' }) : window.scrollTo(0, targetScroll);
+				})()
+			`,
+			]).catch(() => null);
+		}
+
 		const found = await cdp([
 			"eval",
 			tab,
