@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.6.2 (2026-04-01)
+
+### Fixes
+- **Anti-bot detection evasion** — Gemini synthesis now performs gentle scroll every ~6 seconds while waiting for the copy button. This prevents the button from hanging due to anti-bot "human activity" checks.
+
 ## v1.6.1 (2026-03-31)
 
 ### Features
