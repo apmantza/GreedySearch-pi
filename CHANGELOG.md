@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.6.4 (2026-04-02)
+
+### Fixes
+- **Gemini scroll-to-bottom** — Changed from small random jitter scrolls to actual bottom-of-page scrolls every ~6 seconds while waiting for the copy button. This ensures lazy-loaded content is triggered and the full answer is captured.
+- **Restored missing files** — `.mjs` source files (extractors, search.mjs, launch.mjs, etc.) were incorrectly removed in v1.6.2 cleanup; now properly tracked again.
+
+## v1.6.3 (2026-04-02)
+
+### Fixes
+- **Debug output removed** — Cleaned up stderr passthrough that was causing CDP connection issues in some environments.
+
 ## v1.6.2 (2026-04-01)
 
 ### Fixes
