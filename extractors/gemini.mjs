@@ -54,9 +54,6 @@ async function waitForCopyButton(tab, timeout = 120000) {
 
 		// Scroll to bottom every ~6 seconds to trigger lazy loading and ensure copy button appears
 		if (++scrollCount % 10 === 0) {
-			process.stderr.write(
-				`[Gemini] Scrolling to bottom (check ${scrollCount})...\n`,
-			);
 			await cdp([
 				"eval",
 				tab,
@@ -64,17 +61,11 @@ async function waitForCopyButton(tab, timeout = 120000) {
 				(function() {
 					const chat = document.querySelector('chat-window, [role="main"], main') || document.body;
 					const scrollHeight = chat.scrollHeight || document.body.scrollHeight || 0;
-					const currentScroll = chat.scrollTop || window.scrollY || 0;
 					// Scroll to bottom to ensure all content is loaded
 					chat.scrollTo ? chat.scrollTo({ top: scrollHeight, behavior: 'smooth' }) : window.scrollTo(0, scrollHeight);
-					return { scrolled: true, from: currentScroll, to: scrollHeight, height: scrollHeight };
 				})()
 			`,
-			])
-				.then((result) => {
-					process.stderr.write(`[Gemini] Scroll result: ${result}\n`);
-				})
-				.catch(() => null);
+			]).catch(() => null);
 		}
 
 		const found = await cdp([
@@ -82,12 +73,7 @@ async function waitForCopyButton(tab, timeout = 120000) {
 			tab,
 			`!!document.querySelector('${S.copyButton}')`,
 		]).catch(() => "false");
-		if (found === "true") {
-			process.stderr.write(
-				`[Gemini] Copy button found after ${scrollCount} checks\n`,
-			);
-			return;
-		}
+		if (found === "true") return;
 	}
 	throw new Error(`Gemini copy button did not appear within ${timeout}ms`);
 }

@@ -6,9 +6,13 @@ results/
 # Compiled JavaScript files (TypeScript source is what matters)
 *.mjs
 
-# BUT: keep source files that are native .mjs (not compiled from TS)
+# BUT: keep extractor source files (they're native .mjs, not compiled)
 !extractors/*.mjs
 !search.mjs
+!launch.mjs
+!cdp.mjs
+!test.mjs
+!coding-task.mjs
 
 # OS files
 .DS_Store
