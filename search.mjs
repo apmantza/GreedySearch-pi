@@ -849,11 +849,7 @@ async function synthesizeWithGemini(
 		let out = "";
 		let err = "";
 		proc.stdout.on("data", (d) => (out += d));
-		proc.stderr.on("data", (d) => {
-			err += d;
-			// Pass through stderr for debugging
-			process.stderr.write(d);
-		});
+		proc.stderr.on("data", (d) => (err += d));
 		const t = setTimeout(() => {
 			proc.kill();
 			reject(new Error("Gemini synthesis timed out after 180s"));
