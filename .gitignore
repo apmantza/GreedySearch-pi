@@ -6,6 +6,9 @@ results/
 # Compiled JavaScript files (TypeScript source is what matters)
 *.mjs
 
+# BUT: keep extractor source files (they're native .mjs, not compiled)
+!extractors/*.mjs
+
 # OS files
 .DS_Store
 Thumbs.db
