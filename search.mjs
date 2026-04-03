@@ -95,6 +95,143 @@ const NEWS_HOSTS = [
 	"zdnet.com",
 ];
 
+/**
+ * Infer preferred domains based on query keywords
+ * Returns domains that should be boosted for this query
+ */
+function inferPreferredDomains(query) {
+	const normalized = query.toLowerCase();
+	const matches = [];
+
+	if (
+		normalized.includes("openai") ||
+		normalized.includes("gpt") ||
+		normalized.includes("chatgpt")
+	) {
+		matches.push("openai.com", "platform.openai.com", "help.openai.com");
+	}
+	if (normalized.includes("anthropic") || normalized.includes("claude")) {
+		matches.push("anthropic.com", "docs.anthropic.com");
+	}
+	if (normalized.includes("bun")) {
+		matches.push("bun.sh", "bun.com");
+	}
+	if (normalized.includes("next.js") || normalized.includes("nextjs")) {
+		matches.push("nextjs.org", "vercel.com");
+	}
+	if (normalized.includes("playwright")) {
+		matches.push("playwright.dev");
+	}
+	if (normalized.includes("supabase")) {
+		matches.push("supabase.com", "supabase.io");
+	}
+	if (normalized.includes("prisma")) {
+		matches.push("prisma.io");
+	}
+	if (normalized.includes("tailwind")) {
+		matches.push("tailwindcss.com");
+	}
+	if (normalized.includes("vite")) {
+		matches.push("vitejs.dev", "vite.dev");
+	}
+	if (normalized.includes("astro")) {
+		matches.push("astro.build");
+	}
+	if (normalized.includes("svelte")) {
+		matches.push("svelte.dev");
+	}
+	if (normalized.includes("solid")) {
+		matches.push("solidjs.com");
+	}
+	if (normalized.includes("vue") || normalized.includes("nuxt")) {
+		matches.push("vuejs.org", "nuxt.com");
+	}
+	if (normalized.includes("react") || normalized.includes("react native")) {
+		matches.push("react.dev", "reactnative.dev");
+	}
+	if (normalized.includes("angular")) {
+		matches.push("angular.io", "angular.dev");
+	}
+	if (normalized.includes("node.js") || normalized.includes("nodejs")) {
+		matches.push("nodejs.org", "nodejs.dev", "npmjs.com");
+	}
+	if (normalized.includes("deno")) {
+		matches.push("deno.land", "deno.com");
+	}
+	if (normalized.includes("fresh")) {
+		matches.push("fresh.deno.dev");
+	}
+	if (normalized.includes("typescript") || normalized.includes("ts")) {
+		matches.push("typescriptlang.org");
+	}
+	if (normalized.includes("python")) {
+		matches.push("python.org", "docs.python.org");
+	}
+	if (normalized.includes("rust")) {
+		matches.push("rust-lang.org", "docs.rs", "crates.io");
+	}
+	if (normalized.includes("go") || normalized.includes("golang")) {
+		matches.push("go.dev", "golang.org", "pkg.go.dev");
+	}
+	if (normalized.includes("zig")) {
+		matches.push("ziglang.org");
+	}
+	if (normalized.includes("docker")) {
+		matches.push("docker.com", "docs.docker.com", "hub.docker.com");
+	}
+	if (normalized.includes("kubernetes") || normalized.includes("k8s")) {
+		matches.push("kubernetes.io", "k8s.io");
+	}
+	if (normalized.includes("postgres") || normalized.includes("postgresql")) {
+		matches.push("postgresql.org", "neon.tech", "supabase.com");
+	}
+	if (normalized.includes("redis")) {
+		matches.push("redis.io");
+	}
+	if (normalized.includes("sqlite")) {
+		matches.push("sqlite.org");
+	}
+	if (normalized.includes("cloudflare")) {
+		matches.push("developers.cloudflare.com", "cloudflare.com");
+	}
+	if (normalized.includes("vercel")) {
+		matches.push("vercel.com", "nextjs.org");
+	}
+	if (normalized.includes("netlify")) {
+		matches.push("netlify.com", "docs.netlify.com");
+	}
+	if (normalized.includes("stripe")) {
+		matches.push("stripe.com", "docs.stripe.com");
+	}
+	if (normalized.includes("github")) {
+		matches.push("github.com", "docs.github.com");
+	}
+	if (normalized.includes("gitlab")) {
+		matches.push("gitlab.com", "docs.gitlab.com");
+	}
+	if (normalized.includes("aws")) {
+		matches.push("aws.amazon.com", "docs.aws.amazon.com");
+	}
+	if (normalized.includes("azure")) {
+		matches.push("azure.microsoft.com", "learn.microsoft.com");
+	}
+	if (normalized.includes("gcp") || normalized.includes("google cloud")) {
+		matches.push("cloud.google.com", "developers.google.com");
+	}
+	if (normalized.includes("gemini") || normalized.includes("google ai")) {
+		matches.push("ai.google.dev", "developers.google.com");
+	}
+
+	return [...new Set(matches)];
+}
+
+/**
+ * Check if a domain matches a preferred domain (exact or subdomain)
+ */
+function domainMatches(hostname, candidate) {
+	return hostname === candidate || hostname.endsWith(`.${candidate}`);
+}
+
 function trimText(text = "", maxChars = 240) {
 	const clean = String(text).replace(/\s+/g, " ").trim();
 	if (clean.length <= maxChars) return clean;
@@ -221,9 +358,12 @@ function bestRank(source) {
 	return ranks.length ? Math.min(...ranks) : 99;
 }
 
-function buildSourceRegistry(out) {
+function buildSourceRegistry(out, query = "") {
 	const seen = new Map();
 	const engineOrder = ["perplexity", "bing", "google"];
+
+	// Get preferred domains for this query
+	const preferredDomains = inferPreferredDomains(query);
 
 	for (const engine of engineOrder) {
 		const result = out[engine];
@@ -237,6 +377,35 @@ function buildSourceRegistry(out) {
 			const title = normalizeSourceTitle(source.title || "");
 			const domain = getDomain(canonicalUrl);
 			const sourceType = classifySourceType(domain, title, canonicalUrl);
+
+			// Calculate smart score boost
+			let smartScore = 0;
+
+			// Boost preferred domains for this query
+			if (preferredDomains.some((pd) => domainMatches(domain, pd))) {
+				smartScore += 10; // Strong boost for query-relevant official docs
+			}
+
+			// Boost docs/developer sites
+			if (sourceType === "official-docs") {
+				smartScore += 3;
+			}
+
+			// Boost based on URL path patterns
+			const lowerUrl = canonicalUrl.toLowerCase();
+			if (
+				/\/docs\/|\/documentation\/|\.dev\/|\/api\/|\/reference\//.test(
+					lowerUrl,
+				)
+			) {
+				smartScore += 2;
+			}
+
+			// Penalize community/discussion sites for technical queries
+			if (sourceType === "community" && preferredDomains.length > 0) {
+				smartScore -= 2;
+			}
+
 			const existing = seen.get(canonicalUrl) || {
 				id: "",
 				canonicalUrl,
@@ -248,6 +417,7 @@ function buildSourceRegistry(out) {
 				perEngine: {},
 				sourceType,
 				isOfficial: sourceType === "official-docs",
+				smartScore: 0,
 			};
 
 			existing.title = pickPreferredTitle(existing.title, title);
@@ -255,6 +425,7 @@ function buildSourceRegistry(out) {
 			existing.sourceType = existing.sourceType || sourceType;
 			existing.isOfficial =
 				existing.isOfficial || sourceType === "official-docs";
+			existing.smartScore = Math.max(existing.smartScore, smartScore);
 
 			if (!existing.engines.includes(engine)) {
 				existing.engines.push(engine);
@@ -277,7 +448,13 @@ function buildSourceRegistry(out) {
 			engineCount: source.engines.length,
 		}))
 		.sort((a, b) => {
+			// Primary: smart score (query-aware domain boosting)
+			if (b.smartScore !== a.smartScore) return b.smartScore - a.smartScore;
+
+			// Secondary: consensus (sources found by more engines)
 			if (b.engineCount !== a.engineCount) return b.engineCount - a.engineCount;
+
+			// Tertiary: source type priority
 			if (
 				sourceTypePriority(b.sourceType) !== sourceTypePriority(a.sourceType)
 			) {
@@ -285,7 +462,10 @@ function buildSourceRegistry(out) {
 					sourceTypePriority(b.sourceType) - sourceTypePriority(a.sourceType)
 				);
 			}
+
+			// Quaternary: best rank across engines
 			if (bestRank(a) !== bestRank(b)) return bestRank(a) - bestRank(b);
+
 			return a.domain.localeCompare(b.domain);
 		})
 		.slice(0, 12)
@@ -294,8 +474,12 @@ function buildSourceRegistry(out) {
 			id: `S${index + 1}`,
 			title: source.title || source.domain || source.canonicalUrl,
 		}));
+	id: `S${index + 1}`, title;
+	: source.title || source.domain || source.canonicalUrl,
+}
+))
 
-	return sources;
+return sources;
 }
 
 function mergeFetchDataIntoSources(sources, fetchedSources) {
@@ -1199,7 +1383,7 @@ async function main() {
 			await closeTabs(tabs);
 
 			// Build a canonical source registry across all engines
-			out._sources = buildSourceRegistry(out);
+			out._sources = buildSourceRegistry(out, query);
 
 			// Source fetching: default for all "all" searches (was deep-research only)
 			if (depth !== "fast" && out._sources.length > 0) {
