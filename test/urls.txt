@@ -1,0 +1,19 @@
+# Test URLs for HTTP vs Browser comparison
+# One URL per line, # for comments
+
+# Documentation (should work well with HTTP)
+https://docs.python.org/3/library/os.html
+https://docs.python.org/3/tutorial/index.html
+https://developer.mozilla.org/en-US/docs/Web/JavaScript
+https://en.wikipedia.org/wiki/Node.js
+https://docs.npmjs.com/about-npm
+
+# GitHub (should work with HTTP)
+https://github.com/nodejs/node/blob/main/README.md
+https://github.com/expressjs/express/blob/master/Readme.md
+
+# Blogs and articles
+https://blog.mozilla.org/en/products/firefox/
+
+# Potentially JS-heavy (may need browser)
+https://react.dev/learn/thinking-in-react
