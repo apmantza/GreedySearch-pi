@@ -310,7 +310,7 @@ function mergeFetchDataIntoSources(sources, fetchedSources) {
 			title: title || source.title,
 			fetch: {
 				attempted: true,
-				ok: !fetched.error,
+				ok: !fetched.error && fetched.contentChars > 100,
 				status: fetched.status || null,
 				finalUrl: fetched.finalUrl || fetched.url || source.canonicalUrl,
 				contentType: fetched.contentType || "",
@@ -318,6 +318,8 @@ function mergeFetchDataIntoSources(sources, fetchedSources) {
 				title: fetched.title || "",
 				snippet: fetched.snippet || "",
 				contentChars: fetched.contentChars || 0,
+				source: fetched.source || "unknown", // "http" | "browser"
+				duration: fetched.duration || 0,
 				error: fetched.error || "",
 			},
 		};
