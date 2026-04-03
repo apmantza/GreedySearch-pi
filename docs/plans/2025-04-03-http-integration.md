@@ -288,7 +288,7 @@ if (
 With:
 
 ```javascript
-// Depth modes: fast (no synthesis), standard (synthesis+fetch), research (synthesis+more fetch)
+// Depth modes: fast (no synthesis/fetch), standard (synthesis+fetch 5 sources)
 const depthIdx = args.indexOf("--depth");
 let depth = "standard"; // DEFAULT: all "all" searches now include synthesis + source fetch
 
@@ -305,9 +305,9 @@ if (engineArg !== "all" && depthIdx === -1 && !args.includes("--fast")) {
 	depth = "fast";
 }
 
-// --deep-research flag now just means "research" depth (more sources)
+// --deep-research flag maps to standard (backward compat)
 if (args.includes("--deep-research")) {
-	depth = "research";
+	depth = "standard";
 }
 ```
 
@@ -359,11 +359,8 @@ With:
 ```javascript
 // Source fetching: default for all "all" searches (was deep-research only)
 if (depth !== "fast" && out._sources.length > 0) {
-	const fetchCount = depth === "research" ? 8 : 5; // More sources in research mode
-	const maxChars = depth === "research" ? 12000 : 8000;
-
 	process.stderr.write("PROGRESS:source-fetch:start\n");
-	const fetchedSources = await fetchMultipleSources(out._sources, fetchCount, maxChars);
+	const fetchedSources = await fetchMultipleSources(out._sources, 5, 8000);
 
 	out._sources = mergeFetchDataIntoSources(out._sources, fetchedSources);
 	out._fetchedSources = fetchedSources;
@@ -601,14 +598,6 @@ Skip source fetching and synthesis for quick answers:
 
 ```bash
 node search.mjs all "quick question" --fast
-```
-
-### Deeper Research
-
-Fetch more sources (8 vs 5) with longer content:
-
-```bash
-node search.mjs all "complex question" --depth research
 ```
 ```
 
