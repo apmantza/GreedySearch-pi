@@ -32,6 +32,7 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { fetchSourceHttp, shouldUseBrowser } from "./src/fetcher.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const CDP = join(__dir, "cdp.mjs");
