@@ -1,8 +1,12 @@
 .claude/
 .pi-lens/
 node_modules/
+.ruff_cache/
+.git/
+.gitignore
 *.bak
 results/
+test/
 test.mjs
 test.sh
-.git/
+package-lock.json

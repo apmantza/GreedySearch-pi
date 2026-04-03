@@ -1106,6 +1106,7 @@ async function main() {
 			a !== "--deep-research" &&
 			a !== "--inline" &&
 			a !== "--depth" &&
+			a !== "--out" &&
 			(depthIdx === -1 || i !== depthIdx + 1) &&
 			(outIdx === -1 || i !== outIdx + 1),
 	);
