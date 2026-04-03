@@ -88,8 +88,8 @@ export async function fetchSourceHttp(url, options = {}) {
 
 		const html = await response.text();
 
-		// Quick bot detection check
-		const quickCheck = detectBotBlock(response.status, html);
+		// Quick bot detection check (pass both original and final URL for redirect detection)
+		const quickCheck = detectBotBlock(response.status, html, finalUrl, url);
 		if (quickCheck.blocked) {
 			return {
 				ok: false,
@@ -103,6 +103,19 @@ export async function fetchSourceHttp(url, options = {}) {
 
 		// Extract content with Readability
 		const extracted = extractContent(html, finalUrl);
+
+		// Quality check: if content looks suspicious or too short, recommend browser
+		const quality = checkContentQuality(extracted);
+		if (!quality.ok) {
+			return {
+				ok: false,
+				url,
+				finalUrl,
+				status: response.status,
+				error: `Low quality content: ${quality.reason}`,
+				needsBrowser: true,
+			};
+		}
 
 		return {
 			ok: true,
@@ -134,47 +147,148 @@ export async function fetchSourceHttp(url, options = {}) {
 
 /**
  * Detect if HTTP response indicates bot blocking
+ * Checks first 30KB of HTML for performance
  */
-function detectBotBlock(status, html) {
-	const lower = html.toLowerCase();
+function detectBotBlock(status, html, finalUrl, originalUrl) {
 	const title =
 		html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.toLowerCase() || "";
+	const sample = html.slice(0, 30000).toLowerCase();
+	const combined = `${title} ${sample}`;
 
 	// Status-based blocks
-	if (status === 403 || status === 429) {
+	if (status === 403 || status === 429 || status === 503) {
 		return { blocked: true, reason: `HTTP ${status}` };
 	}
 
-	// Content-based blocks
+	// Content-based blocks - more specific patterns to avoid false positives
 	const blockSignals = [
+		// Captcha: must be in context of challenge (not just mentioned on page)
 		{
-			pattern: /captcha|i'm not a robot|verify you are human/i,
+			pattern: /class=["'][^"']*captcha["']|<div[^>]*id=["']captcha/i,
 			reason: "captcha",
 		},
-		{ pattern: /access denied|accessDenied|blocked/i, reason: "access denied" },
 		{
-			pattern: /just a moment.{0,50}checking your browser/i,
+			pattern: /g-recaptcha|data-sitekey|i['"]m not a robot/i,
+			reason: "captcha",
+		},
+
+		// Cloudflare challenge pages
+		{
+			pattern:
+				/checking your browser.{0,100}please wait|cf-browser-verification/i,
 			reason: "cloudflare challenge",
 		},
 		{
-			pattern: /enable javascript|javascript is required/i,
-			reason: "requires javascript",
+			pattern:
+				/just a moment.{0,50}security check|ddos protection by cloudflare/i,
+			reason: "cloudflare challenge",
+		},
+
+		// Bot detection
+		{
+			pattern: /unusual traffic.{0,50}from your computer network/i,
+			reason: "unusual traffic",
 		},
 		{
-			pattern: /unusual traffic|unusual activity/i,
-			reason: "unusual traffic detection",
+			pattern: /bot detected|automated.{0,20}request/i,
+			reason: "bot detection",
 		},
-		{ pattern: /bot detected|automated request/i, reason: "bot detection" },
+
+		// JavaScript requirements (specific patterns)
+		{
+			pattern:
+				/enable\s+javascript\s+to\s+view|javascript\s+is\s+required.{0,50}enabled/i,
+			reason: "requires javascript",
+		},
+
+		// Access denied
+		{ pattern: /access denied|accessdenied/i, reason: "access denied" },
 	];
 
-	const combined = `${title} ${lower.slice(0, 10000)}`;
 	for (const signal of blockSignals) {
 		if (signal.pattern.test(combined)) {
 			return { blocked: true, reason: signal.reason };
 		}
 	}
 
+	// Check for login redirect (different hostname, auth patterns)
+	const loginRedirect = detectLoginRedirect(originalUrl, finalUrl, html);
+	if (loginRedirect) {
+		return { blocked: true, reason: loginRedirect };
+	}
+
 	return { blocked: false };
+}
+
+/** Known authentication/login domains. */
+const AUTH_DOMAINS = [
+	"accounts.google.com",
+	"login.microsoftonline.com",
+	"login.live.com",
+	"auth0.com",
+	"okta.com",
+	"auth.mozilla.auth0.com",
+	"id.atlassian.com",
+];
+
+/** Hostname prefixes that indicate an auth/login service. */
+const AUTH_HOSTNAME_PREFIXES = [
+	"login.",
+	"signin.",
+	"auth.",
+	"sso.",
+	"accounts.",
+	"idp.",
+];
+
+/** Content patterns that indicate a login wall when combined with a hostname redirect. */
+const LOGIN_CONTENT_PATTERNS = [
+	"sign in to continue",
+	"log in to continue",
+	"authentication required",
+	"create an account to continue",
+	"subscribe to continue reading",
+	"members only",
+];
+
+/**
+ * Detects redirect-to-login pages: sites that return 200 but redirect to an
+ * auth domain or serve a login form instead of the requested content.
+ */
+function detectLoginRedirect(requestedUrl, finalUrl, html) {
+	try {
+		const requested = new URL(requestedUrl);
+		const final = new URL(finalUrl);
+
+		// Same hostname = not a redirect to login
+		if (requested.hostname.toLowerCase() === final.hostname.toLowerCase()) {
+			return undefined;
+		}
+
+		const finalHost = final.hostname.toLowerCase();
+
+		// Check for known auth domains
+		if (
+			AUTH_DOMAINS.some((d) => finalHost === d || finalHost.endsWith(`.${d}`))
+		) {
+			return `redirected to login (${final.hostname})`;
+		}
+
+		// Check for auth-related hostname prefixes
+		if (AUTH_HOSTNAME_PREFIXES.some((p) => finalHost.startsWith(p))) {
+			return `redirected to login (${final.hostname})`;
+		}
+
+		// Check for login content patterns (only when redirected)
+		const sample = html.slice(0, 20000).toLowerCase();
+		if (LOGIN_CONTENT_PATTERNS.some((p) => sample.includes(p))) {
+			return `redirected to login page (${final.hostname})`;
+		}
+	} catch {
+		// URL parsing failures are not login redirects
+	}
+
+	return undefined;
 }
 
 /**
@@ -236,6 +350,60 @@ function extractContent(html, url) {
 		markdown: "",
 		excerpt: "",
 	};
+}
+
+/**
+ * Check if extracted content quality is sufficient
+ * Returns { ok: true } or { ok: false, reason: string }
+ */
+function checkContentQuality(extracted) {
+	const markdown = extracted.markdown.trim().toLowerCase();
+	const title = (extracted.title || "").toLowerCase();
+
+	// Minimum content length check
+	if (extracted.markdown.trim().length < 100) {
+		return { ok: false, reason: "content too short (< 100 chars)" };
+	}
+
+	// Suspicious content patterns that indicate bot block or incomplete extraction
+	const suspiciousPatterns = [
+		{ pattern: /\bloading\b.{0,50}\bplease wait\b/i, desc: "loading page" },
+		{
+			pattern: /please\s+ensure\s+javascript\s+is\s+enabled/i,
+			desc: "requires javascript",
+		},
+		{
+			pattern: /enable\s+javascript\s+to\s+view/i,
+			desc: "requires javascript",
+		},
+		{
+			pattern: /just\s+a\s+moment\b/i,
+			desc: "cloudflare challenge detected in content",
+		},
+		{ pattern: /verify\s+you\s+are\s+human/i, desc: "human verification" },
+		{ pattern: /captcha\s+required/i, desc: "captcha in extracted content" },
+		{ pattern: /access\s+denied/i, desc: "access denied in content" },
+		{
+			pattern: /^\s*sign\s+in\s*$|^\s*log\s+in\s*$/im,
+			desc: "login form only",
+		},
+	];
+
+	for (const { pattern, desc } of suspiciousPatterns) {
+		if (pattern.test(markdown)) {
+			return { ok: false, reason: desc };
+		}
+	}
+
+	// Title-based checks
+	if (
+		title.includes("just a moment") ||
+		title.includes("checking your browser")
+	) {
+		return { ok: false, reason: "cloudflare challenge page detected in title" };
+	}
+
+	return { ok: true };
 }
 
 /**
