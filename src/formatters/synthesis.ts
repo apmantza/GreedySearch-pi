@@ -89,12 +89,3 @@ export function renderSynthesis(
 		lines.push("");
 	}
 }
-
-/**
- * Format agreement level display
- * Note: Also in helpers.ts for shared use
- */
-function formatAgreementLevelLocal(level: string): string {
-	if (!level) return "Mixed";
-	return level.charAt(0).toUpperCase() + level.slice(1);
-}
