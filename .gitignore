@@ -13,6 +13,7 @@ results/
 !cdp.mjs
 !test.mjs
 !coding-task.mjs
+!src/**/*.mjs
 
 # OS files
 .DS_Store
