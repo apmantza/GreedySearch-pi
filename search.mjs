@@ -474,12 +474,8 @@ function buildSourceRegistry(out, query = "") {
 			id: `S${index + 1}`,
 			title: source.title || source.domain || source.canonicalUrl,
 		}));
-	id: `S${index + 1}`, title;
-	: source.title || source.domain || source.canonicalUrl,
-}
-))
 
-return sources;
+	return sources;
 }
 
 function mergeFetchDataIntoSources(sources, fetchedSources) {
