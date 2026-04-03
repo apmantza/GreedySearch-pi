@@ -712,65 +712,99 @@ async function fetchTopSource(url) {
 	}
 }
 
-async function fetchSourceContent(url, maxChars = 5000) {
+/**
+ * Fetch source content via HTTP with Readability extraction.
+ * Falls back to browser if HTTP fails or content quality is low.
+ * @param {string} url - URL to fetch
+ * @param {number} maxChars - Max characters to return
+ * @returns {Promise<object>} Fetch result
+ */
+async function fetchSourceContent(url, maxChars = 8000) {
+	const start = Date.now();
+
+	// Try HTTP first
+	const httpResult = await fetchSourceHttp(url, { timeoutMs: 15000 });
+
+	if (httpResult.ok) {
+		const content = httpResult.markdown.slice(0, maxChars);
+		return {
+			url,
+			finalUrl: httpResult.finalUrl,
+			status: httpResult.status,
+			contentType: "text/markdown",
+			lastModified: "",
+			title: httpResult.title,
+			snippet: httpResult.excerpt,
+			content,
+			contentChars: content.length,
+			source: "http",
+			duration: Date.now() - start,
+		};
+	}
+
+	// HTTP failed or blocked - fall back to browser
+	process.stderr.write(
+		`[greedysearch] HTTP failed for ${url.slice(0, 60)}, trying browser...\n`,
+	);
+	return await fetchSourceContentBrowser(url, maxChars);
+}
+
+/**
+ * Browser fallback for source fetching (original CDP-based method)
+ */
+async function fetchSourceContentBrowser(url, maxChars = 8000) {
+	const start = Date.now();
+	const tab = await openNewTab();
+
 	try {
-		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), 15000);
+		await cdp(["nav", tab, url], 30000);
+		await new Promise((r) => setTimeout(r, 1500));
 
-		const res = await fetch(url, {
-			signal: controller.signal,
-			headers: {
-				"User-Agent":
-					"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-				Accept: "text/html,application/xhtml+xml",
-				"Accept-Language": "en-US,en;q=0.9",
-			},
-		});
-		clearTimeout(timeout);
+		const content = await cdp([
+			"eval",
+			tab,
+			`
+			(function(){
+				var el = document.querySelector('article, [role="main"], main, .post-content, .article-body, #content, .content');
+				var text = (el || document.body).innerText;
+				return JSON.stringify({
+					title: document.title,
+					content: text.replace(/\\s+/g, ' ').trim(),
+					url: location.href
+				});
+			})()
+		`,
+		]);
 
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-		const html = await res.text();
-
-		// Simple HTML extraction - remove tags and extract text
-		const content = html
-			.replace(/<script[\s\S]*?<\/script>/gi, "")
-			.replace(/<style[\s\S]*?<\/style>/gi, "")
-			.replace(/<nav[\s\S]*?<\/nav>/gi, "")
-			.replace(/<header[\s\S]*?<\/header>/gi, "")
-			.replace(/<footer[\s\S]*?<\/footer>/gi, "")
-			.replace(/<[^>]+>/g, " ")
-			.replace(/&[a-z]+;/gi, " ")
-			.replace(/\s+/g, " ")
-			.trim()
-			.slice(0, maxChars);
-
-		// Extract title
-		const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-		const title = titleMatch ? titleMatch[1].trim() : "";
-		const finalUrl = res.url || url;
-		const snippet = trimText(content, 320);
+		const parsed = JSON.parse(content);
+		const finalContent = parsed.content.slice(0, maxChars);
 
 		return {
 			url,
-			finalUrl,
-			status: res.status,
-			contentType: res.headers.get("content-type") || "",
-			lastModified: res.headers.get("last-modified") || "",
-			title,
-			snippet,
-			content,
-			contentChars: content.length,
+			finalUrl: parsed.url || url,
+			status: 200,
+			contentType: "text/plain",
+			lastModified: "",
+			title: parsed.title,
+			snippet: trimText(finalContent, 320),
+			content: finalContent,
+			contentChars: finalContent.length,
+			source: "browser",
+			duration: Date.now() - start,
 		};
-	} catch (e) {
+	} catch (error) {
 		return {
 			url,
 			title: "",
 			content: null,
 			snippet: "",
 			contentChars: 0,
-			error: e.message,
+			error: error.message,
+			source: "browser",
+			duration: Date.now() - start,
 		};
+	} finally {
+		await closeTab(tab);
 	}
 }
 
