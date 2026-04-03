@@ -668,6 +668,302 @@ git commit --allow-empty -m "feat: HTTP source fetching integrated, deep-researc
 - [ ] No errors
 - [ ] Final commit made
 
+### Task 9: Add Smart Source Re-Ranking
+
+**Files:**
+- Modify: `search.mjs` (in `buildSourceRegistry` function or create `rerankSources`)
+
+**Step 1: Add query-aware domain inference function**
+
+Add after the existing host/domain constants (~line 60):
+
+```javascript
+/**
+ * Infer preferred domains based on query keywords
+ * Returns domains that should be boosted for this query
+ */
+function inferPreferredDomains(query) {
+	const normalized = query.toLowerCase();
+	const matches = [];
+
+	if (normalized.includes("openai") || normalized.includes("gpt") || normalized.includes("chatgpt")) {
+		matches.push("openai.com", "platform.openai.com", "help.openai.com");
+	}
+	if (normalized.includes("anthropic") || normalized.includes("claude")) {
+		matches.push("anthropic.com", "docs.anthropic.com");
+	}
+	if (normalized.includes("bun")) {
+		matches.push("bun.sh", "bun.com");
+	}
+	if (normalized.includes("next.js") || normalized.includes("nextjs")) {
+		matches.push("nextjs.org", "vercel.com");
+	}
+	if (normalized.includes("playwright")) {
+		matches.push("playwright.dev");
+	}
+	if (normalized.includes("supabase")) {
+		matches.push("supabase.com", "supabase.io");
+	}
+	if (normalized.includes("prisma")) {
+		matches.push("prisma.io");
+	}
+	if (normalized.includes("tailwind")) {
+		matches.push("tailwindcss.com");
+	}
+	if (normalized.includes("vite")) {
+		matches.push("vitejs.dev", "vite.dev");
+	}
+	if (normalized.includes("astro")) {
+		matches.push("astro.build");
+	}
+	if (normalized.includes("svelte")) {
+		matches.push("svelte.dev");
+	}
+	if (normalized.includes("solid")) {
+		matches.push("solidjs.com");
+	}
+	if (normalized.includes("vue") || normalized.includes("nuxt")) {
+		matches.push("vuejs.org", "nuxt.com");
+	}
+	if (normalized.includes("react") || normalized.includes("react native")) {
+		matches.push("react.dev", "reactnative.dev");
+	}
+	if (normalized.includes("angular")) {
+		matches.push("angular.io", "angular.dev");
+	}
+	if (normalized.includes("node.js") || normalized.includes("nodejs")) {
+		matches.push("nodejs.org", "nodejs.dev", "npmjs.com");
+	}
+	if (normalized.includes("deno")) {
+		matches.push("deno.land", "deno.com");
+	}
+	if (normalized.includes("fresh")) {
+		matches.push("fresh.deno.dev");
+	}
+	if (normalized.includes("typescript") || normalized.includes("ts")) {
+		matches.push("typescriptlang.org");
+	}
+	if (normalized.includes("python")) {
+		matches.push("python.org", "docs.python.org");
+	}
+	if (normalized.includes("rust")) {
+		matches.push("rust-lang.org", "docs.rs", "crates.io");
+	}
+	if (normalized.includes("go") || normalized.includes("golang")) {
+		matches.push("go.dev", "golang.org", "pkg.go.dev");
+	}
+	if (normalized.includes("zig")) {
+		matches.push("ziglang.org");
+	}
+	if (normalized.includes("docker")) {
+		matches.push("docker.com", "docs.docker.com", "hub.docker.com");
+	}
+	if (normalized.includes("kubernetes") || normalized.includes("k8s")) {
+		matches.push("kubernetes.io", "k8s.io");
+	}
+	if (normalized.includes("postgres") || normalized.includes("postgresql")) {
+		matches.push("postgresql.org", "neon.tech", "supabase.com");
+	}
+	if (normalized.includes("redis")) {
+		matches.push("redis.io");
+	}
+	if (normalized.includes("sqlite")) {
+		matches.push("sqlite.org");
+	}
+	if (normalized.includes("cloudflare")) {
+		matches.push("developers.cloudflare.com", "cloudflare.com");
+	}
+	if (normalized.includes("vercel")) {
+		matches.push("vercel.com", "nextjs.org");
+	}
+	if (normalized.includes("netlify")) {
+		matches.push("netlify.com", "docs.netlify.com");
+	}
+	if (normalized.includes("stripe")) {
+		matches.push("stripe.com", "docs.stripe.com");
+	}
+	if (normalized.includes("github")) {
+		matches.push("github.com", "docs.github.com");
+	}
+	if (normalized.includes("gitlab")) {
+		matches.push("gitlab.com", "docs.gitlab.com");
+	}
+	if (normalized.includes("aws")) {
+		matches.push("aws.amazon.com", "docs.aws.amazon.com");
+	}
+	if (normalized.includes("azure")) {
+		matches.push("azure.microsoft.com", "learn.microsoft.com");
+	}
+	if (normalized.includes("gcp") || normalized.includes("google cloud")) {
+		matches.push("cloud.google.com", "developers.google.com");
+	}
+	if (normalized.includes("gemini") || normalized.includes("google ai")) {
+		matches.push("ai.google.dev", "developers.google.com");
+	}
+
+	return [...new Set(matches)];
+}
+
+/**
+ * Check if a domain matches a preferred domain (exact or subdomain)
+ */
+function domainMatches(hostname, candidate) {
+	return hostname === candidate || hostname.endsWith(`.${candidate}`);
+}
+```
+
+**Step 2: Update buildSourceRegistry to use smart re-ranking**
+
+Find `buildSourceRegistry` function and add scoring before sorting:
+
+```javascript
+function buildSourceRegistry(out, query = "") {
+	const seen = new Map();
+	const engineOrder = ["perplexity", "bing", "google"];
+
+	// Get preferred domains for this query
+	const preferredDomains = inferPreferredDomains(query);
+
+	for (const engine of engineOrder) {
+		const result = out[engine];
+		if (!result?.sources) continue;
+
+		for (let i = 0; i < result.sources.length; i++) {
+			const source = result.sources[i];
+			const canonicalUrl = normalizeUrl(source.url);
+			if (!canonicalUrl || canonicalUrl.length < 10) continue;
+
+			const title = normalizeSourceTitle(source.title || "");
+			const domain = getDomain(canonicalUrl);
+			const sourceType = classifySourceType(domain, title, canonicalUrl);
+			
+			// Calculate smart score boost
+			let smartScore = 0;
+			
+			// Boost preferred domains for this query
+			if (preferredDomains.some((pd) => domainMatches(domain, pd))) {
+				smartScore += 10; // Strong boost for query-relevant official docs
+			}
+			
+			// Boost docs/developer sites
+			if (sourceType === "official-docs") {
+				smartScore += 3;
+			}
+			
+			// Boost based on URL path patterns
+			const lowerUrl = canonicalUrl.toLowerCase();
+			if (/\/docs\/|\/documentation\/|\.dev\/|\/api\/|\/reference\//.test(lowerUrl)) {
+				smartScore += 2;
+			}
+			
+			// Penalize community/discussion sites for technical queries
+			if (sourceType === "community" && preferredDomains.length > 0) {
+				smartScore -= 2;
+			}
+
+			const existing = seen.get(canonicalUrl) || {
+				id: "",
+				canonicalUrl,
+				displayUrl: source.url || canonicalUrl,
+				domain,
+				title: "",
+				engines: [],
+				engineCount: 0,
+				perEngine: {},
+				sourceType,
+				isOfficial: sourceType === "official-docs",
+				smartScore: 0,
+			};
+
+			existing.title = pickPreferredTitle(existing.title, title);
+			existing.displayUrl = existing.displayUrl || source.url || canonicalUrl;
+			existing.sourceType = existing.sourceType || sourceType;
+			existing.isOfficial = existing.isOfficial || sourceType === "official-docs";
+			existing.smartScore = Math.max(existing.smartScore, smartScore);
+
+			if (!existing.engines.includes(engine)) {
+				existing.engines.push(engine);
+			}
+			existing.perEngine[engine] = {
+				rank: i + 1,
+				title: pickPreferredTitle(existing.perEngine[engine]?.title || "", title),
+			};
+
+			seen.set(canonicalUrl, existing);
+		}
+	}
+
+	const sources = Array.from(seen.values())
+		.map((source) => ({
+			...source,
+			engineCount: source.engines.length,
+		}))
+		.sort((a, b) => {
+			// Primary: smart score (query-aware domain boosting)
+			if (b.smartScore !== a.smartScore) return b.smartScore - a.smartScore;
+			
+			// Secondary: consensus (sources found by more engines)
+			if (b.engineCount !== a.engineCount) return b.engineCount - a.engineCount;
+			
+			// Tertiary: source type priority
+			if (sourceTypePriority(b.sourceType) !== sourceTypePriority(a.sourceType)) {
+				return sourceTypePriority(b.sourceType) - sourceTypePriority(a.sourceType);
+			}
+			
+			// Quaternary: best rank across engines
+			if (bestRank(a) !== bestRank(b)) return bestRank(a) - bestRank(b);
+			
+			return a.domain.localeCompare(b.domain);
+		})
+		.slice(0, 12)
+		.map((source, index) => ({
+			...source,
+			id: `S${index + 1}`,
+			title: source.title || source.domain || source.canonicalUrl,
+		}));
+
+	return sources;
+}
+```
+
+**Step 3: Update call sites to pass query**
+
+Find where `buildSourceRegistry` is called (~line 1160) and update:
+
+```javascript
+// Before:
+out._sources = buildSourceRegistry(out);
+
+// After:
+out._sources = buildSourceRegistry(out, query);
+```
+
+**Step 4: Test smart re-ranking**
+
+Run: `node search.mjs all "React hooks useMemo" --inline 2>&1 | grep -A5 "_sources" | head -30`
+
+Expected: react.dev should appear near top due to query match
+
+Run: `node search.mjs all "bun runtime" --inline 2>&1 | grep -A5 "_sources" | head -30`
+
+Expected: bun.sh should appear near top
+
+**Step 5: Commit**
+
+```bash
+git add search.mjs
+git commit -m "feat: smart source re-ranking with query-aware domain boosting"
+```
+
+**Verification:**
+- [ ] `inferPreferredDomains` added with comprehensive tech mappings
+- [ ] `domainMatches` helper added
+- [ ] `buildSourceRegistry` accepts query parameter
+- [ ] Smart score calculated (preferred domains +10, docs +3, etc.)
+- [ ] Sorting updated to use smartScore as primary key
+- [ ] Tests show query-relevant domains ranking higher
+- [ ] Commit made
+
 ---
 
 ## Summary
