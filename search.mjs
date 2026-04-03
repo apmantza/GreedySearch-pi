@@ -1091,16 +1091,16 @@ async function main() {
 				"Engines: perplexity (p), bing (b), google (g), gemini (gem), all",
 				"",
 				"Flags:",
-				"  --full              Return complete answers (~3000+ chars)",
-				"  --synthesize        Synthesize results via Gemini (adds ~30s)",
-				"  --deep-research     Full research: full answers + source fetching + synthesis",
+				"  --fast              Quick mode: no source fetching or synthesis",
+				"  --synthesize        Deprecated: synthesis is now default for multi-engine",
+				"  --deep-research     Deprecated: source fetching is now default",
 				"  --fetch-top-source  Fetch content from top source",
 				"  --inline            Output JSON to stdout (for piping)",
 				"",
 				"Examples:",
-				'  node search.mjs p "what is memoization"',
-				'  node search.mjs all "TCP congestion control"',
-				'  node search.mjs all "RAG vs fine-tuning" --deep-research',
+				'  node search.mjs all "Node.js streams"           # Default: sources + synthesis',
+				'  node search.mjs all "quick check" --fast        # Fast: no sources/synthesis',
+				'  node search.mjs p "what is memoization"         # Single engine: fast mode',
 			].join("\n")}\n`,
 		);
 		process.exit(1);
@@ -1108,28 +1108,31 @@ async function main() {
 
 	await ensureChrome();
 
-	// Parse --depth or fall back to deprecated flags
+	// Depth modes: fast (no synthesis/fetch), standard (synthesis+fetch 5 sources)
 	const depthIdx = args.indexOf("--depth");
-	let depth = "fast"; // default for single engine
+	let depth = "standard"; // DEFAULT: all "all" searches now include synthesis + source fetch
+
 	if (depthIdx !== -1 && args[depthIdx + 1]) {
 		depth = args[depthIdx + 1];
-	} else if (args.includes("--deep-research")) {
-		depth = "deep";
-	} else if (args.includes("--synthesize")) {
-		depth = "standard";
+	} else if (args.includes("--fast")) {
+		depth = "fast"; // Explicit fast mode requested
 	}
-	// For "all" engine, default to standard if not specified
+
+	// For single engine (not "all"), default to fast unless explicit
 	const engineArg = args.find((a) => !a.startsWith("--"))?.toLowerCase();
-	if (
-		engineArg === "all" &&
-		depthIdx === -1 &&
-		!args.includes("--deep-research") &&
-		!args.includes("--synthesize")
-	) {
+	if (engineArg !== "all" && depthIdx === -1 && !args.includes("--fast")) {
+		// Single engine: default to fast for speed (no synthesis overhead)
+		depth = "fast";
+	}
+
+	// --deep-research flag maps to standard (backward compat)
+	if (args.includes("--deep-research")) {
 		depth = "standard";
 	}
 
-	const full = args.includes("--full") || depth === "deep";
+	// For "all" engine with no explicit flags, standard is already default
+
+	const full = args.includes("--full");
 	const short = !full;
 	const fetchSource = args.includes("--fetch-top-source");
 	const inline = args.includes("--inline");
@@ -1139,6 +1142,7 @@ async function main() {
 		(a, i) =>
 			a !== "--full" &&
 			a !== "--short" &&
+			a !== "--fast" &&
 			a !== "--fetch-top-source" &&
 			a !== "--synthesize" &&
 			a !== "--deep-research" &&
@@ -1195,23 +1199,21 @@ async function main() {
 			// Build a canonical source registry across all engines
 			out._sources = buildSourceRegistry(out);
 
-			if (depth === "deep") {
-				process.stderr.write("PROGRESS:deep-research:start\n");
-				const fetchedSources =
-					out._sources.length > 0
-						? await fetchMultipleSources(out._sources, 5, 8000)
-						: [];
+			// Source fetching: default for all "all" searches (was deep-research only)
+			if (depth !== "fast" && out._sources.length > 0) {
+				process.stderr.write("PROGRESS:source-fetch:start\n");
+				const fetchedSources = await fetchMultipleSources(
+					out._sources,
+					5,
+					8000,
+				);
 
 				out._sources = mergeFetchDataIntoSources(out._sources, fetchedSources);
 				out._fetchedSources = fetchedSources;
-				process.stderr.write(
-					out._sources.length > 0
-						? "PROGRESS:deep-research:done\n"
-						: "PROGRESS:deep-research:no-sources\n",
-				);
+				process.stderr.write("PROGRESS:source-fetch:done\n");
 			}
 
-			// Synthesize with Gemini for standard and deep modes
+			// Synthesize with Gemini for all non-fast modes (now default)
 			if (depth !== "fast") {
 				process.stderr.write("PROGRESS:synthesis:start\n");
 				process.stderr.write(
@@ -1245,7 +1247,8 @@ async function main() {
 					out._topSource = await fetchTopSource(top.canonicalUrl || top.url);
 			}
 
-			if (depth === "deep") out._confidence = buildConfidence(out);
+			// Always include confidence metrics for non-fast searches
+			if (depth !== "fast") out._confidence = buildConfidence(out);
 
 			writeOutput(out, outFile, {
 				inline,
