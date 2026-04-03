@@ -2,7 +2,9 @@
 
 Pi extension that adds `greedy_search`, `deep_research`, and `coding_task` tools -- multi-engine AI search via browser automation. **NO API KEYS needed.**
 
-Fans out queries to Perplexity, Bing Copilot, and Google AI simultaneously. Returns AI-synthesized answers with deduped sources. Streams progress as each engine completes.
+Fans out queries to Perplexity, Bing Copilot, and Google AI simultaneously. Returns AI-synthesized answers with fetched source content. Streams progress as each engine completes.
+
+**New in v2.0:** HTTP-first source fetching with Mozilla Readability extraction (~3x faster), smart query-aware source ranking.
 
 Forked from [GreedySearch-claude](https://github.com/apmantza/GreedySearch-claude).
 
@@ -24,10 +26,14 @@ pi install git:github.com/apmantza/GreedySearch-pi
 
 ## Quick Start
 
-Once installed, Pi gains a `greedy_search` tool with three depth levels.
+Once installed, Pi gains a `greedy_search` tool with two modes.
 
-```
-greedy_search({ query: "What's new in React 19?", depth: "standard" })
+```javascript
+// Default: multi-engine + source fetch + synthesis
+ Greedy_search({ query: "What's new in React 19?" })
+
+// Fast: single engine, no synthesis
+ greedy_search({ query: "What's new in React 19?", depth: "fast", engine: "perplexity" })
 ```
 
 ## Parameters
@@ -36,22 +42,25 @@ greedy_search({ query: "What's new in React 19?", depth: "standard" })
 |-----------|------|---------|-------------|
 | `query` | string | required | The search question |
 | `engine` | string | `"all"` | `all`, `perplexity`, `bing`, `google`, `gemini` |
-| `depth` | string | `"standard"` | `fast` (1 engine), `standard` (3 engines + synthesis), `deep` (3 + fetch + synthesis + confidence) |
+| `depth` | string | `"standard"` | `fast` (1 engine, no fetch), `standard` (3 engines + fetch + synthesis) |
 | `fullAnswer` | boolean | `false` | Return complete answer (~3000+ chars) vs truncated preview (~300 chars) |
 
 ## Depth Levels
 
 | Depth | Engines | Synthesis | Source Fetch | Time | Best For |
 |-------|---------|-----------|--------------|------|----------|
-| `fast` | 1 | no | no | 15-30s | Quick lookup, single perspective |
-| `standard` | 3 | yes | no | 30-90s | Default -- balanced speed/quality |
-| `deep` | 3 | yes | yes (top 5) | 60-180s | Research that matters -- architecture decisions |
+| `fast` | 1 | no | no | 10-30s | Quick lookup, single perspective |
+| `standard` | 3 | yes | yes (top 5) | 15-30s | **Default** -- balanced, grounded answers |
 
-## Engines (for fast mode)
+**Standard mode** (default for `engine: "all"`): Queries 3 engines, fetches content from top 5 sources via HTTP (with Readability extraction), synthesizes grounded answer with citations.
+
+**Fast mode**: Single engine, no source fetching or synthesis. Good for quick checks.
+
+## Engines
 
 | Engine | Alias | Best for |
 |--------|-------|----------|
-| `all` | - | All 3 engines -- but for fast single-engine, pick one below |
+| `all` | - | **Default** -- all 3 engines with synthesis + source fetch |
 | `perplexity` | `p` | Technical Q&A, code explanations, documentation |
 | `bing` | `b` | Recent news, Microsoft ecosystem |
 | `google` | `g` | Broad coverage, multiple perspectives |
@@ -66,57 +75,69 @@ When using `engine: "all"`, the tool streams progress as each engine completes:
 **Searching...** done: perplexity, pending: bing, google
 **Searching...** done: perplexity, done: bing, pending: google
 **Searching...** done: perplexity, done: bing, done: google
+**Synthesizing...** with Gemini
 ```
 
-## Deep Research Mode
+## Source Fetching (HTTP-First)
 
-For research that matters -- architecture decisions, library comparisons -- use `depth: "deep"`:
+GreedySearch now uses **HTTP-first source fetching** with Mozilla Readability for content extraction:
 
+- **HTTP**: Fast (~200-800ms), parallel, structured markdown output
+- **Browser fallback**: Only when HTTP fails (bot protection, JS-heavy sites)
+- **Typical success rate**: 90%+ of documentation sites work via HTTP
+- **Speed improvement**: ~3x faster than browser-only fetching (15-30s vs 60-180s)
+
+The old regex-based HTML stripping has been replaced with professional-grade content extraction that preserves document structure, code blocks, and headings.
+
+## Smart Source Ranking
+
+Sources are now ranked using query-aware domain boosting:
+
+- **Query keywords** boost official docs (e.g., "react" → react.dev +10 points)
+- **Consensus**: Sources found by multiple engines rank higher
+- **Source type**: Official docs > repos > blogs > community
+- **URL patterns**: `/docs/`, `/api/`, `/reference/` get extra boost
+
+40+ tech stacks have preferred domain mappings including React, Node.js, Python, Rust, Go, Prisma, Supabase, and more.
+
+## Examples
+
+**Default research (multi-engine + sources + synthesis):**
+
+```javascript
+greedy_search({ query: "Best practices for monorepo structure" })
 ```
-greedy_search({ query: "best auth patterns for SaaS in 2026", depth: "deep" })
+
+**Quick lookup (fast):**
+
+```javascript
+greedy_search({ query: "How to use async await in Python", depth: "fast", engine: "perplexity" })
 ```
 
-Deep mode: 3 engines + source fetching (top 5) + synthesis + confidence scores. ~60-180s but returns grounded synthesis with fetched evidence.
+**Compare tools:**
 
-**Standard vs Deep:**
-- `standard` (default): 3 engines + synthesis. Good for most research.
-- `deep`: Same + fetches source content for grounded answers. Use when the answer really matters.
+```javascript
+greedy_search({ query: "Prisma vs Drizzle in 2026" })
+```
 
-**Legacy:** `deep_research` tool still works -- aliases to `greedy_search` with `depth: "deep"`.
+**Debug an error:**
+
+```javascript
+greedy_search({ query: "Error: Cannot find module 'react-dom/client' Next.js 15" })
+```
 
 ## Full vs Short Answers
 
 Default mode returns ~300 char summaries to save tokens. Use `fullAnswer: true` for complete responses:
 
-```
+```javascript
 greedy_search({ query: "explain the React compiler", engine: "perplexity", fullAnswer: true })
 ```
 
-## Examples
+## Legacy Tools
 
-**Quick lookup (fast):**
-
-```
-greedy_search({ query: "How to use async await in Python", depth: "fast", engine: "perplexity" })
-```
-
-**Compare tools (standard):**
-
-```
-greedy_search({ query: "Prisma vs Drizzle in 2026", depth: "standard" })
-```
-
-**Deep research (architecture decision):**
-
-```
-greedy_search({ query: "Best practices for monorepo structure", depth: "deep" })
-```
-
-**Debug an error:**
-
-```
-greedy_search({ query: "Error: Cannot find module 'react-dom/client' Next.js 15", depth: "standard" })
-```
+- `deep_research` tool still works -- now aliases to default `greedy_search` (behavior is the same)
+- `--deep-research` CLI flag still works -- now default behavior
 
 ## Requirements
 
