@@ -8,10 +8,6 @@ Fans out queries to Perplexity, Bing Copilot, and Google AI simultaneously. Retu
 
 Forked from [GreedySearch-claude](https://github.com/apmantza/GreedySearch-claude).
 
-## Quick Note
-
-**No API keys required** -- this tool uses Chrome DevTools Protocol (CDP) to interact with search engines directly through a browser. It launches its own isolated Chrome instance, so it won't interfere with your main browser session.
-
 ## Install
 
 ```bash
