@@ -27,3 +27,9 @@ npm-debug.log*
 # Temp files
 *.tmp
 *.temp
+
+# Analysis documents (local only)
+FEATURES.md
+assessment.md
+shortlist.md
+docs/plans/
