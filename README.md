@@ -100,6 +100,20 @@ Sources are now ranked using query-aware domain boosting:
 
 40+ tech stacks have preferred domain mappings including React, Node.js, Python, Rust, Go, Prisma, Supabase, and more.
 
+## GitHub Content Extraction
+
+GreedySearch handles GitHub URLs intelligently:
+
+- **Blob URLs** (`/blob/`) — Automatically rewritten to `raw.githubusercontent.com` for instant raw file access
+- **Tree/Root URLs** — Clones repo locally with `git clone --depth 1`, returns README preview + file tree for agent exploration
+- **Benefits**: Real file contents (not rendered HTML), accurate line numbers, works with private repos via `gh` CLI auth
+
+## Security
+
+- **Private URL blocking** — Requests to localhost, RFC1918 addresses (10.x, 192.168.x), and .local/.internal domains are automatically blocked
+- **Cross-host redirect detection** — Detects redirects to authentication/login pages and falls back to browser extraction
+- **File protocol blocking** — `file://` URLs are rejected
+
 ## Examples
 
 **Default research (multi-engine + sources + synthesis):**

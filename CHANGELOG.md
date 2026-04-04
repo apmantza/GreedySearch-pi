@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.6.5 (2026-04-04)
+
+### Security
+- **Private URL blocking** — Added validation to block requests to localhost, RFC1918 private addresses (10.x, 192.168.x), and .local/.internal domains. Prevents accidental exposure of internal services.
+
+### Features
+- **GitHub URL rewriting** — GitHub blob URLs (`github.com/owner/repo/blob/...`) are automatically rewritten to `raw.githubusercontent.com` for faster, cleaner raw file access.
+- **GitHub repo cloning** — Root and tree URLs now trigger `git clone --depth 1` for complete repo access. Agent can explore files locally instead of parsing rendered HTML. Includes README preview and directory tree listing.
+- **Head+tail content trimming** — Large documents now use smart truncation: keeps 75% from the beginning (introduction) + 25% from the end (conclusions/examples) with `[...content trimmed...]` marker, instead of simple truncation.
+- **Anubis bot detection** — Added detection for the new Anubis proof-of-work anti-bot system (`protected by anubis`, `anubis uses a proof-of-work`).
+
+### Fixes
+- **Perplexity clipboard retry** — Added single retry with 2s delay when clipboard extraction fails, improving reliability.
+
 ## v1.6.4 (2026-04-02)
 
 ### Fixes
