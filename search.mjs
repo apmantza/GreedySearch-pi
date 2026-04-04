@@ -33,6 +33,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchSourceHttp, shouldUseBrowser } from "./src/fetcher.mjs";
+import { fetchGitHubContent, parseGitHubUrl } from "./src/github.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const CDP = join(__dir, "cdp.mjs");
@@ -903,6 +904,42 @@ async function fetchTopSource(url) {
  */
 async function fetchSourceContent(url, maxChars = 8000) {
 	const start = Date.now();
+
+	// Check if it's a GitHub URL (tree/root - use clone, blob - let fetcher handle via raw)
+	if (parseGitHubUrl(url)) {
+		const parsed = parseGitHubUrl(url);
+		// Use cloning for tree/root URLs, or blob URLs that might need exploration
+		if (
+			parsed &&
+			(parsed.type === "root" ||
+				parsed.type === "tree" ||
+				(parsed.type === "blob" && !parsed.path?.includes(".")))
+		) {
+			const ghResult = await fetchGitHubContent(url);
+			if (ghResult.ok) {
+				const content = ghResult.content.slice(0, maxChars);
+				return {
+					url,
+					finalUrl: url,
+					status: 200,
+					contentType: "text/markdown",
+					lastModified: "",
+					title: ghResult.title,
+					snippet: content.slice(0, 320),
+					content,
+					contentChars: content.length,
+					source: "github-clone",
+					localPath: ghResult.localPath,
+					...(ghResult.tree && { tree: ghResult.tree }),
+					duration: Date.now() - start,
+				};
+			}
+			// If GitHub clone failed, fall through to HTTP (which will use raw for blobs)
+			process.stderr.write(
+				`[greedysearch] GitHub clone failed, trying HTTP: ${ghResult.error}\n`,
+			);
+		}
+	}
 
 	// Try HTTP first
 	const httpResult = await fetchSourceHttp(url, { timeoutMs: 15000 });
