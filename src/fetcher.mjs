@@ -35,6 +35,53 @@ const DEFAULT_HEADERS = {
 	"upgrade-insecure-requests": "1",
 };
 
+/** Blocked private/internal URL patterns */
+const PRIVATE_URL_PATTERNS = [
+	/^localhost$/i,
+	/^127\.\d+\.\d+\.\d+$/,
+	/^0\.0\.0\.0$/,
+	/^\[::1\]$/,
+	/^10\./, // RFC1918 - Class A
+	/^172\.(1[6-9]|2\d|3[01])\./, // RFC1918 - Class B
+	/^192\.168\./, // RFC1918 - Class C
+	/^169\.254\./, // Link-local
+	/^fc00:/i, // IPv6 unique local
+	/^fe80:/i, // IPv6 link-local
+	/\.local$/i,
+	/\.internal$/i,
+	/\.localhost$/i,
+];
+
+/**
+ * Check if URL is a private/internal address that should not be fetched
+ * @param {string} url - URL to check
+ * @returns {{blocked: boolean, reason?: string}}
+ */
+export function isPrivateUrl(url) {
+	try {
+		const parsed = new URL(url);
+		const hostname = parsed.hostname.toLowerCase();
+
+		for (const pattern of PRIVATE_URL_PATTERNS) {
+			if (pattern.test(hostname)) {
+				return {
+					blocked: true,
+					reason: `Private/internal address: ${hostname}`,
+				};
+			}
+		}
+
+		// Block file:// protocol
+		if (parsed.protocol === "file:") {
+			return { blocked: true, reason: "File protocol not allowed" };
+		}
+
+		return { blocked: false };
+	} catch (error) {
+		return { blocked: true, reason: `Invalid URL: ${error.message}` };
+	}
+}
+
 /**
  * Fetch a URL via HTTP and extract readable content
  * @param {string} url - URL to fetch
@@ -45,6 +92,19 @@ const DEFAULT_HEADERS = {
  * @returns {Promise<FetchResult>}
  */
 export async function fetchSourceHttp(url, options = {}) {
+	// Security: Block private/internal URLs
+	const privateCheck = isPrivateUrl(url);
+	if (privateCheck.blocked) {
+		return {
+			ok: false,
+			url,
+			finalUrl: url,
+			status: 403,
+			error: `Blocked: ${privateCheck.reason}`,
+			needsBrowser: false,
+		};
+	}
+
 	const { timeoutMs = 15000, userAgent, signal } = options;
 
 	const controller = new AbortController();
