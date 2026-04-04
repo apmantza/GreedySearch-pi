@@ -41,7 +41,20 @@ async function extractAnswer(tab) {
 	]);
 	await new Promise((r) => setTimeout(r, 400));
 
-	const answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+
+	// Retry once if clipboard is empty (Perplexity might be slow to write)
+	if (!answer) {
+		console.error("[perplexity] Clipboard empty, retrying in 2s...");
+		await cdp([
+			"eval",
+			tab,
+			`document.querySelector('${S.copyButton}')?.click()`,
+		]);
+		await new Promise((r) => setTimeout(r, 2000));
+		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	}
+
 	if (!answer) throw new Error("Clipboard interceptor returned empty text");
 
 	const sources = parseSourcesFromMarkdown(answer);
