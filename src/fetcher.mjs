@@ -330,6 +330,12 @@ function detectBotBlock(status, html, finalUrl, originalUrl) {
 
 		// Access denied
 		{ pattern: /access denied|accessdenied/i, reason: "access denied" },
+
+		// Anubis (new proof-of-work anti-bot system)
+		{
+			pattern: /protected by anubis|anubis uses a proof-of-work/i,
+			reason: "anubis challenge",
+		},
 	];
 
 	for (const signal of blockSignals) {
