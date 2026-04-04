@@ -34,6 +34,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchSourceHttp, shouldUseBrowser } from "./src/fetcher.mjs";
 import { fetchGitHubContent, parseGitHubUrl } from "./src/github.mjs";
+import { trimContentHeadTail } from "./src/utils/content.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const CDP = join(__dir, "cdp.mjs");
@@ -917,7 +918,7 @@ async function fetchSourceContent(url, maxChars = 8000) {
 		) {
 			const ghResult = await fetchGitHubContent(url);
 			if (ghResult.ok) {
-				const content = ghResult.content.slice(0, maxChars);
+				const content = trimContentHeadTail(ghResult.content, maxChars);
 				return {
 					url,
 					finalUrl: url,
@@ -945,7 +946,7 @@ async function fetchSourceContent(url, maxChars = 8000) {
 	const httpResult = await fetchSourceHttp(url, { timeoutMs: 15000 });
 
 	if (httpResult.ok) {
-		const content = httpResult.markdown.slice(0, maxChars);
+		const content = trimContentHeadTail(httpResult.markdown, maxChars);
 		return {
 			url,
 			finalUrl: httpResult.finalUrl,
@@ -996,7 +997,7 @@ async function fetchSourceContentBrowser(url, maxChars = 8000) {
 		]);
 
 		const parsed = JSON.parse(content);
-		const finalContent = parsed.content.slice(0, maxChars);
+		const finalContent = trimContentHeadTail(parsed.content, maxChars);
 
 		return {
 			url,
