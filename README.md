@@ -144,11 +144,6 @@ Default mode returns ~300 char summaries to save tokens. Use `fullAnswer: true` 
 greedy_search({ query: "explain the React compiler", engine: "perplexity", fullAnswer: true })
 ```
 
-## Legacy Tools
-
-- `deep_research` tool still works -- now aliases to default `greedy_search` (behavior is the same)
-- `--deep-research` CLI flag still works -- now default behavior
-
 ## Requirements
 
 - **Chrome** -- must be installed. The extension auto-launches a dedicated Chrome instance on port 9222 with its own isolated profile and DevTools port file, separate from your main browser session.
@@ -173,45 +168,6 @@ Check status:
 ```bash
 node ~/.pi/agent/git/GreedySearch-pi/launch.mjs --status
 ```
-
-## Testing
-
-Run the comprehensive test suite:
-
-```bash
-npm test              # full suite (~8-12 min)
-npm run test:quick    # skip slow tests (~3 min)
-npm run test:smoke    # basic health check (~60s)
-
-# Or run directly:
-./test.sh              # all tests (~8-12 min)
-./test.sh quick        # skip slow tests (~3 min)
-./test.sh smoke        # basic health check (~60s)
-./test.sh parallel     # race condition tests only
-./test.sh flags        # flag/option tests only
-./test.sh edge         # edge case tests only
-```
-
-### Test Coverage
-
-| Test Category | What It Tests |
-|---------------|---------------|
-| **Pre-flight** | Chrome, CDP, Node.js version |
-| **Flags** | `--full`, `--short`, `--inline`, engine aliases |
-| **Single Engine** | Each engine (Perplexity, Bing, Google) independently |
-| **Multi-Engine** | Sequential "all" mode, query routing |
-| **Parallel** | 5+ concurrent searches, race condition detection |
-| **Synthesis** | Gemini synthesis with agreement/caveats/cited claims |
-| **Deep Research** | Source fetching, confidence scores, deduplication |
-| **Edge Cases** | Special chars, long/short queries, unicode |
-| **Coding Task** | Code generation, debug, review modes |
-
-### Test Results
-
-Tests generate a detailed report in `results/test_*/REPORT.md` with:
-- Pass/fail/warning counts
-- Specific failure details
-- Troubleshooting guidance
 
 ## Troubleshooting
 
