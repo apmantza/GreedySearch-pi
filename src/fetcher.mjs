@@ -83,6 +83,45 @@ export function isPrivateUrl(url) {
 }
 
 /**
+ * Rewrite GitHub blob URLs to raw.githubusercontent.com
+ * github.com/owner/repo/blob/ref/path → raw.githubusercontent.com/owner/repo/ref/path
+ * @param {string} url - URL to rewrite
+ * @returns {string} - Rewritten URL or original if not applicable
+ */
+export function rewriteGitHubUrl(url) {
+	try {
+		const parsed = new URL(url);
+
+		// Only process github.com
+		if (!parsed.hostname.endsWith("github.com")) {
+			return url;
+		}
+
+		// Parse path: /owner/repo/blob/ref/path/to/file
+		const parts = parsed.pathname.split("/").filter(Boolean);
+		if (parts.length < 5) {
+			return url; // Not a blob URL (need owner, repo, 'blob', ref, path...)
+		}
+
+		const [owner, repo, type, ref, ...fileParts] = parts;
+
+		// Must be /blob/ path
+		if (type !== "blob") {
+			return url;
+		}
+
+		// Build raw URL
+		const rawPath = fileParts.join("/");
+		const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${rawPath}`;
+
+		return rawUrl;
+	} catch {
+		// If parsing fails, return original
+		return url;
+	}
+}
+
+/**
  * Fetch a URL via HTTP and extract readable content
  * @param {string} url - URL to fetch
  * @param {object} options - Options
@@ -103,6 +142,15 @@ export async function fetchSourceHttp(url, options = {}) {
 			error: `Blocked: ${privateCheck.reason}`,
 			needsBrowser: false,
 		};
+	}
+
+	// Rewrite GitHub blob URLs to raw.githubusercontent.com
+	const originalUrl = url;
+	url = rewriteGitHubUrl(url);
+	if (url !== originalUrl) {
+		console.error(
+			`[fetcher] Rewrote GitHub URL: ${originalUrl.slice(0, 60)}... → raw.githubusercontent.com`,
+		);
 	}
 
 	const { timeoutMs = 15000, userAgent, signal } = options;
@@ -130,6 +178,25 @@ export async function fetchSourceHttp(url, options = {}) {
 
 		const contentType = response.headers.get("content-type") || "";
 		const finalUrl = response.url;
+
+		// Handle raw text/plain from GitHub (raw file content)
+		if (
+			contentType.includes("text/plain") &&
+			finalUrl.includes("raw.githubusercontent.com")
+		) {
+			const text = await response.text();
+			return {
+				ok: true,
+				url: originalUrl,
+				finalUrl,
+				status: response.status,
+				title: finalUrl.split("/").pop() || "GitHub File",
+				markdown: text,
+				contentLength: text.length,
+				excerpt: text.slice(0, 300).replace(/\n/g, " "),
+				needsBrowser: false,
+			};
+		}
 
 		// Check for non-HTML content
 		if (
