@@ -10,3 +10,9 @@ test/
 test.mjs
 test.sh
 package-lock.json
+
+# Local development docs (not for distribution)
+FEATURES.md
+assessment.md
+shortlist.md
+docs/
