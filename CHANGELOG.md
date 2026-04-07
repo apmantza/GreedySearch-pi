@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.7.2 (2026-04-08)
+
+### Release
+- **Patch release** — version bump and npm package verification for the `bin/` runtime layout (`bin/search.mjs`, `bin/launch.mjs`, `bin/cdp.mjs`, `bin/coding-task.mjs`).
+
 ## v1.7.1 (2026-04-08)
 
 ### Performance
