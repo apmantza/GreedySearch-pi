@@ -8,11 +8,8 @@ results/
 
 # BUT: keep extractor source files (they're native .mjs, not compiled)
 !extractors/*.mjs
-!search.mjs
-!launch.mjs
-!cdp.mjs
+!bin/*.mjs
 !test.mjs
-!coding-task.mjs
 !src/**/*.mjs
 !test/**/*.mjs
 

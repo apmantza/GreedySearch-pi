@@ -12,8 +12,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { cdp, injectClipboardInterceptor } from "./extractors/common.mjs";
-import { dismissConsent, handleVerification } from "./extractors/consent.mjs";
+import { cdp, injectClipboardInterceptor } from "../extractors/common.mjs";
+import { dismissConsent, handleVerification } from "../extractors/consent.mjs";
 
 const __dir = fileURLToPath(new URL(".", import.meta.url));
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, "/")}/cdp-pages.json`;

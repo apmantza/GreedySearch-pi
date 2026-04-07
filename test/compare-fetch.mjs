@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { fetchSourceHttp, shouldUseBrowser } from "../src/fetcher.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const CDP = join(__dir, "..", "cdp.mjs");
+const CDP = join(__dir, "..", "bin", "cdp.mjs");
 
 // ============================================
 // Browser fetch via CDP (reuses existing infra)

@@ -107,7 +107,7 @@ if (mode !== "parallel") {
 		const timeout = engine === "gemini" ? 180000 : 90000;
 		const result = await runNode(
 			[
-				join(__dir, "search.mjs"),
+				join(__dir, "bin", "search.mjs"),
 				engine,
 				`explain ${engine} test`,
 				"--out",
@@ -137,7 +137,7 @@ if (mode !== "parallel") {
 		const outfile = join(RESULTS_DIR, `seq_${i}.json`);
 		const query = `test query ${i}`;
 		const result = await runNode(
-			[join(__dir, "search.mjs"), "all", query, "--out", outfile],
+			[join(__dir, "bin", "search.mjs"), "all", query, "--out", outfile],
 			120000,
 		);
 
@@ -174,7 +174,7 @@ if (mode !== "quick" && mode !== "sequential") {
 	const promises = parallelQueries.map(async (query, i) => {
 		const outfile = join(RESULTS_DIR, `parallel_${i}.json`);
 		const result = await runNode(
-			[join(__dir, "search.mjs"), "all", query, "--out", outfile],
+			[join(__dir, "bin", "search.mjs"), "all", query, "--out", outfile],
 			120000,
 		);
 		return { i, query, outfile, result };
@@ -217,7 +217,7 @@ if (mode !== "parallel" && mode !== "quick") {
 	const outfile = join(RESULTS_DIR, "synthesis.json");
 	const result = await runNode(
 		[
-			join(__dir, "search.mjs"),
+			join(__dir, "bin", "search.mjs"),
 			"all",
 			"what is machine learning",
 			"--synthesize",
@@ -257,7 +257,7 @@ if (mode !== "parallel" && mode !== "sequential") {
 	const outfile = join(RESULTS_DIR, "coding_gemini.json");
 	const result = await runNode(
 		[
-			join(__dir, "coding-task.mjs"),
+			join(__dir, "bin", "coding-task.mjs"),
 			"write hello world in JS",
 			"--engine",
 			"gemini",

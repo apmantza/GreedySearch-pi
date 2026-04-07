@@ -172,9 +172,9 @@ run_search() {
   local timeout_sec="${5:-120}"
   
   if [[ -n "$extra_flags" ]]; then
-    timeout "$timeout_sec" node search.mjs "$engine" "$query" --out "$outfile" $extra_flags 2>/dev/null || true
+    timeout "$timeout_sec" node bin/search.mjs "$engine" "$query" --out "$outfile" $extra_flags 2>/dev/null || true
   else
-    timeout "$timeout_sec" node search.mjs "$engine" "$query" --out "$outfile" 2>/dev/null || true
+    timeout "$timeout_sec" node bin/search.mjs "$engine" "$query" --out "$outfile" 2>/dev/null || true
   fi
   [[ -f "$outfile" ]] && [[ -s "$outfile" ]]
 }
@@ -186,7 +186,7 @@ run_search_stdout() {
   local extra_flags="${3:-}"
   local timeout_sec="${4:-120}"
   
-  timeout "$timeout_sec" node search.mjs "$engine" "$query" $extra_flags 2>/dev/null || echo "TIMEOUT"
+  timeout "$timeout_sec" node bin/search.mjs "$engine" "$query" $extra_flags 2>/dev/null || echo "TIMEOUT"
 }
 
 # Print header
@@ -206,8 +206,8 @@ else
 fi
 
 # Check CDP is available
-if [[ ! -f "cdp.mjs" ]]; then
-  fail "cdp.mjs missing - extension not properly installed"
+if [[ ! -f "bin/cdp.mjs" ]]; then
+  fail "bin/cdp.mjs missing - extension not properly installed"
   exit 1
 else
   pass "CDP module present"
@@ -222,8 +222,8 @@ else
 fi
 
 # Check launch.mjs exists
-if [[ ! -f "launch.mjs" ]]; then
-  warn "launch.mjs missing - Chrome auto-launch may fail"
+if [[ ! -f "bin/launch.mjs" ]]; then
+  warn "bin/launch.mjs missing - Chrome auto-launch may fail"
 else
   pass "Chrome launcher present"
 fi
@@ -389,7 +389,7 @@ if [[ "$1" == "" || "$1" == "parallel" || "$1" == "quick" ]]; then
   for i in "${!PARALLEL_QUERIES[@]}"; do
     outfile="$RESULTS_DIR/parallel1_${i}.json"
     query="${PARALLEL_QUERIES[$i]}"
-    node search.mjs all "$query" --out "$outfile" 2>/dev/null &
+    node bin/search.mjs all "$query" --out "$outfile" 2>/dev/null &
     PIDS+=($!)
   done
   
@@ -446,7 +446,7 @@ if [[ "$1" == "" || "$1" == "parallel" || "$1" == "quick" ]]; then
   for i in 1 2 3; do
     outfile="$RESULTS_DIR/parallel2_${i}.json"
     query="synthesis test $i"
-    node search.mjs all "$query" --synthesize --out "$outfile" 2>/dev/null &
+    node bin/search.mjs all "$query" --synthesize --out "$outfile" 2>/dev/null &
     SYNTH_PIDS+=($!)
   done
   
@@ -635,7 +635,7 @@ if [[ "$1" != "parallel" && "$1" != "smoke" && "$1" != "sequential" && "$1" != "
   
   outfile="$RESULTS_DIR/coding1.json"
   
-  timeout 180 node coding-task.mjs "write a python function to reverse a string" --engine gemini --mode code --out "$outfile" 2>/dev/null || true
+  timeout 180 node bin/coding-task.mjs "write a python function to reverse a string" --engine gemini --mode code --out "$outfile" 2>/dev/null || true
   
   if [[ -f "$outfile" ]]; then
     has_code=$(node -e "
@@ -657,7 +657,7 @@ if [[ "$1" != "parallel" && "$1" != "smoke" && "$1" != "sequential" && "$1" != "
   
   outfile="$RESULTS_DIR/coding2.json"
   
-  timeout 180 node coding-task.mjs "debug: why does this loop hang - for(let i=0; i<10; i--) {}" --engine gemini --mode debug --out "$outfile" 2>/dev/null || true
+  timeout 180 node bin/coding-task.mjs "debug: why does this loop hang - for(let i=0; i<10; i--) {}" --engine gemini --mode debug --out "$outfile" 2>/dev/null || true
   
   if [[ -f "$outfile" ]]; then
     has_debug=$(node -e "
@@ -679,7 +679,7 @@ if [[ "$1" != "parallel" && "$1" != "smoke" && "$1" != "sequential" && "$1" != "
   
   outfile="$RESULTS_DIR/coding3.json"
   
-  timeout 180 node coding-task.mjs "review this code: function add(a,b){ return a+b; }" --engine gemini --mode review --out "$outfile" 2>/dev/null || true
+  timeout 180 node bin/coding-task.mjs "review this code: function add(a,b){ return a+b; }" --engine gemini --mode review --out "$outfile" 2>/dev/null || true
   
   if [[ -f "$outfile" ]]; then
     has_review=$(node -e "
@@ -815,8 +815,8 @@ Install Chrome or set CHROME_PATH environment variable.
 ### "CDP timeout" / "Chrome may have crashed"
 Restart the dedicated Chrome instance:
 ```bash
-node launch.mjs --kill
-node launch.mjs
+node bin/launch.mjs --kill
+node bin/launch.mjs
 ```
 
 ### Engine-specific errors

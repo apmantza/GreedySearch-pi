@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.7.1 (2026-04-08)
+
+### Performance
+- **Bounded source-fetch concurrency** — source fetching now uses a small worker pool (default `2`, configurable via `GREEDY_FETCH_CONCURRENCY`) to reduce burstiness while keeping deep-research fast.
+
+### Project structure
+- **Runtime scripts moved to `bin/`** — `search.mjs`, `launch.mjs`, `cdp.mjs`, and `coding-task.mjs` now live under `bin/` for a cleaner repository root.
+- **Path references updated** — extension runtime, tests, extractor shared utilities, and docs now point to `bin/*` paths.
+
+### Packaging & docs
+- **Package file list updated** — npm package now includes `bin/` directly instead of root script entries.
+- **README simplified** — rewritten into a shorter, concise format with quick install, usage, and layout guidance.
+
 ## v1.6.5 (2026-04-04)
 
 ### Security

@@ -32,9 +32,9 @@ import http from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchSourceHttp, shouldUseBrowser } from "./src/fetcher.mjs";
-import { fetchGitHubContent, parseGitHubUrl } from "./src/github.mjs";
-import { trimContentHeadTail } from "./src/utils/content.mjs";
+import { fetchSourceHttp, shouldUseBrowser } from "../src/fetcher.mjs";
+import { fetchGitHubContent, parseGitHubUrl } from "../src/github.mjs";
+import { trimContentHeadTail } from "../src/utils/content.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const CDP = join(__dir, "cdp.mjs");
@@ -847,7 +847,7 @@ function runExtractor(
 	return new Promise((resolve, reject) => {
 		const proc = spawn(
 			"node",
-			[join(__dir, "extractors", script), query, ...extraArgs],
+			[join(__dir, "..", "extractors", script), query, ...extraArgs],
 			{
 				stdio: ["ignore", "pipe", "pipe"],
 				env: { ...process.env, CDP_PROFILE_DIR: GREEDY_PROFILE_DIR },
@@ -1123,7 +1123,7 @@ async function synthesizeWithGemini(
 		const extraArgs = tabPrefix ? ["--tab", String(tabPrefix)] : [];
 		const proc = spawn(
 			"node",
-			[join(__dir, "extractors", "gemini.mjs"), prompt, ...extraArgs],
+			[join(__dir, "..", "extractors", "gemini.mjs"), prompt, ...extraArgs],
 			{
 				stdio: ["ignore", "pipe", "pipe"],
 				env: { ...process.env, CDP_PROFILE_DIR: GREEDY_PROFILE_DIR },
@@ -1167,7 +1167,7 @@ function slugify(query) {
 }
 
 function resultsDir() {
-	const dir = join(__dir, "results");
+	const dir = join(__dir, "..", "results");
 	mkdirSync(dir, { recursive: true });
 	return dir;
 }

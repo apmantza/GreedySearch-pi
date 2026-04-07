@@ -24,7 +24,7 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const ALL_ENGINES = ["perplexity", "bing", "google"] as const;
 
 function cdpAvailable(): boolean {
-	return existsSync(join(__dir, "cdp.mjs"));
+	return existsSync(join(__dir, "bin", "cdp.mjs"));
 }
 
 function runSearch(
@@ -37,7 +37,7 @@ function runSearch(
 	return new Promise((resolve, reject) => {
 		const proc = spawn(
 			"node",
-			[`${__dir}/search.mjs`, engine, "--inline", ...flags, query],
+			[join(__dir, "bin", "search.mjs"), engine, "--inline", ...flags, query],
 			{
 				stdio: ["ignore", "pipe", "pipe"],
 			},
@@ -355,13 +355,13 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 
 				const data = await new Promise<Record<string, unknown>>(
 					(resolve, reject) => {
-						const proc = spawn(
-							"node",
-							[`${__dir}/coding-task.mjs`, task, ...flags],
-							{
-								stdio: ["ignore", "pipe", "pipe"],
-							},
-						);
+					const proc = spawn(
+						"node",
+						[join(__dir, "bin", "coding-task.mjs"), task, ...flags],
+						{
+							stdio: ["ignore", "pipe", "pipe"],
+						},
+					);
 						let out = "";
 						let err = "";
 

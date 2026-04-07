@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { fetchSourceHttp, shouldUseBrowser } from "../src/fetcher.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const SEARCH = join(__dir, "..", "search.mjs");
+const SEARCH = join(__dir, "..", "bin", "search.mjs");
 
 // ANSI colors
 const C = {
