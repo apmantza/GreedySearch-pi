@@ -41,6 +41,10 @@ const CDP = join(__dir, "cdp.mjs");
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, "/")}/cdp-pages.json`;
 
 const GREEDY_PORT = 9222;
+const SOURCE_FETCH_CONCURRENCY = Math.max(
+	1,
+	parseInt(process.env.GREEDY_FETCH_CONCURRENCY || "2", 10) || 2,
+);
 
 const ENGINES = {
 	perplexity: "perplexity.mjs",
@@ -1028,38 +1032,59 @@ async function fetchSourceContentBrowser(url, maxChars = 8000) {
 	}
 }
 
-async function fetchMultipleSources(sources, maxSources = 5, maxChars = 8000) {
-	process.stderr.write(
-		`[greedysearch] Fetching content from ${Math.min(sources.length, maxSources)} sources via HTTP (parallel)...\n`,
+async function fetchMultipleSources(
+	sources,
+	maxSources = 5,
+	maxChars = 8000,
+	concurrency = SOURCE_FETCH_CONCURRENCY,
+) {
+	const toFetch = sources.slice(0, maxSources);
+	if (toFetch.length === 0) return [];
+
+	const workerCount = Math.min(
+		toFetch.length,
+		Math.max(1, parseInt(String(concurrency), 10) || SOURCE_FETCH_CONCURRENCY),
 	);
 
-	const toFetch = sources.slice(0, maxSources);
+	process.stderr.write(
+		`[greedysearch] Fetching content from ${toFetch.length} sources via HTTP (concurrency ${workerCount})...\n`,
+	);
 
-	// Fetch all sources in parallel via HTTP
-	const fetchPromises = toFetch.map(async (s, index) => {
-		const url = s.canonicalUrl || s.url;
-		process.stderr.write(
-			`[greedysearch] [${index + 1}/${toFetch.length}] Fetching: ${url.slice(0, 60)}...\n`,
-		);
+	const fetched = new Array(toFetch.length);
+	let nextIndex = 0;
+	let completed = 0;
 
-		const result = await fetchSourceContent(url, maxChars);
+	async function worker() {
+		while (true) {
+			const index = nextIndex++;
+			if (index >= toFetch.length) return;
 
-		if (result.content && result.content.length > 100) {
+			const s = toFetch[index];
+			const url = s.canonicalUrl || s.url;
 			process.stderr.write(
-				`[greedysearch] ✓ ${result.source}: ${result.content.length} chars\n`,
+				`[greedysearch] [${index + 1}/${toFetch.length}] Fetching: ${url.slice(0, 60)}...\n`,
 			);
-		} else if (result.error) {
-			process.stderr.write(`[greedysearch] ✗ ${result.error.slice(0, 80)}\n`);
+
+			const result = await fetchSourceContent(url, maxChars);
+			fetched[index] = {
+				id: s.id,
+				...result,
+			};
+
+			if (result.content && result.content.length > 100) {
+				process.stderr.write(
+					`[greedysearch] ✓ ${result.source}: ${result.content.length} chars\n`,
+				);
+			} else if (result.error) {
+				process.stderr.write(`[greedysearch] ✗ ${result.error.slice(0, 80)}\n`);
+			}
+
+			completed += 1;
+			process.stderr.write(`PROGRESS:fetch:${completed}/${toFetch.length}\n`);
 		}
-		process.stderr.write(`PROGRESS:fetch:${index + 1}/${toFetch.length}\n`);
+	}
 
-		return {
-			id: s.id,
-			...result,
-		};
-	});
-
-	const fetched = await Promise.all(fetchPromises);
+	await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
 	// Log summary
 	const successful = fetched.filter((f) => f.content && f.content.length > 100);
