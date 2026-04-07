@@ -10,6 +10,8 @@ test/
 test.mjs
 test.sh
 package-lock.json
+nul
+newfeaturesideas.md
 
 # Local development docs (not for distribution)
 FEATURES.md

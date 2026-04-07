@@ -1213,29 +1213,51 @@ function probeGreedyChrome(timeoutMs = 3000) {
 async function refreshPortFile() {
 	const LOCK_FILE = `${ACTIVE_PORT_FILE}.lock`;
 	const TEMP_FILE = `${ACTIVE_PORT_FILE}.tmp`;
+	const LOCK_STALE_MS = 5000;
+	const LOCK_WAIT_MS = 1000;
 
-	// Simple file-based lock with timeout (prevents parallel writes from corrupting the port file)
+	// File-based lock with exclusive create + stale lock recovery
 	const lockAcquired = await new Promise((resolve) => {
 		const start = Date.now();
 		const tryLock = () => {
 			try {
-				writeFileSync(LOCK_FILE, `${process.pid}`, "utf8");
+				const payload = JSON.stringify({ pid: process.pid, ts: Date.now() });
+				writeFileSync(LOCK_FILE, payload, { encoding: "utf8", flag: "wx" });
 				resolve(true);
-			} catch {
-				// Lock file exists - check if stale (older than 5 seconds)
-				try {
-					const lockTime = parseInt(readFileSync(LOCK_FILE, "utf8"), 10);
-					if (Date.now() - lockTime > 5000) {
-						// Stale lock - overwrite
-						writeFileSync(LOCK_FILE, `${process.pid}`, "utf8");
-						resolve(true);
-					} else if (Date.now() - start < 1000) {
+			} catch (e) {
+				if (e?.code !== "EEXIST") {
+					if (Date.now() - start < LOCK_WAIT_MS) {
 						setTimeout(tryLock, 50);
 					} else {
-						resolve(false); // Give up after 1s
+						resolve(false);
+					}
+					return;
+				}
+
+				try {
+					const lockRaw = readFileSync(LOCK_FILE, "utf8").trim();
+					const parsed = lockRaw.startsWith("{")
+						? JSON.parse(lockRaw)
+						: { ts: Number(lockRaw) };
+					const lockTime = Number(parsed?.ts) || 0;
+
+					if (lockTime > 0 && Date.now() - lockTime > LOCK_STALE_MS) {
+						try {
+							unlinkSync(LOCK_FILE);
+						} catch {}
+					}
+
+					if (Date.now() - start < LOCK_WAIT_MS) {
+						setTimeout(tryLock, 50);
+					} else {
+						resolve(false);
 					}
 				} catch {
-					setTimeout(tryLock, 50);
+					if (Date.now() - start < LOCK_WAIT_MS) {
+						setTimeout(tryLock, 50);
+					} else {
+						resolve(false);
+					}
 				}
 			}
 		};
@@ -1381,18 +1403,18 @@ async function main() {
 		// PARALLEL-SAFE: Always create fresh tabs for each engine to avoid race conditions
 		// when multiple "all" searches run concurrently. Previously, reusing cached tabs
 		// caused ERR_ABORTED and Uncaught errors as multiple processes fought over the same tab.
-		const tabs = [];
+		const engineTabs = [];
 		for (let i = 0; i < ALL_ENGINES.length; i++) {
 			if (i > 0) await new Promise((r) => setTimeout(r, 300)); // small delay between tab opens
 			const tab = await openNewTab();
-			tabs.push(tab);
+			engineTabs.push(tab);
 		}
 
 		// All tabs assigned — run extractors in parallel
 		try {
 			const results = await Promise.allSettled(
 				ALL_ENGINES.map((e, i) =>
-					runExtractor(ENGINES[e], query, tabs[i], short)
+					runExtractor(ENGINES[e], query, engineTabs[i], short)
 						.then((r) => {
 							process.stderr.write(`PROGRESS:${e}:done\n`);
 							return { engine: e, ...r };
@@ -1414,7 +1436,7 @@ async function main() {
 				}
 			}
 
-			await closeTabs(tabs);
+			await closeTabs(engineTabs);
 
 			// Build a canonical source registry across all engines
 			out._sources = buildSourceRegistry(out, query);
@@ -1440,14 +1462,13 @@ async function main() {
 					"[greedysearch] Synthesizing results with Gemini...\n",
 				);
 				try {
-					// Create fresh Gemini tab per search (not cached) to avoid conflicts in parallel searches
-					const geminiTab = await openNewTab();
-					tabs.push(geminiTab); // ensure cleanup in finally block
+					const geminiTab = await getOrOpenEngineTab("gemini");
 					await activateTab(geminiTab);
 					const synthesis = await synthesizeWithGemini(query, out, {
 						grounded: depth === "deep",
 						tabPrefix: geminiTab,
 					});
+					await activateTab(geminiTab);
 					out._synthesis = {
 						...synthesis,
 						synthesized: true,
@@ -1477,7 +1498,7 @@ async function main() {
 			});
 			return;
 		} finally {
-			await closeTabs(tabs);
+			await closeTabs(engineTabs);
 		}
 	}
 
