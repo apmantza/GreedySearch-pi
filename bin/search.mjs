@@ -1461,7 +1461,7 @@ async function main() {
 					"[greedysearch] Synthesizing results with Gemini...\n",
 				);
 				try {
-					const geminiTab = await getOrOpenEngineTab("gemini");
+					const geminiTab = await openNewTab();
 					await activateTab(geminiTab);
 					const synthesis = await synthesizeWithGemini(query, out, {
 						grounded: depth === "deep",
