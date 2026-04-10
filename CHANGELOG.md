@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.7.3 (2026-04-10)
+
+### Fixes
+- **Force English in Google AI results** — Added `hl=en` query parameter to Google AI Mode search URL so responses are always returned in English, regardless of the user's IP-based region (fixes #1).
+
 ## v1.7.2 (2026-04-08)
 
 ### Release
