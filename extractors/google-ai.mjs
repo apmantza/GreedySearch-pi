@@ -105,7 +105,7 @@ async function main() {
 		await cdp(["list"]);
 		const tab = await getOrOpenTab(tabPrefix);
 
-		const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&udm=50`;
+		const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&udm=50&hl=en`;
 		await cdp(["nav", tab, url], 35000);
 		await new Promise((r) => setTimeout(r, 1500));
 		await dismissConsent(tab, cdp);
