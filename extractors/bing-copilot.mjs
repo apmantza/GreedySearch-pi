@@ -18,7 +18,9 @@ import {
 	outputJson,
 	parseArgs,
 	parseSourcesFromMarkdown,
+	TIMING,
 	validateQuery,
+	waitForCopyButton,
 } from "./common.mjs";
 import { dismissConsent, handleVerification } from "./consent.mjs";
 import { SELECTORS } from "./selectors.mjs";
@@ -29,20 +31,6 @@ const GLOBAL_VAR = "__bingClipboard";
 // ============================================================================
 // Bing Copilot-specific helpers
 // ============================================================================
-
-async function waitForCopyButton(tab, timeout = 60000) {
-	const deadline = Date.now() + timeout;
-	while (Date.now() < deadline) {
-		await new Promise((r) => setTimeout(r, 700));
-		const found = await cdp([
-			"eval",
-			tab,
-			`!!document.querySelector('${S.copyButton}')`,
-		]).catch(() => "false");
-		if (found === "true") return;
-	}
-	throw new Error(`Copilot copy button did not appear within ${timeout}ms`);
-}
 
 async function extractAnswer(tab) {
 	await cdp([
@@ -78,7 +66,7 @@ async function main() {
 
 		// Navigate to Copilot homepage and use the chat input
 		await cdp(["nav", tab, "https://copilot.microsoft.com/"], 35000);
-		await new Promise((r) => setTimeout(r, 2000));
+		await new Promise((r) => setTimeout(r, TIMING.postNavSlow));
 		await dismissConsent(tab, cdp);
 
 		// Handle verification challenges (Cloudflare Turnstile, Microsoft auth, etc.)
@@ -91,7 +79,7 @@ async function main() {
 
 		// After verification, page may have redirected or reloaded — wait for it to settle
 		if (verifyResult === "clicked") {
-			await new Promise((r) => setTimeout(r, 3000));
+			await new Promise((r) => setTimeout(r, TIMING.afterVerify));
 
 			// Re-navigate if we got redirected
 			const currentUrl = await cdp([
@@ -101,7 +89,7 @@ async function main() {
 			]).catch(() => "");
 			if (!currentUrl.includes("copilot.microsoft.com")) {
 				await cdp(["nav", tab, "https://copilot.microsoft.com/"], 35000);
-				await new Promise((r) => setTimeout(r, 2000));
+				await new Promise((r) => setTimeout(r, TIMING.postNavSlow));
 				await dismissConsent(tab, cdp);
 			}
 		}
@@ -133,9 +121,9 @@ async function main() {
 
 		await injectClipboardInterceptor(tab, GLOBAL_VAR);
 		await cdp(["click", tab, S.input]);
-		await new Promise((r) => setTimeout(r, 400));
+		await new Promise((r) => setTimeout(r, TIMING.postClick));
 		await cdp(["type", tab, query]);
-		await new Promise((r) => setTimeout(r, 400));
+		await new Promise((r) => setTimeout(r, TIMING.postType));
 
 		// Submit with Enter (most reliable across locales and Chrome instances)
 		await cdp([
@@ -144,7 +132,7 @@ async function main() {
 			`document.querySelector('${S.input}')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,keyCode:13})), 'ok'`,
 		]);
 
-		await waitForCopyButton(tab);
+		await waitForCopyButton(tab, S.copyButton, { timeout: 60000 });
 
 		const { answer, sources } = await extractAnswer(tab);
 		if (!answer)

@@ -12,7 +12,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { cdp, injectClipboardInterceptor } from "../extractors/common.mjs";
+import { cdp, injectClipboardInterceptor, waitForCopyButton } from "../extractors/common.mjs";
 import { dismissConsent, handleVerification } from "../extractors/consent.mjs";
 
 const __dir = fileURLToPath(new URL(".", import.meta.url));
@@ -31,9 +31,7 @@ const MODE_PROMPTS = {
 	debug: `You are a senior engineer debugging someone else's code. You have fresh eyes — no prior assumptions about what should work. Given the bug description and relevant code: (1) identify the most likely root cause, being specific about the exact line or condition, (2) explain why it manifests the way it does, (3) suggest the minimal fix, (4) flag any other latent bugs you notice while reading. Do not guess vaguely — reason from the code. If you need information that isn't provided, say exactly what you'd add to narrow it down.`,
 };
 
-const STREAM_POLL_INTERVAL = 800;
-const STREAM_STABLE_ROUNDS = 4;
-const STREAM_TIMEOUT = 120000; // coding tasks take longer
+const STREAM_TIMEOUT = 120000; // coding tasks take longer — passed to waitForCopyButton
 const MIN_RESPONSE_LENGTH = 50;
 
 // ---------------------------------------------------------------------------
@@ -104,17 +102,7 @@ const ENGINES = {
 		},
 
 		async waitForCopyButton(tab) {
-			const deadline = Date.now() + STREAM_TIMEOUT;
-			while (Date.now() < deadline) {
-				await new Promise((r) => setTimeout(r, STREAM_POLL_INTERVAL));
-				const found = await cdp([
-					"eval",
-					tab,
-					`!!document.querySelector('button[aria-label="Copy"]')`,
-				]).catch(() => "false");
-				if (found === "true") return;
-			}
-			throw new Error("Gemini copy button did not appear within timeout");
+			await waitForCopyButton(tab, 'button[aria-label="Copy"]', { timeout: STREAM_TIMEOUT });
 		},
 
 		async extract(tab) {
@@ -162,17 +150,7 @@ const ENGINES = {
 		},
 
 		async waitForCopyButton(tab) {
-			const deadline = Date.now() + STREAM_TIMEOUT;
-			while (Date.now() < deadline) {
-				await new Promise((r) => setTimeout(r, STREAM_POLL_INTERVAL));
-				const found = await cdp([
-					"eval",
-					tab,
-					`!!document.querySelector('button[data-testid="copy-ai-message-button"]')`,
-				]).catch(() => "false");
-				if (found === "true") return;
-			}
-			throw new Error("Copilot copy button did not appear within timeout");
+			await waitForCopyButton(tab, 'button[data-testid="copy-ai-message-button"]', { timeout: STREAM_TIMEOUT });
 		},
 
 		async extract(tab) {

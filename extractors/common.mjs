@@ -120,6 +120,46 @@ export function parseSourcesFromMarkdown(text) {
 }
 
 // ============================================================================
+// Timing constants
+// ============================================================================
+
+export const TIMING = {
+	postNav: 1500,       // settle after navigation
+	postNavSlow: 2000,   // settle after slower navigations (Bing, Gemini)
+	postClick: 400,      // settle after a UI click
+	postType: 400,       // settle after typing
+	inputPoll: 400,      // polling interval when waiting for input to appear
+	copyPoll: 600,       // polling interval when waiting for copy button
+	afterVerify: 3000,   // settle after a verification challenge completes
+};
+
+// ============================================================================
+// Copy button polling
+// ============================================================================
+
+/**
+ * Wait for a copy button to appear in the DOM.
+ * @param {string} tab - Tab identifier
+ * @param {string} selector - CSS selector for the copy button
+ * @param {object} [options]
+ * @param {number} [options.timeout=60000] - Max wait in ms
+ * @param {Function} [options.onPoll] - Optional async callback on each poll tick (e.g. scroll)
+ * @returns {Promise<void>}
+ */
+export async function waitForCopyButton(tab, selector, options = {}) {
+	const { timeout = 60000, onPoll } = options;
+	const deadline = Date.now() + timeout;
+	let tick = 0;
+	while (Date.now() < deadline) {
+		await new Promise((r) => setTimeout(r, TIMING.copyPoll));
+		if (onPoll) await onPoll(++tick).catch(() => null);
+		const found = await cdp(["eval", tab, `!!document.querySelector('${selector}')`]).catch(() => "false");
+		if (found === "true") return;
+	}
+	throw new Error(`Copy button ('${selector}') did not appear within ${timeout}ms`);
+}
+
+// ============================================================================
 // Stream completion detection
 // ============================================================================
 
@@ -139,6 +179,7 @@ export async function waitForStreamComplete(tab, options = {}) {
 		interval = 600,
 		stableRounds = 3,
 		selector = "document.body",
+		minLength = 0,
 	} = options;
 
 	const deadline = Date.now() + timeout;
@@ -154,7 +195,7 @@ export async function waitForStreamComplete(tab, options = {}) {
 		]).catch(() => "0");
 		const currentLen = parseInt(lenStr, 10) || 0;
 
-		if (currentLen > 0) {
+		if (currentLen >= minLength) {
 			if (currentLen === lastLen) {
 				stableCount++;
 				if (stableCount >= stableRounds) return currentLen;
@@ -165,6 +206,7 @@ export async function waitForStreamComplete(tab, options = {}) {
 		}
 	}
 
+	if (lastLen >= minLength) return lastLen;
 	throw new Error(`Generation did not stabilise within ${timeout}ms`);
 }
 

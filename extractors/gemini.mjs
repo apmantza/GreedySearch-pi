@@ -18,7 +18,9 @@ import {
 	outputJson,
 	parseArgs,
 	parseSourcesFromMarkdown,
+	TIMING,
 	validateQuery,
+	waitForCopyButton,
 } from "./common.mjs";
 import { dismissConsent, handleVerification } from "./consent.mjs";
 import { SELECTORS } from "./selectors.mjs";
@@ -46,36 +48,15 @@ async function typeIntoGemini(tab, text) {
 	]);
 }
 
-async function waitForCopyButton(tab, timeout = 120000) {
-	const deadline = Date.now() + timeout;
-	let scrollCount = 0;
-	while (Date.now() < deadline) {
-		await new Promise((r) => setTimeout(r, 600));
-
-		// Scroll to bottom every ~6 seconds to trigger lazy loading and ensure copy button appears
-		if (++scrollCount % 10 === 0) {
-			await cdp([
-				"eval",
-				tab,
-				`
-				(function() {
-					const chat = document.querySelector('chat-window, [role="main"], main') || document.body;
-					const scrollHeight = chat.scrollHeight || document.body.scrollHeight || 0;
-					// Scroll to bottom to ensure all content is loaded
-					chat.scrollTo ? chat.scrollTo({ top: scrollHeight, behavior: 'smooth' }) : window.scrollTo(0, scrollHeight);
-				})()
-			`,
-			]).catch(() => null);
-		}
-
-		const found = await cdp([
-			"eval",
-			tab,
-			`!!document.querySelector('${S.copyButton}')`,
-		]).catch(() => "false");
-		if (found === "true") return;
-	}
-	throw new Error(`Gemini copy button did not appear within ${timeout}ms`);
+async function scrollToBottom(tab) {
+	await cdp([
+		"eval",
+		tab,
+		`(function() {
+			const chat = document.querySelector('chat-window, [role="main"], main') || document.body;
+			chat.scrollTo ? chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' }) : window.scrollTo(0, document.body.scrollHeight);
+		})()`,
+	]);
 }
 
 async function extractAnswer(tab) {
@@ -111,7 +92,7 @@ async function main() {
 
 		// Each search = fresh conversation
 		await cdp(["nav", tab, "https://gemini.google.com/app"], 35000);
-		await new Promise((r) => setTimeout(r, 2000));
+		await new Promise((r) => setTimeout(r, TIMING.postNavSlow));
 		await dismissConsent(tab, cdp);
 		await handleVerification(tab, cdp, 60000);
 
@@ -124,13 +105,13 @@ async function main() {
 				`!!document.querySelector('${S.input}')`,
 			]).catch(() => "false");
 			if (ready === "true") break;
-			await new Promise((r) => setTimeout(r, 400));
+			await new Promise((r) => setTimeout(r, TIMING.inputPoll));
 		}
-		await new Promise((r) => setTimeout(r, 300));
+		await new Promise((r) => setTimeout(r, TIMING.postClick));
 
 		await injectClipboardInterceptor(tab, GLOBAL_VAR);
 		await typeIntoGemini(tab, query);
-		await new Promise((r) => setTimeout(r, 400));
+		await new Promise((r) => setTimeout(r, TIMING.postType));
 
 		await cdp([
 			"eval",
@@ -138,7 +119,11 @@ async function main() {
 			`document.querySelector('${S.sendButton}')?.click()`,
 		]);
 
-		await waitForCopyButton(tab);
+		// Scroll to bottom every ~6s while waiting to trigger lazy-loaded content
+		await waitForCopyButton(tab, S.copyButton, {
+			timeout: 120000,
+			onPoll: (tick) => tick % 10 === 0 ? scrollToBottom(tab) : Promise.resolve(),
+		});
 
 		const { answer, sources } = await extractAnswer(tab);
 		if (!answer) throw new Error("No answer captured from Gemini clipboard");

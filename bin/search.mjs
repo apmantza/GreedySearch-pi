@@ -752,27 +752,6 @@ async function getAnyTab() {
 	return first.slice(0, 8);
 }
 
-async function _getOrReuseBlankTab() {
-	// Reuse an existing about:blank tab rather than always creating a new one
-	const listOut = await cdp(["list"]);
-	const lines = listOut.split("\n").filter(Boolean);
-	for (const line of lines) {
-		if (line.includes("about:blank")) {
-			return line.slice(0, 8); // prefix of the blank tab's targetId
-		}
-	}
-	// No blank tab — open a new one
-	const anchor = await getAnyTab();
-	const raw = await cdp([
-		"evalraw",
-		anchor,
-		"Target.createTarget",
-		'{"url":"about:blank"}',
-	]);
-	const { targetId } = JSON.parse(raw);
-	return targetId;
-}
-
 async function openNewTab() {
 	const anchor = await getAnyTab();
 	const raw = await cdp([
@@ -783,11 +762,6 @@ async function openNewTab() {
 	]);
 	const { targetId } = JSON.parse(raw);
 	return targetId;
-}
-
-async function _getOrOpenEngineTab(engine) {
-	await cdp(["list"]);
-	return getFullTabFromCache(engine) || openNewTab();
 }
 
 async function activateTab(targetId) {
