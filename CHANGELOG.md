@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.7.4 (2026-04-10)
+
+### Refactor
+- **Shared `waitForCopyButton()`** — consolidated duplicate copy-button polling loops from `bing-copilot`, `gemini`, and `coding-task` into a single `waitForCopyButton(tab, selector, { timeout, onPoll })` in `common.mjs`. Gemini's scroll-to-bottom logic passed as `onPoll` callback.
+- **Shared `TIMING` constants** — replaced 30+ scattered `setTimeout` magic numbers with named constants (`postNav`, `postNavSlow`, `postClick`, `postType`, `inputPoll`, `copyPoll`, `afterVerify`) in `common.mjs`.
+- **`waitForStreamComplete` improvements** — added `minLength` option and graceful last-value fallback; `google-ai` now uses the shared implementation instead of its own copy.
+- **Removed dead code** — deleted unused `_getOrReuseBlankTab` and `_getOrOpenEngineTab` from `bin/search.mjs`; removed unused `STREAM_POLL_INTERVAL` and `STREAM_STABLE_ROUNDS` from `coding-task`.
+
+### Fixes
+- **Synthesis tab regression** — `getOrOpenEngineTab("gemini")` call during synthesis was broken by the dead-code removal; replaced with `openNewTab()`.
+
 ## v1.7.3 (2026-04-10)
 
 ### Fixes
