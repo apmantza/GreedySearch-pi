@@ -1,0 +1,73 @@
+name: Mirror to GreedySearch-claude
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout GreedySearch-pi
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout GreedySearch-claude
+        uses: actions/checkout@v4
+        with:
+          repository: apmantza/GreedySearch-claude
+          token: ${{ secrets.MIRROR_PAT }}
+          path: claude-repo
+          fetch-depth: 0
+
+      - name: Sync files to claude repo
+        run: |
+          cd claude-repo
+
+          # Wipe everything except .git
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+
+          # Copy everything from pi except npm/pi-specific artifacts
+          rsync -a \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='package-lock.json' \
+            --exclude='.npmignore' \
+            --exclude='index.ts' \
+            --exclude='results/' \
+            --exclude='test/' \
+            --exclude='test.mjs' \
+            --exclude='test.sh' \
+            --exclude='scripts/' \
+            ../. .
+
+          # Use claude-specific README
+          if [ -f README-claude.md ]; then
+            mv README-claude.md README.md
+          fi
+
+          # Remove pi-specific files that don't belong in claude plugin
+          rm -f README-claude.md index.ts .npmignore
+
+      - name: Update plugin.json version from package.json
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          cd claude-repo
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('.claude-plugin/plugin.json', 'utf8'));
+            p.version = '$VERSION';
+            fs.writeFileSync('.claude-plugin/plugin.json', JSON.stringify(p, null, 2) + '\n');
+          "
+
+      - name: Commit and push to GreedySearch-claude
+        run: |
+          cd claude-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet && echo "No changes to mirror" && exit 0
+          COMMIT=$(git -C .. rev-parse --short HEAD)
+          git commit -m "mirror: sync from GreedySearch-pi@${COMMIT}"
+          git push origin HEAD:main

@@ -1,5 +1,8 @@
 .claude/
+.claude-plugin/
 .pi-lens/
+scripts/
+README-claude.md
 node_modules/
 .ruff_cache/
 .git/
