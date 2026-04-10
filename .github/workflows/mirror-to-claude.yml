@@ -31,6 +31,7 @@ jobs:
           # Copy everything from pi except npm/pi-specific artifacts
           rsync -a \
             --exclude='.git' \
+            --exclude='.github' \
             --exclude='node_modules' \
             --exclude='package-lock.json' \
             --exclude='.npmignore' \
