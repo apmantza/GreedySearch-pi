@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "greedysearch",
+  "description": "GreedySearch — multi-engine AI web search for Claude Code",
+  "owner": {
+    "name": "Apostolos Mantzaris",
+    "email": "apmantza@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "greedysearch",
+      "description": "Multi-engine AI web search — Perplexity, Bing Copilot, and Google AI in parallel with Gemini synthesis. No API keys needed.",
+      "version": "1.7.4",
+      "author": {
+        "name": "Apostolos Mantzaris",
+        "email": "apmantza@gmail.com"
+      },
+      "source": "./",
+      "category": "research",
+      "keywords": ["search", "perplexity", "bing", "google", "gemini", "research", "web-search"]
+    }
+  ]
+}
