@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.7.5 (2026-04-10)
+
+### Plugin
+- **Claude Code plugin** — added `.claude-plugin/plugin.json` and `marketplace.json` so GreedySearch can be installed directly as a Claude Code plugin via `claude plugin install`.
+- **Auto-mirror GH Action** — every push to `GreedySearch-pi/master` automatically syncs to `GreedySearch-claude/main`, keeping the Claude plugin up to date.
+- **Tightened `skill.md`** — removed verbose guidance sections; kept parameters, depth table, and coding_task reference. -72 lines.
+
 ## v1.7.4 (2026-04-10)
 
 ### Refactor
