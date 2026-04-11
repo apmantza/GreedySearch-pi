@@ -1467,11 +1467,11 @@ async function main() {
 						grounded: depth === "deep",
 						tabPrefix: geminiTab,
 					});
-					await activateTab(geminiTab);
 					out._synthesis = {
 						...synthesis,
 						synthesized: true,
 					};
+					await closeTab(geminiTab);
 					process.stderr.write("PROGRESS:synthesis:done\n");
 				} catch (e) {
 					process.stderr.write(

@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.7.6 (2026-04-11)
+
+### Fixes
+- **Close Gemini synthesis tab** — after synthesis completes, the Gemini tab is now closed instead of merely activated, preventing stale tabs from accumulating across searches.
+
 ## v1.7.5 (2026-04-10)
 
 ### Plugin
