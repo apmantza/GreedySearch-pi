@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.7.7 (2026-04-14)
+
+### Fixes
+- **`--deep` flag leaking into queries** — `depth: "deep"` was passing `--deep` as a bare flag to `search.mjs`, which didn't recognize it and appended it to the query string. Fixed by passing `--depth deep` instead; also added `--deep` as a recognized flag in `search.mjs` for backward compatibility with the legacy `deep_research` tool.
+- **GitHub fetch always failing** — `git clone` was being `await`-ed on a non-Promise `ChildProcess` object (Node `execFile` is callback-based), so the clone never actually completed and content was always empty. Replaced git clone entirely with GitHub REST API calls: repo info + README + file tree fetched via parallel HTTP requests (~2-5s vs 30-60s, no git dependency). Non-existent repos now correctly return `ok: false`.
+- **`--inline` test false negative** — smoke test was interpolating multiline JSON stdout into a `node -e` string, always producing `PARSE_ERROR`. Fixed to write stdout to a temp file and parse from file.
+
+### Features
+- **Rich source metadata** — HTTP-fetched sources now include `publishedTime`, `lastModified`, `byline`, `siteName`, and `lang`. `publishedTime` is extracted from Readability's parser plus a fallback chain of 8 `<meta>` selectors (Open Graph, schema.org, Dublin Core). All fields flow through to the Gemini synthesis prompt. Gemini is instructed to flag sources older than 2 years as potentially stale in caveats.
+- **GitHub Fetch Tests** — smoke/edge/quick test modes now include 4 GitHub-specific tests: root repo API fetch (README + tree), blob file via raw URL, blob via HTTP fetcher pipeline, and graceful failure on non-existent repo.
+
 ## v1.7.6 (2026-04-11)
 
 ### Fixes
