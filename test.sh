@@ -152,13 +152,14 @@ check_answer_truncated() {
 }
 
 check_inline_output() {
-  local stdout="$1"
+  local file="$1"
   node -e "
+    const fs = require('fs');
     try {
-      const d = JSON.parse('$stdout');
+      const d = JSON.parse(fs.readFileSync('$file', 'utf8'));
       console.log(d.answer || d.perplexity?.answer || d.google?.answer ? 'OK' : 'NO_ANSWER_IN_JSON');
-    } catch {
-      console.log('INVALID_JSON');
+    } catch(e) {
+      console.log('INVALID_JSON: ' + e.message);
     }
   " 2>/dev/null || echo "PARSE_ERROR"
 }
@@ -264,10 +265,11 @@ if [[ "$1" == "" || "$1" == "flags" || "$1" == "quick" || "$1" == "smoke" ]]; th
   fi
   
   subsection "Testing --inline flag (stdout output)..."
-  
-  stdout=$(run_search_stdout "perplexity" "what is AI" "--inline" 90)
-  if [[ "$stdout" != "TIMEOUT" && -n "$stdout" ]]; then
-    inline=$(check_inline_output "$stdout")
+
+  inline_tmp="$RESULTS_DIR/flag_inline.json"
+  timeout 90 node bin/search.mjs perplexity "what is AI" --inline 2>/dev/null > "$inline_tmp" || true
+  if [[ -s "$inline_tmp" ]]; then
+    inline=$(check_inline_output "$inline_tmp")
     if [[ "$inline" == "OK" ]]; then
       pass "--inline: JSON output to stdout"
     else
@@ -627,6 +629,108 @@ if [[ "$1" == "" || "$1" == "edge" || "$1" == "quick" ]]; then
 fi
 
 # ════════════════════════════════════════════════════════
+section "🐙 GitHub Fetch Tests"
+# ════════════════════════════════════════════════════════
+
+if [[ "$1" == "" || "$1" == "edge" || "$1" == "quick" || "$1" == "smoke" ]]; then
+  # Run a GitHub fetch test using a temp .mjs file in RESULTS_DIR (keeps relative imports valid)
+  run_gh_node() {
+    local outfile="$1"
+    local nodescript="$2"
+    local timeout_sec="${3:-20}"
+    local tmpscript="./_gh_test_$.mjs"
+    printf '%s
+' "$nodescript" > "$tmpscript"
+    timeout "$timeout_sec" node "$tmpscript" 2>/dev/null || true
+    rm -f "$tmpscript"
+  }
+
+  subsection "Test 1: Root repo fetch (API — README + tree)..."
+
+  gh_tmp="$RESULTS_DIR/gh_root.json"
+  run_gh_node "$gh_tmp" "
+    import { fetchGitHubContent } from './src/github.mjs';
+    import { writeFileSync } from 'fs';
+    try {
+      const r = await fetchGitHubContent('https://github.com/danicat/testquery');
+      writeFileSync('$gh_tmp', JSON.stringify(r));
+    } catch(e) { writeFileSync('$gh_tmp', JSON.stringify({ ok: false, error: e.message })); }
+  "
+  if [[ -f "$gh_tmp" ]]; then
+    result=$(node -e "
+      const r = JSON.parse(require('fs').readFileSync('$gh_tmp', 'utf8'));
+      console.log(r.ok && r.content.length > 100 ? 'OK(chars=' + r.content.length + ', tree=' + (r.tree?.length||0) + ')' : 'FAIL: ' + (r.error||'short content'));
+    " 2>/dev/null)
+    [[ "$result" == OK* ]] && pass "GitHub root: $result" || fail "GitHub root: ${result:-no output}"
+  else
+    fail "GitHub root: no output"
+  fi
+
+  subsection "Test 2: Blob file fetch (raw URL)..."
+
+  gh_tmp2="$RESULTS_DIR/gh_blob.json"
+  run_gh_node "$gh_tmp2" "
+    import { fetchGitHubContent } from './src/github.mjs';
+    import { writeFileSync } from 'fs';
+    try {
+      const r = await fetchGitHubContent('https://github.com/expressjs/express/blob/master/Readme.md');
+      writeFileSync('$gh_tmp2', JSON.stringify(r));
+    } catch(e) { writeFileSync('$gh_tmp2', JSON.stringify({ ok: false, error: e.message })); }
+  "
+  if [[ -f "$gh_tmp2" ]]; then
+    result=$(node -e "
+      const r = JSON.parse(require('fs').readFileSync('$gh_tmp2', 'utf8'));
+      console.log(r.ok && r.content.length > 100 ? 'OK(chars=' + r.content.length + ')' : 'FAIL: ' + (r.error||'short content'));
+    " 2>/dev/null)
+    [[ "$result" == OK* ]] && pass "GitHub blob: $result" || fail "GitHub blob: ${result:-no output}"
+  else
+    fail "GitHub blob: no output"
+  fi
+
+  subsection "Test 3: GitHub blob via HTTP fetcher (raw URL rewrite)..."
+
+  gh_tmp3="$RESULTS_DIR/gh_fetcher.json"
+  run_gh_node "$gh_tmp3" "
+    import { fetchSourceHttp } from './src/fetcher.mjs';
+    import { writeFileSync } from 'fs';
+    try {
+      const r = await fetchSourceHttp('https://github.com/expressjs/express/blob/master/Readme.md');
+      writeFileSync('$gh_tmp3', JSON.stringify({ ok: r.ok, title: r.title, length: r.markdown?.length, needsBrowser: r.needsBrowser, error: r.error }));
+    } catch(e) { writeFileSync('$gh_tmp3', JSON.stringify({ ok: false, error: e.message })); }
+  "
+  if [[ -f "$gh_tmp3" ]]; then
+    result=$(node -e "
+      const r = JSON.parse(require('fs').readFileSync('$gh_tmp3', 'utf8'));
+      console.log(r.ok && r.length > 100 ? 'OK(chars=' + r.length + ')' : 'FAIL: ' + (r.error||'ok='+r.ok));
+    " 2>/dev/null)
+    [[ "$result" == OK* ]] && pass "GitHub via fetcher: $result" || fail "GitHub via fetcher: ${result:-no output}"
+  else
+    fail "GitHub via fetcher: no output"
+  fi
+
+  subsection "Test 4: Invalid GitHub URL graceful failure..."
+
+  gh_tmp4="$RESULTS_DIR/gh_invalid.json"
+  run_gh_node "$gh_tmp4" "
+    import { fetchGitHubContent } from './src/github.mjs';
+    import { writeFileSync } from 'fs';
+    try {
+      const r = await fetchGitHubContent('https://github.com/this-owner-does-not-exist-xyz/no-repo-here');
+      writeFileSync('$gh_tmp4', JSON.stringify(r));
+    } catch(e) { writeFileSync('$gh_tmp4', JSON.stringify({ ok: false, error: e.message })); }
+  " 15
+  if [[ -f "$gh_tmp4" ]]; then
+    result=$(node -e "
+      const r = JSON.parse(require('fs').readFileSync('$gh_tmp4', 'utf8'));
+      console.log(!r.ok && r.error ? 'OK(graceful: ' + r.error.slice(0,50) + ')' : 'FAIL: returned ok=true');
+    " 2>/dev/null)
+    [[ "$result" == OK* ]] && pass "GitHub invalid URL: $result" || fail "GitHub invalid URL: ${result:-no output}"
+  else
+    fail "GitHub invalid URL: no output"
+  fi
+fi
+
+# ════════════════════════════════════════════════════════
 section "💻 Coding Task Tests"
 # ════════════════════════════════════════════════════════
 
@@ -801,6 +905,12 @@ cat >> "$REPORT_FILE" << 'EOF'
 - Long queries
 - Short queries
 - Unicode/international text
+
+### GitHub Fetch Tests
+- Root repo fetch (README + tree via API)
+- Blob file fetch (raw.githubusercontent.com rewrite)
+- Full pipeline via HTTP fetcher
+- Invalid URL graceful failure
 
 ### Coding Task Tests
 - Code generation

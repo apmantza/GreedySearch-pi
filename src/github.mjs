@@ -173,7 +173,12 @@ export async function fetchGitHubContent(url) {
 				fetchTree(owner, repo, ref || "HEAD"),
 			]);
 
-			const info = repoInfo.status === "fulfilled" ? repoInfo.value : null;
+			// If repo info failed (e.g. 404 — repo doesn't exist), bail out
+			if (repoInfo.status === "rejected") {
+				return { ok: false, error: repoInfo.reason?.message || "Repo not found" };
+			}
+
+			const info = repoInfo.value;
 			const readmeText = readme.status === "fulfilled" ? readme.value : "";
 			const treeItems = tree.status === "fulfilled" ? tree.value : [];
 
