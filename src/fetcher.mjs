@@ -178,6 +178,7 @@ export async function fetchSourceHttp(url, options = {}) {
 
 		const contentType = response.headers.get("content-type") || "";
 		const finalUrl = response.url;
+		const lastModified = response.headers.get("last-modified") || "";
 
 		// Handle raw text/plain from GitHub (raw file content)
 		if (
@@ -191,6 +192,11 @@ export async function fetchSourceHttp(url, options = {}) {
 				finalUrl,
 				status: response.status,
 				title: finalUrl.split("/").pop() || "GitHub File",
+				byline: "",
+				siteName: "GitHub",
+				lang: "",
+				publishedTime: lastModified,
+				lastModified,
 				markdown: text,
 				contentLength: text.length,
 				excerpt: text.slice(0, 300).replace(/\n/g, " "),
@@ -250,6 +256,11 @@ export async function fetchSourceHttp(url, options = {}) {
 			finalUrl,
 			status: response.status,
 			title: extracted.title,
+			byline: extracted.byline,
+			siteName: extracted.siteName,
+			lang: extracted.lang,
+			publishedTime: extracted.publishedTime || lastModified,
+			lastModified,
 			markdown: extracted.markdown,
 			excerpt: extracted.excerpt,
 			contentLength: extracted.markdown.length,
@@ -438,6 +449,29 @@ function isNetworkErrorRetryableWithBrowser(error) {
 }
 
 /**
+ * Extract a date string from <meta> tags (Open Graph, schema.org, standard)
+ * Returns ISO string or empty string.
+ */
+function extractMetaDate(document) {
+	const selectors = [
+		'meta[property="article:published_time"]',
+		'meta[name="article:published_time"]',
+		'meta[property="og:published_time"]',
+		'meta[name="publication_date"]',
+		'meta[name="date"]',
+		'meta[itemprop="datePublished"]',
+		'time[itemprop="datePublished"]',
+		'meta[name="DC.date"]',
+	];
+	for (const sel of selectors) {
+		const el = document.querySelector(sel);
+		const val = el?.getAttribute("content") || el?.getAttribute("datetime") || "";
+		if (val) return val;
+	}
+	return "";
+}
+
+/**
  * Extract readable content using Mozilla Readability + Turndown
  */
 function extractContent(html, url) {
@@ -452,8 +486,14 @@ function extractContent(html, url) {
 		const markdown = turndown.turndown(article.content);
 		const cleanMarkdown = markdown.replace(/\n{3,}/g, "\n\n").trim();
 
+		const publishedTime = article.publishedTime || extractMetaDate(document) || "";
+
 		return {
 			title: article.title || document.title || url,
+			byline: article.byline || "",
+			siteName: article.siteName || "",
+			lang: article.lang || "",
+			publishedTime,
 			markdown: cleanMarkdown,
 			excerpt: cleanMarkdown.slice(0, 300).replace(/\n/g, " "),
 		};
@@ -472,6 +512,10 @@ function extractContent(html, url) {
 
 		return {
 			title: document.title || url,
+			byline: "",
+			siteName: "",
+			lang: "",
+			publishedTime: extractMetaDate(document),
 			markdown: cleanText,
 			excerpt: cleanText.slice(0, 300),
 		};
@@ -480,6 +524,10 @@ function extractContent(html, url) {
 	// Last resort
 	return {
 		title: url,
+		byline: "",
+		siteName: "",
+		lang: "",
+		publishedTime: "",
 		markdown: "",
 		excerpt: "",
 	};

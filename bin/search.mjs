@@ -501,6 +501,10 @@ function mergeFetchDataIntoSources(sources, fetchedSources) {
 				finalUrl: fetched.finalUrl || fetched.url || source.canonicalUrl,
 				contentType: fetched.contentType || "",
 				lastModified: fetched.lastModified || "",
+				publishedTime: fetched.publishedTime || "",
+				byline: fetched.byline || "",
+				siteName: fetched.siteName || "",
+				lang: fetched.lang || "",
 				title: fetched.title || "",
 				snippet: fetched.snippet || "",
 				contentChars: fetched.contentChars || 0,
@@ -634,12 +638,15 @@ function buildSynthesisPrompt(
 		engineCount: source.engineCount,
 		perEngine: source.perEngine,
 		fetch:
-			grounded && source.fetch?.attempted
+			source.fetch?.attempted
 				? {
 						ok: source.fetch.ok,
 						status: source.fetch.status,
-						lastModified: source.fetch.lastModified,
-						snippet: trimText(source.fetch.snippet || "", 700),
+						publishedTime: source.fetch.publishedTime || "",
+						lastModified: source.fetch.lastModified || "",
+						byline: source.fetch.byline || "",
+						siteName: source.fetch.siteName || "",
+						...(grounded ? { snippet: trimText(source.fetch.snippet || "", 700) } : {}),
 					}
 				: undefined,
 	}));
@@ -650,6 +657,7 @@ function buildSynthesisPrompt(
 			? "Use the fetched source snippets as the strongest evidence. Use engine answers for perspective and conflict detection."
 			: "Use the engine answers for perspective. Use the source registry for provenance and citations.",
 		"Prefer official docs, release notes, repositories, and maintainer-authored sources when available.",
+		"When publishedTime or lastModified is available, flag sources older than 2 years as potentially stale in caveats.",
 		"If the engines disagree, say so explicitly.",
 		"Do not invent sources. Only reference source IDs from the source registry.",
 		"Return valid JSON only. No markdown fences, no prose outside the JSON object.",
@@ -907,15 +915,14 @@ async function fetchSourceContent(url, maxChars = 8000) {
 					snippet: content.slice(0, 320),
 					content,
 					contentChars: content.length,
-					source: "github-clone",
-					localPath: ghResult.localPath,
+					source: "github-api",
 					...(ghResult.tree && { tree: ghResult.tree }),
 					duration: Date.now() - start,
 				};
 			}
 			// If GitHub clone failed, fall through to HTTP (which will use raw for blobs)
 			process.stderr.write(
-				`[greedysearch] GitHub clone failed, trying HTTP: ${ghResult.error}\n`,
+				`[greedysearch] GitHub API fetch failed, trying HTTP: ${ghResult.error}\n`,
 			);
 		}
 	}
@@ -930,7 +937,11 @@ async function fetchSourceContent(url, maxChars = 8000) {
 			finalUrl: httpResult.finalUrl,
 			status: httpResult.status,
 			contentType: "text/markdown",
-			lastModified: "",
+			lastModified: httpResult.lastModified || "",
+			publishedTime: httpResult.publishedTime || "",
+			byline: httpResult.byline || "",
+			siteName: httpResult.siteName || "",
+			lang: httpResult.lang || "",
 			title: httpResult.title,
 			snippet: httpResult.excerpt,
 			content,
@@ -1366,9 +1377,12 @@ async function main() {
 		depth = "fast";
 	}
 
-	// --deep-research flag maps to standard (backward compat)
+	// --deep-research / --deep flags map to deep mode (backward compat)
 	if (args.includes("--deep-research")) {
 		depth = "standard";
+	}
+	if (args.includes("--deep")) {
+		depth = "deep";
 	}
 
 	// For "all" engine with no explicit flags, standard is already default
@@ -1387,6 +1401,7 @@ async function main() {
 			a !== "--fetch-top-source" &&
 			a !== "--synthesize" &&
 			a !== "--deep-research" &&
+			a !== "--deep" &&
 			a !== "--inline" &&
 			a !== "--depth" &&
 			a !== "--out" &&

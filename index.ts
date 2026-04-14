@@ -163,7 +163,7 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 			// For multi-engine, default to truncated to save tokens during synthesis
 			const fullAnswer = fullAnswerParam ?? (engine !== "all");
 			if (fullAnswer) flags.push("--full");
-			if (depth === "deep") flags.push("--deep");
+			if (depth === "deep") flags.push("--depth", "deep");
 			else if (depth === "standard" && engine === "all") flags.push("--synthesize");
 
 			const completed = new Set<string>();

@@ -1,19 +1,11 @@
-// src/github.mjs - GitHub repo cloning for better code extraction
+// src/github.mjs - GitHub content fetching via REST API
 
-import { execFile } from "node:child_process";
-import {
-	existsSync,
-	mkdtempSync,
-	readdirSync,
-	readFileSync,
-	statSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
-
-const CLONE_CACHE = new Map(); // repo key -> path
-const DEFAULT_MAX_FILES = 50;
-const MAX_FILE_SIZE_BYTES = 1024 * 1024; // 1MB per file
+const GITHUB_API = "https://api.github.com";
+const DEFAULT_HEADERS = {
+	"user-agent": "GreedySearch/1.0",
+	accept: "application/vnd.github+json",
+	"x-github-api-version": "2022-11-28",
+};
 
 /**
  * Parse a GitHub URL into components
@@ -29,7 +21,7 @@ export function parseGitHubUrl(url) {
 
 		const parts = parsed.pathname.split("/").filter(Boolean);
 		if (parts.length < 2) {
-			return null; // Need at least owner/repo
+			return null;
 		}
 
 		const [owner, repo] = parts;
@@ -54,201 +46,115 @@ export function parseGitHubUrl(url) {
 }
 
 /**
- * Check if git CLI is available
+ * Fetch JSON from GitHub API with timeout
  */
-async function checkGitAvailable() {
+async function apiGet(path, timeoutMs = 10000) {
+	const controller = new AbortController();
+	const tid = setTimeout(() => controller.abort(), timeoutMs);
 	try {
-		await execFile("git", ["--version"]);
-		return true;
-	} catch {
-		return false;
+		const res = await fetch(`${GITHUB_API}${path}`, {
+			headers: DEFAULT_HEADERS,
+			signal: controller.signal,
+		});
+		clearTimeout(tid);
+		if (!res.ok) {
+			throw new Error(`GitHub API ${res.status}: ${path}`);
+		}
+		return await res.json();
+	} catch (err) {
+		clearTimeout(tid);
+		throw err;
 	}
 }
 
 /**
- * Clone a GitHub repo and return local path
- * @param {string} owner - Repo owner
- * @param {string} repo - Repo name
- * @param {string} [ref] - Branch/tag/commit (default: main/master)
- * @returns {Promise<{path: string, cached: boolean, error?: string}>}
+ * Fetch the default branch README as plain text
  */
-export async function cloneGitHubRepo(owner, repo, ref = "HEAD") {
-	const cacheKey = `${owner}/${repo}@${ref}`;
-
-	// Check cache
-	if (CLONE_CACHE.has(cacheKey)) {
-		const cachedPath = CLONE_CACHE.get(cacheKey);
-		if (existsSync(cachedPath)) {
-			return { path: cachedPath, cached: true };
-		}
-		// Cache stale, remove
-		CLONE_CACHE.delete(cacheKey);
-	}
-
-	// Check git available
-	if (!(await checkGitAvailable())) {
-		return { path: "", cached: false, error: "git CLI not available" };
-	}
-
-	// Create temp directory
-	const tempBase = mkdtempSync(join(tmpdir(), `github-${owner}-${repo}-`));
-	const clonePath = join(tempBase, "repo");
-
+async function fetchReadme(owner, repo) {
 	try {
-		// Shallow clone
-		await execFile(
-			"git",
-			[
-				"clone",
-				"--depth",
-				"1",
-				"--single-branch",
-				"--branch",
-				ref === "HEAD" ? "main" : ref,
-				`https://github.com/${owner}/${repo}.git`,
-				clonePath,
-			],
-			{ timeout: 60000 },
+		const data = await apiGet(`/repos/${owner}/${repo}/readme`);
+		if (data.content && data.encoding === "base64") {
+			return Buffer.from(data.content, "base64").toString("utf8");
+		}
+		return "";
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * Fetch top-level file tree (non-recursive)
+ */
+async function fetchTree(owner, repo, ref = "HEAD", subPath = "") {
+	try {
+		// Resolve ref to a tree SHA first when using HEAD or a branch name
+		const refData = await apiGet(`/repos/${owner}/${repo}/git/ref/heads/${ref === "HEAD" ? "main" : ref}`).catch(() =>
+			apiGet(`/repos/${owner}/${repo}/git/ref/heads/master`).catch(() => null)
 		);
 
-		// Cache result
-		CLONE_CACHE.set(cacheKey, clonePath);
-
-		return { path: clonePath, cached: false };
-	} catch (error) {
-		// Try 'master' if 'main' failed
-		if (ref === "HEAD") {
-			try {
-				await execFile(
-					"git",
-					[
-						"clone",
-						"--depth",
-						"1",
-						"--single-branch",
-						"--branch",
-						"master",
-						`https://github.com/${owner}/${repo}.git`,
-						clonePath,
-					],
-					{ timeout: 60000 },
-				);
-
-				CLONE_CACHE.set(cacheKey, clonePath);
-				return { path: clonePath, cached: false };
-			} catch {
-				// Fall through to error
-			}
+		let treeSha;
+		if (refData?.object?.sha) {
+			// Get commit to get tree SHA
+			const commit = await apiGet(`/repos/${owner}/${repo}/git/commits/${refData.object.sha}`);
+			treeSha = commit.tree.sha;
+		} else {
+			// Fall back to repo default branch info
+			const repoInfo = await apiGet(`/repos/${owner}/${repo}`);
+			const branch = await apiGet(`/repos/${owner}/${repo}/branches/${repoInfo.default_branch}`);
+			treeSha = branch.commit.commit.tree.sha;
 		}
 
-		return { path: "", cached: false, error: error.message };
-	}
-}
+		const treeData = await apiGet(`/repos/${owner}/${repo}/git/trees/${treeSha}`);
+		let items = treeData.tree || [];
 
-/**
- * Read a file from cloned repo
- * @param {string} repoPath - Local repo path
- * @param {string} filePath - Relative path within repo
- * @returns {{content: string, size: number} | null}
- */
-export function readRepoFile(repoPath, filePath) {
-	const fullPath = join(repoPath, filePath);
+		// Filter to subPath if requested
+		if (subPath) {
+			items = items.filter((item) => item.path.startsWith(subPath));
+		}
 
-	// Security: ensure path is within repo
-	if (!fullPath.startsWith(repoPath)) {
-		return null;
-	}
-
-	if (!existsSync(fullPath)) {
-		return null;
-	}
-
-	const stats = statSync(fullPath);
-	if (stats.isDirectory()) {
-		return null;
-	}
-
-	if (stats.size > MAX_FILE_SIZE_BYTES) {
-		return {
-			content: `[File too large: ${(stats.size / 1024).toFixed(1)}KB]`,
-			size: stats.size,
-		};
-	}
-
-	try {
-		const content = readFileSync(fullPath, "utf8");
-		return { content, size: stats.size };
+		return items.slice(0, 50).map((item) => ({
+			path: item.path,
+			type: item.type === "tree" ? "dir" : "file",
+			size: item.size,
+		}));
 	} catch {
-		return null;
+		return [];
 	}
 }
 
 /**
- * Get directory tree listing
- * @param {string} repoPath - Local repo path
- * @param {string} [subPath] - Subdirectory to list
- * @param {number} [maxFiles] - Max files to return
- * @returns {Array<{path: string, type: 'file'|'dir', size?: number}>}
+ * Fetch a specific file via raw.githubusercontent.com
  */
-export function getRepoTree(
-	repoPath,
-	subPath = "",
-	maxFiles = DEFAULT_MAX_FILES,
-) {
-	const targetPath = join(repoPath, subPath);
+async function fetchRawFile(owner, repo, ref, filePath, timeoutMs = 10000) {
+	const ref_ = ref && ref !== "HEAD" ? ref : "main";
+	const urls = [
+		`https://raw.githubusercontent.com/${owner}/${repo}/${ref_}/${filePath}`,
+		`https://raw.githubusercontent.com/${owner}/${repo}/master/${filePath}`,
+	];
 
-	// Security: ensure within repo
-	if (!targetPath.startsWith(repoPath)) {
-		return [];
-	}
-
-	if (!existsSync(targetPath)) {
-		return [];
-	}
-
-	const results = [];
-
-	function walk(dir, relativePath) {
-		if (results.length >= maxFiles) return;
-
+	for (const url of urls) {
+		const controller = new AbortController();
+		const tid = setTimeout(() => controller.abort(), timeoutMs);
 		try {
-			const entries = readdirSync(dir, { withFileTypes: true });
-
-			for (const entry of entries) {
-				if (results.length >= maxFiles) break;
-
-				// Skip hidden and common non-source dirs
-				if (
-					entry.name.startsWith(".") ||
-					entry.name === "node_modules" ||
-					entry.name === "vendor"
-				) {
-					continue;
-				}
-
-				const entryRelPath = join(relativePath, entry.name);
-
-				if (entry.isDirectory()) {
-					results.push({ path: entryRelPath, type: "dir" });
-					walk(join(dir, entry.name), entryRelPath);
-				} else if (entry.isFile()) {
-					const stats = statSync(join(dir, entry.name));
-					results.push({ path: entryRelPath, type: "file", size: stats.size });
-				}
+			const res = await fetch(url, {
+				headers: { "user-agent": DEFAULT_HEADERS["user-agent"] },
+				signal: controller.signal,
+			});
+			clearTimeout(tid);
+			if (res.ok) {
+				return await res.text();
 			}
 		} catch {
-			// Ignore permission errors
+			clearTimeout(tid);
 		}
 	}
-
-	walk(targetPath, subPath);
-	return results;
+	return null;
 }
 
 /**
- * Fetch GitHub content by cloning repo
+ * Fetch GitHub content via API
  * @param {string} url - GitHub URL (blob, tree, or root)
- * @returns {Promise<{ok: boolean, content?: string, title?: string, error?: string, localPath?: string, tree?: Array}>}
+ * @returns {Promise<{ok: boolean, content?: string, title?: string, error?: string, tree?: Array}>}
  */
 export async function fetchGitHubContent(url) {
 	const parsed = parseGitHubUrl(url);
@@ -258,66 +164,69 @@ export async function fetchGitHubContent(url) {
 
 	const { owner, repo, type, ref, path } = parsed;
 
-	// Clone repo
-	const cloneResult = await cloneGitHubRepo(owner, repo, ref);
-	if (cloneResult.error) {
-		return { ok: false, error: `Clone failed: ${cloneResult.error}` };
-	}
+	try {
+		if (type === "root" || (type === "tree" && !path)) {
+			// Fetch repo info + README + top-level tree in parallel
+			const [repoInfo, readme, tree] = await Promise.allSettled([
+				apiGet(`/repos/${owner}/${repo}`),
+				fetchReadme(owner, repo),
+				fetchTree(owner, repo, ref || "HEAD"),
+			]);
 
-	const repoPath = cloneResult.path;
+			const info = repoInfo.status === "fulfilled" ? repoInfo.value : null;
+			const readmeText = readme.status === "fulfilled" ? readme.value : "";
+			const treeItems = tree.status === "fulfilled" ? tree.value : [];
 
-	// Handle different URL types
-	if (type === "root" || (type === "tree" && !path)) {
-		// Return README + tree
-		const tree = getRepoTree(repoPath, "", 50);
+			const description = info?.description ? `\n\n> ${info.description}` : "";
+			const stars = info?.stargazers_count != null ? ` ⭐ ${info.stargazers_count}` : "";
+			const language = info?.language ? ` · ${info.language}` : "";
 
-		// Try to find README
-		const readmeNames = ["README.md", "Readme.md", "readme.md", "README.MD"];
-		let readmeContent = "";
-		for (const name of readmeNames) {
-			const readme = readRepoFile(repoPath, name);
-			if (readme) {
-				readmeContent = readme.content.slice(0, 5000); // First 5KB of README
-				break;
+			let content = `# ${owner}/${repo}${stars}${language}${description}\n\n`;
+
+			if (readmeText) {
+				content += readmeText.slice(0, 6000);
+			} else {
+				content += `[No README found]\n\nFiles:\n${treeItems.map((t) => `  ${t.type === "dir" ? "📁" : "📄"} ${t.path}`).join("\n")}`;
 			}
+
+			return {
+				ok: true,
+				title: `${owner}/${repo}`,
+				content,
+				tree: treeItems.slice(0, 30),
+			};
 		}
 
-		return {
-			ok: true,
-			title: `${owner}/${repo}`,
-			content: readmeContent || `[Repository: ${owner}/${repo}]`,
-			localPath: repoPath,
-			tree: tree.slice(0, 30),
-		};
-	}
-
-	if (type === "blob" && path) {
-		// Return specific file
-		const file = readRepoFile(repoPath, path);
-		if (!file) {
-			return { ok: false, error: `File not found: ${path}` };
+		if (type === "blob" && path) {
+			// Fetch specific file via raw URL
+			const content = await fetchRawFile(owner, repo, ref, path);
+			if (content === null) {
+				return { ok: false, error: `File not found: ${path}` };
+			}
+			return {
+				ok: true,
+				title: `${owner}/${repo}: ${path}`,
+				content,
+			};
 		}
 
-		return {
-			ok: true,
-			title: `${owner}/${repo}: ${path}`,
-			content: file.content,
-			localPath: join(repoPath, path),
-		};
+		if (type === "tree" && path) {
+			// Directory listing via API tree
+			const treeItems = await fetchTree(owner, repo, ref || "HEAD", path);
+			const listing = treeItems
+				.map((t) => `  ${t.type === "dir" ? "📁" : "📄"} ${t.path}`)
+				.join("\n");
+
+			return {
+				ok: true,
+				title: `${owner}/${repo}/${path}`,
+				content: `[Directory: ${path}]\n\nFiles:\n${listing}`,
+				tree: treeItems,
+			};
+		}
+
+		return { ok: false, error: "Unsupported GitHub URL type" };
+	} catch (err) {
+		return { ok: false, error: err.message };
 	}
-
-	if (type === "tree" && path) {
-		// Return directory listing
-		const tree = getRepoTree(repoPath, path, 50);
-
-		return {
-			ok: true,
-			title: `${owner}/${repo}/${path}`,
-			content: `[Directory: ${path}]\n\nFiles:\n${tree.map((t) => `  ${t.type === "dir" ? "📁" : "📄"} ${t.path}`).join("\n")}`,
-			localPath: join(repoPath, path),
-			tree,
-		};
-	}
-
-	return { ok: false, error: "Unsupported GitHub URL type" };
 }
