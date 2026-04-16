@@ -111,9 +111,9 @@ check_synthesis() {
     if (!syn?.answer) { console.log('NO_SYNTHESIS'); return; }
     const hasAgreement = syn.agreement !== undefined;
     const hasCaveats = syn.caveats !== undefined;
-    const hasCitedClaims = Array.isArray(syn.citedClaims) && syn.citedClaims.length > 0;
+    const hasClaims = Array.isArray(syn.claims) && syn.claims.length > 0;
     const hasSources = d._sources && d._sources.length > 0;
-    console.log('OK(answer=' + syn.answer.length + ', agreement=' + hasAgreement + ', caveats=' + hasCaveats + ', claims=' + hasCitedClaims + ', sources=' + (hasSources ? d._sources.length : 0) + ')');
+    console.log('OK(answer=' + syn.answer.length + ', agreement=' + hasAgreement + ', caveats=' + hasCaveats + ', claims=' + hasClaims + ', sources=' + (hasSources ? d._sources.length : 0) + ')');
   " 2>/dev/null || echo "PARSE_ERROR"
 }
 
