@@ -9,6 +9,7 @@ import type { ProgressUpdate, ToolResult } from "../types.js";
 
 export type { ProgressUpdate, ToolResult } from "../types.js";
 
+// Canonical source is src/search/constants.mjs — keep in sync
 const ALL_ENGINES = ["perplexity", "bing", "google"] as const;
 export { ALL_ENGINES };
 

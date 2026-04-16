@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.0 (2026-04-16)
+
+### Fixes
+- **`cdpAvailable()` missing `baseDir` argument** — two callsites in `index.ts` (session_start handler and coding_task handler) were calling `cdpAvailable()` without the required `baseDir` parameter, producing an incorrect path (`join(undefined, "bin", "cdp.mjs")`). Both now pass `__dir` so the CDP check resolves against the correct package directory.
+- **Duplicated `ENGINES` map removed** — `ENGINES` was defined identically in both `src/search/constants.mjs` and `src/search/engines.mjs`. Now `engines.mjs` imports and re-exports from `constants.mjs`, keeping a single canonical source and eliminating sync drift risk.
+- **`ALL_ENGINES` sync comment** — added a `// Keep in sync with src/search/constants.mjs` comment on the `ALL_ENGINES` tuple in `shared.ts` so future maintainers know where the canonical definition lives.
+
 ## v1.7.7 (2026-04-14)
 
 ### Fixes

@@ -24,7 +24,7 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 
 export default function greedySearchExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
-		if (!cdpAvailable()) {
+		if (!cdpAvailable(__dir)) {
 			ctx.ui.notify(
 				"GreedySearch: cdp.mjs missing from package directory — try reinstalling: pi install git:github.com/apmantza/GreedySearch-pi",
 				"warning",
@@ -75,7 +75,7 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 				task: string; engine: string; mode: string; context?: string;
 			};
 
-			if (!cdpAvailable()) {
+			if (!cdpAvailable(__dir)) {
 				return {
 					content: [{ type: "text", text: "cdp.mjs missing — try reinstalling." }],
 					details: {} as { raw?: Record<string, unknown> },

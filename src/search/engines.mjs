@@ -1,25 +1,15 @@
-// src/search/engines.mjs — Engine map, extractor runner
+// src/search/engines.mjs — Extractor runner
 //
-// Extracted from search.mjs.
+// Engine map lives in constants.mjs; this module re-exports it for
+// backward compatibility and provides the runExtractor() function.
 
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { GREEDY_PROFILE_DIR } from "./constants.mjs";
+import { ENGINES, GREEDY_PROFILE_DIR } from "./constants.mjs";
+
+export { ENGINES };
 
 const __dir = import.meta.dirname || new URL(".", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
-
-export const ENGINES = {
-	perplexity: "perplexity.mjs",
-	pplx: "perplexity.mjs",
-	p: "perplexity.mjs",
-	bing: "bing-copilot.mjs",
-	copilot: "bing-copilot.mjs",
-	b: "bing-copilot.mjs",
-	google: "google-ai.mjs",
-	g: "google-ai.mjs",
-	gemini: "gemini.mjs",
-	gem: "gemini.mjs",
-};
 
 export function runExtractor(
 	script,
