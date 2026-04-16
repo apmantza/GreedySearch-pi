@@ -18,7 +18,7 @@ import { formatCodingTask } from "./src/formatters/coding.js";
 import { registerGreedySearchTool } from "./src/tools/greedy-search-handler.js";
 import { registerDeepResearchTool } from "./src/tools/deep-research-handler.js";
 import { cdpAvailable, type ProgressUpdate } from "./src/tools/shared.js";
-import { DEFAULTS } from "./src/search/defaults.js";
+import { DEFAULTS } from "./src/search/defaults.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
