@@ -9,11 +9,15 @@
 // Output (stdout): JSON { engine, task, code: [{language, code}], explanation, raw }
 // Errors go to stderr only.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cdp, injectClipboardInterceptor, waitForCopyButton } from "../extractors/common.mjs";
 import { dismissConsent, handleVerification } from "../extractors/consent.mjs";
+
+const MAX_FILE_SIZE = 50 * 1024; // 50KB per file
+const MAX_FILES = 5;
 
 const __dir = fileURLToPath(new URL(".", import.meta.url));
 const PAGES_CACHE = `${tmpdir().replace(/\\/g, "/")}/cdp-pages.json`;
@@ -309,6 +313,28 @@ async function main() {
 			filePaths.push(args[i + 1]);
 		}
 	}
+
+	// Validate file paths: limit count, check readability, enforce size
+	if (filePaths.length > MAX_FILES) {
+		process.stderr.write(`Error: too many --file arguments (max ${MAX_FILES})\n`);
+		process.exit(1);
+	}
+	for (const p of filePaths) {
+		if (!existsSync(p)) {
+			process.stderr.write(`Error: file not found: ${p}\n`);
+			process.exit(1);
+		}
+		if (isAbsolute(p) && !p.startsWith(process.cwd())) {
+			process.stderr.write(`Error: file must be within project directory: ${p}\n`);
+			process.exit(1);
+		}
+		const stat = statSync(p);
+		if (stat.size > MAX_FILE_SIZE) {
+			process.stderr.write(`Error: file too large (${Math.round(stat.size / 1024)}KB, max ${MAX_FILE_SIZE / 1024}KB): ${p}\n`);
+			process.exit(1);
+		}
+	}
+
 	const fileContext =
 		filePaths.length > 0
 			? filePaths

@@ -29,5 +29,9 @@ npm-debug.log*
 FEATURES.md
 assessment.md
 shortlist.md
+refactor.md
 docs/plans/
 nul
+
+# Local dev test file
+test_unit.mjs
