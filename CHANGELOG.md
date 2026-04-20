@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.8.2 (2026-04-20)
+
+### Cross-Platform Testing
+- **Node.js test runner (`test.mjs`)** — Added cross-platform test runner that works on Windows, macOS, and Linux without requiring bash. Runs smoke tests, quick tests, and edge case tests.
+- **Updated npm scripts** — `npm test` now runs the Node.js test runner (was bash-only). Original bash tests available via `npm run test:bash`.
+
+### Project Metadata
+- **Added `engines` field** — Package now specifies `node: ">=20.11.0"` requirement for `import.meta.dirname` support.
+- **Updated README** — Added Testing section documenting both Node.js and bash test runners, clarified Node.js 20.11.0+ requirement.
+
 ## v1.8.0 (2026-04-16)
 
 ### Fixes

@@ -55,7 +55,7 @@ node ~/.pi/agent/git/GreedySearch-pi/bin/launch.mjs --kill
 ## Requirements
 
 - Chrome
-- Node.js 22+
+- Node.js 20.11.0+ (22+ recommended)
 
 ## Project layout
 
@@ -63,6 +63,22 @@ node ~/.pi/agent/git/GreedySearch-pi/bin/launch.mjs --kill
 - `extractors/` - engine-specific automation
 - `src/` - ranking/fetching/formatting internals
 - `skills/` - Pi skill metadata
+
+## Testing
+
+Cross-platform test runner (Windows + Unix):
+```bash
+npm test              # run all tests
+npm run test:quick    # skip slow tests
+npm run test:smoke    # basic health check
+```
+
+Full bash test suite (Unix only):
+```bash
+npm run test:bash           # comprehensive tests
+./test.sh parallel          # race condition tests
+./test.sh flags             # flag/option tests
+```
 
 ## Changelog
 
