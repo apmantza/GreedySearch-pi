@@ -8,7 +8,8 @@ export const SELECTORS = {
 	// ──────────────────────────────────────────────
 	perplexity: {
 		input: "#ask-input",
-		copyButton: 'button[aria-label="Copy"]',
+		// Note: copy button found via JS in extractor (language-agnostic)
+		copyButton: null,
 		sourceItem: "[data-pplx-citation-url]",
 		sourceLink: "a",
 		consent: "#onetrust-accept-btn-handler",
@@ -41,8 +42,9 @@ export const SELECTORS = {
 	// ──────────────────────────────────────────────
 	gemini: {
 		input: "rich-textarea .ql-editor",
-		copyButton: 'button[aria-label="Copy"]',
-		sendButton: 'button[aria-label*="Send"]',
+		// Language-agnostic: use Material icon data attributes (work across locales)
+		copyButton: 'button:has(mat-icon[data-mat-icon-name="content_copy"])',
+		sendButton: 'button:has(mat-icon[data-mat-icon-name="send"]), .send-button',
 		sourcesSidebarButton: "button.legacy-sources-sidebar-button",
 		sourcesExclude: ["gemini.google", "gstatic", "google.com/search"],
 		citationButtonPattern: 'button[aria-label*="citation from"]',

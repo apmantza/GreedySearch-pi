@@ -124,13 +124,13 @@ export function parseSourcesFromMarkdown(text) {
 // ============================================================================
 
 export const TIMING = {
-	postNav: 1500,       // settle after navigation
-	postNavSlow: 2000,   // settle after slower navigations (Bing, Gemini)
-	postClick: 400,      // settle after a UI click
-	postType: 400,       // settle after typing
-	inputPoll: 400,      // polling interval when waiting for input to appear
-	copyPoll: 600,       // polling interval when waiting for copy button
-	afterVerify: 3000,   // settle after a verification challenge completes
+	postNav: 1500, // settle after navigation
+	postNavSlow: 2000, // settle after slower navigations (Bing, Gemini)
+	postClick: 400, // settle after a UI click
+	postType: 400, // settle after typing
+	inputPoll: 400, // polling interval when waiting for input to appear
+	copyPoll: 600, // polling interval when waiting for copy button
+	afterVerify: 3000, // settle after a verification challenge completes
 };
 
 // ============================================================================
@@ -153,10 +153,16 @@ export async function waitForCopyButton(tab, selector, options = {}) {
 	while (Date.now() < deadline) {
 		await new Promise((r) => setTimeout(r, TIMING.copyPoll));
 		if (onPoll) await onPoll(++tick).catch(() => null);
-		const found = await cdp(["eval", tab, `!!document.querySelector('${selector}')`]).catch(() => "false");
+		const found = await cdp([
+			"eval",
+			tab,
+			`!!document.querySelector('${selector}')`,
+		]).catch(() => "false");
 		if (found === "true") return;
 	}
-	throw new Error(`Copy button ('${selector}') did not appear within ${timeout}ms`);
+	throw new Error(
+		`Copy button ('${selector}') did not appear within ${timeout}ms`,
+	);
 }
 
 // ============================================================================
@@ -217,20 +223,26 @@ export async function waitForStreamComplete(tab, options = {}) {
 /**
  * Parse standard extractor CLI arguments
  * @param {string[]} args - process.argv.slice(2)
- * @returns {{query: string, tabPrefix: string|null, short: boolean}}
+ * @returns {{query: string, tabPrefix: string|null, short: boolean, locale: string|null}}
  */
 export function parseArgs(args) {
 	const short = args.includes("--short");
-	const rest = args.filter((a) => a !== "--short");
+	let rest = args.filter((a) => a !== "--short");
+
 	const tabFlagIdx = rest.indexOf("--tab");
 	const tabPrefix = tabFlagIdx !== -1 ? rest[tabFlagIdx + 1] : null;
-	const query =
-		tabFlagIdx !== -1
-			? rest
-					.filter((_, i) => i !== tabFlagIdx && i !== tabFlagIdx + 1)
-					.join(" ")
-			: rest.join(" ");
-	return { query, tabPrefix, short };
+	if (tabFlagIdx !== -1) {
+		rest = rest.filter((_, i) => i !== tabFlagIdx && i !== tabFlagIdx + 1);
+	}
+
+	const localeIdx = rest.indexOf("--locale");
+	const locale = localeIdx !== -1 ? rest[localeIdx + 1] : null;
+	if (localeIdx !== -1) {
+		rest = rest.filter((_, i) => i !== localeIdx && i !== localeIdx + 1);
+	}
+
+	const query = rest.join(" ");
+	return { query, tabPrefix, short, locale };
 }
 
 /**

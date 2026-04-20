@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 // search.mjs — unified CLI for GreedySearch extractors
 //
 // Usage:
@@ -19,30 +20,45 @@
 //   node search.mjs gem "latest React features"
 //   node search.mjs all "how does TCP congestion control work"
 
+import { existsSync, readFileSync } from "node:fs";
+// Config file for user defaults
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
-	ALL_ENGINES,
-	ENGINES,
-} from "../src/search/constants.mjs";
-import {
-	buildSourceRegistry,
-	mergeFetchDataIntoSources,
-} from "../src/search/sources.mjs";
-import { buildConfidence } from "../src/search/synthesis.mjs";
-import { synthesizeWithGemini } from "../src/search/synthesis-runner.mjs";
-import {
-	cdp,
-	ensureChrome,
-	openNewTab,
 	activateTab,
+	cdp,
 	closeTab,
 	closeTabs,
+	ensureChrome,
+	openNewTab,
 } from "../src/search/chrome.mjs";
+import { ALL_ENGINES, ENGINES } from "../src/search/constants.mjs";
 import { runExtractor } from "../src/search/engines.mjs";
 import {
 	fetchMultipleSources,
 	fetchTopSource,
 } from "../src/search/fetch-source.mjs";
 import { writeOutput } from "../src/search/output.mjs";
+import {
+	buildSourceRegistry,
+	mergeFetchDataIntoSources,
+} from "../src/search/sources.mjs";
+import { buildConfidence } from "../src/search/synthesis.mjs";
+import { synthesizeWithGemini } from "../src/search/synthesis-runner.mjs";
+
+const CONFIG_DIR = join(homedir(), ".config", "greedysearch");
+const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+
+function loadUserConfig() {
+	try {
+		if (existsSync(CONFIG_FILE)) {
+			return JSON.parse(readFileSync(CONFIG_FILE, "utf8"));
+		}
+	} catch {
+		// Ignore errors
+	}
+	return {};
+}
 
 // ─── Main ──────────────────────────────────────────────────────────────────
 
@@ -61,6 +77,11 @@ async function main() {
 				"  --deep-research     Deprecated: source fetching is now default",
 				"  --fetch-top-source  Fetch content from top source",
 				"  --inline            Output JSON to stdout (for piping)",
+				"  --locale <lang>     Force results language (en, de, fr, etc.)",
+				"",
+				"Environment:",
+				"  GREEDY_SEARCH_LOCALE    Default locale (default: en)",
+				"  GREEDY_SEARCH_VISIBLE   Set to 1 to show Chrome window",
 				"",
 				"Examples:",
 				'  node search.mjs all "Node.js streams"           # Default: sources + synthesis',
@@ -92,13 +113,17 @@ async function main() {
 	// --deep-research / --deep flags map to deep mode (backward compat)
 	if (args.includes("--deep-research")) {
 		depth = "standard";
-		process.stderr.write("[greedysearch] --deep-research is deprecated; use --depth standard (now default)\n");
+		process.stderr.write(
+			"[greedysearch] --deep-research is deprecated; use --depth standard (now default)\n",
+		);
 	}
 	if (args.includes("--deep")) {
 		depth = "deep";
 	}
 	if (args.includes("--synthesize")) {
-		process.stderr.write("[greedysearch] --synthesize is deprecated; synthesis is now default for multi-engine\n");
+		process.stderr.write(
+			"[greedysearch] --synthesize is deprecated; synthesis is now default for multi-engine\n",
+		);
 	}
 
 	const full = args.includes("--full");
@@ -107,6 +132,20 @@ async function main() {
 	const inline = args.includes("--inline");
 	const outIdx = args.indexOf("--out");
 	const outFile = outIdx !== -1 ? args[outIdx + 1] : null;
+
+	// Locale handling: CLI flag > env var > config file > default (en)
+	const localeIdx = args.indexOf("--locale");
+	const envLocale = process.env.GREEDY_SEARCH_LOCALE;
+	const userConfig = loadUserConfig();
+	let locale = "en"; // Default to English
+
+	if (localeIdx !== -1 && args[localeIdx + 1]) {
+		locale = args[localeIdx + 1];
+	} else if (envLocale) {
+		locale = envLocale;
+	} else if (userConfig.locale) {
+		locale = userConfig.locale;
+	}
 	const rest = args.filter(
 		(a, i) =>
 			a !== "--full" &&
@@ -140,7 +179,7 @@ async function main() {
 		try {
 			const results = await Promise.allSettled(
 				ALL_ENGINES.map((e, i) =>
-					runExtractor(ENGINES[e], query, engineTabs[i], short)
+					runExtractor(ENGINES[e], query, engineTabs[i], short, null, locale)
 						.then((r) => {
 							process.stderr.write(`PROGRESS:${e}:done\n`);
 							return { engine: e, ...r };
@@ -236,7 +275,7 @@ async function main() {
 	}
 
 	try {
-		const result = await runExtractor(script, query, null, short);
+		const result = await runExtractor(script, query, null, short, null, locale);
 		if (fetchSource && result.sources?.length > 0) {
 			result.topSource = await fetchTopSource(result.sources[0].url);
 		}

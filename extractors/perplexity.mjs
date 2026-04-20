@@ -30,15 +30,23 @@ const S = SELECTORS.perplexity;
 const GLOBAL_VAR = "__pplxClipboard";
 
 // ============================================================================
+// Language-agnostic copy button finder
+// ============================================================================
+
+function findCopyButtonJsExpression() {
+	// Perplexity uses SVG icons via <use xlink:href="#pplx-icon-copy">
+	// This works across all locales since it doesn't depend on aria-label text
+	return `Array.from(document.querySelectorAll('button')).find(b => b.innerHTML.includes('#pplx-icon-copy'))`;
+}
+
+// ============================================================================
 // Extraction
 // ============================================================================
 
 async function extractAnswer(tab) {
-	await cdp([
-		"eval",
-		tab,
-		`document.querySelector('${S.copyButton}')?.click()`,
-	]);
+	const copyBtnExpr = findCopyButtonJsExpression();
+
+	await cdp(["eval", tab, `${copyBtnExpr}?.click()`]);
 	await new Promise((r) => setTimeout(r, 400));
 
 	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
@@ -46,11 +54,7 @@ async function extractAnswer(tab) {
 	// Retry once if clipboard is empty (Perplexity might be slow to write)
 	if (!answer) {
 		console.error("[perplexity] Clipboard empty, retrying in 2s...");
-		await cdp([
-			"eval",
-			tab,
-			`document.querySelector('${S.copyButton}')?.click()`,
-		]);
+		await cdp(["eval", tab, `${copyBtnExpr}?.click()`]);
 		await new Promise((r) => setTimeout(r, 2000));
 		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
 	}

@@ -9,7 +9,9 @@ import { ENGINES, GREEDY_PROFILE_DIR } from "./constants.mjs";
 
 export { ENGINES };
 
-const __dir = import.meta.dirname || new URL(".", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
+const __dir =
+	import.meta.dirname ||
+	new URL(".", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
 
 export function runExtractor(
 	script,
@@ -17,6 +19,7 @@ export function runExtractor(
 	tabPrefix = null,
 	short = false,
 	timeoutMs = null,
+	locale = null,
 ) {
 	// Gemini is slower - use longer timeout
 	if (timeoutMs === null) {
@@ -25,6 +28,7 @@ export function runExtractor(
 	const extraArgs = [
 		...(tabPrefix ? ["--tab", tabPrefix] : []),
 		...(short ? ["--short"] : []),
+		...(locale ? ["--locale", locale] : []),
 	];
 	return new Promise((resolve, reject) => {
 		const proc = spawn(
