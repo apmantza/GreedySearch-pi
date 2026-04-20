@@ -12,6 +12,10 @@
 //   node launch.mjs          — launch (or report if already running)
 //   node launch.mjs --kill   — stop and restore original DevToolsActivePort
 //   node launch.mjs --status — check if running
+//
+// Environment:
+//   GREEDY_SEARCH_VISIBLE=1  — Show Chrome window instead of minimizing
+//   CHROME_PATH              — Path to Chrome executable
 
 import { execSync, spawn } from "node:child_process";
 import {
@@ -55,7 +59,7 @@ function findChrome() {
 
 const CHROME_FLAGS = [
 	`--remote-debugging-port=${PORT}`,
-	"--disable-features=DevToolsPrivacyUI", // suppresses "Allow remote debugging?" dialog
+	"--disable-features=DevToolsPrivacyUI",
 	"--no-first-run",
 	"--no-default-browser-check",
 	"--disable-default-apps",
@@ -64,6 +68,119 @@ const CHROME_FLAGS = [
 	"about:blank",
 ];
 
+const isVisible = () => process.env.GREEDY_SEARCH_VISIBLE === "1";
+
+// ---------------------------------------------------------------------------
+// CDP Window Minimization
+// ---------------------------------------------------------------------------
+
+async function minimizeViaCDP() {
+	if (isVisible()) return;
+	console.log("[minimize] Starting...");
+
+	// Wait for Chrome to be ready
+	await new Promise((r) => setTimeout(r, 1000));
+
+	try {
+		// Get browser WebSocket URL
+		console.log("[minimize] Getting version info...");
+		const version = await new Promise((resolve, reject) => {
+			http
+				.get(`http://localhost:${PORT}/json/version`, (res) => {
+					let body = "";
+					res.on("data", (d) => (body += d));
+					res.on("end", () => resolve(JSON.parse(body)));
+				})
+				.on("error", reject);
+		});
+
+		const wsUrl = version.webSocketDebuggerUrl;
+		console.log("[minimize] WebSocket URL:", wsUrl.slice(0, 40) + "...");
+
+		const WebSocket = globalThis.WebSocket;
+		if (!WebSocket) {
+			console.log("[minimize] WebSocket not available");
+			return;
+		}
+
+		const ws = new WebSocket(wsUrl);
+		let requestId = 0;
+		const pending = new Map();
+
+		ws.onopen = () => {
+			console.log("[minimize] Connected, getting targets...");
+			// Step 1: Get targets
+			const id = ++requestId;
+			pending.set(id, {
+				resolve: (result) => {
+					const targets = result.targetInfos || [];
+					console.log(`[minimize] Found ${targets.length} targets`);
+					const pageTarget = targets.find((t) => t.type === "page");
+					if (!pageTarget) {
+						console.log("[minimize] No page target, closing");
+						ws.close();
+						return;
+					}
+
+					console.log(`[minimize] Using target: ${pageTarget.targetId}`);
+					// Step 2: Get windowId for target
+					const winId = ++requestId;
+					pending.set(winId, {
+						resolve: (winResult) => {
+							const windowId = winResult.windowId;
+							console.log(
+								`[minimize] Got windowId: ${windowId}, minimizing...`,
+							);
+							// Step 3: Minimize window
+							const minId = ++requestId;
+							pending.set(minId, {
+								resolve: () =>
+									console.log("[minimize] Window minimized successfully"),
+								reject: (err) =>
+									console.log("[minimize] Minimize failed:", err),
+							});
+							ws.send(
+								JSON.stringify({
+									id: minId,
+									method: "Browser.setWindowBounds",
+									params: { windowId, bounds: { windowState: "minimized" } },
+								}),
+							);
+							setTimeout(() => ws.close(), 500);
+						},
+						reject: () => ws.close(),
+					});
+					ws.send(
+						JSON.stringify({
+							id: winId,
+							method: "Browser.getWindowForTarget",
+							params: { targetId: pageTarget.targetId },
+						}),
+					);
+				},
+				reject: () => ws.close(),
+			});
+			ws.send(JSON.stringify({ id, method: "Target.getTargets", params: {} }));
+		};
+
+		ws.onmessage = (event) => {
+			const msg = JSON.parse(event.data);
+			if (msg.id && pending.has(msg.id)) {
+				const { resolve, reject } = pending.get(msg.id);
+				pending.delete(msg.id);
+				if (msg.error) reject?.(msg.error);
+				else resolve?.(msg.result);
+			}
+		};
+
+		setTimeout(() => ws.close(), 5000);
+	} catch {
+		// Best-effort
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Chrome process management
 // ---------------------------------------------------------------------------
 
 function isRunning() {
@@ -78,41 +195,30 @@ function isRunning() {
 	}
 }
 
-// Get the PID of the process listening on a port (Windows + Unix)
 function getPortPid(port) {
 	try {
 		const os = platform();
 		if (os === "win32") {
-			// Windows: netstat -ano returns PID in last column
 			const out = execSync(`netstat -ano -p TCP 2>nul`, { encoding: "utf8" });
-			// Match lines like: TCP    127.0.0.1:9222    0.0.0.0:0    LISTENING    12345
 			const regex = new RegExp(
 				`TCP\\s+[^\\s]*:${port}\\s+[^\\s]*:0\\s+LISTENING\\s+(\\d+)`,
 				"i",
 			);
 			const match = out.match(regex);
 			return match ? parseInt(match[1], 10) : null;
-		} else {
-			// Unix: use lsof or ss
-			try {
-				const out = execSync(`lsof -i :${port} -t 2>/dev/null`, {
-					encoding: "utf8",
-				}).trim();
-				return out ? parseInt(out.split("\n")[0], 10) : null;
-			} catch {
-				const out = execSync(`ss -tlnp 2>/dev/null | grep :${port}`, {
-					encoding: "utf8",
-				});
-				const match = out.match(/pid=(\d+)/);
-				return match ? parseInt(match[1], 10) : null;
-			}
 		}
+		const out = execSync(
+			`lsof -i :${port} -t 2>/dev/null || ss -tlnp 2>/dev/null | grep :${port} | grep -oP 'pid=\\K\\d+'`,
+			{
+				encoding: "utf8",
+			},
+		).trim();
+		return out ? parseInt(out.split("\n")[0], 10) : null;
 	} catch {
 		return null;
 	}
 }
 
-// Kill a process by PID (with Windows/Unix compatibility)
 function killProcess(pid) {
 	try {
 		if (platform() === "win32") {
@@ -126,39 +232,21 @@ function killProcess(pid) {
 	}
 }
 
-// Clean up ghost Chrome on port 9222 that isn't tracked by our PID file
 function cleanupGhostChrome() {
 	const portPid = getPortPid(PORT);
-	if (!portPid) return; // Nothing on port 9222, all good
+	if (!portPid) return;
 
 	const trackedPid = isRunning();
+	if (trackedPid && portPid === trackedPid) return;
 
-	if (trackedPid && portPid === trackedPid) {
-		return; // Port 9222 is our Chrome, all good
-	}
-
-	// Ghost Chrome detected — something on 9222 that isn't ours
-	if (trackedPid && portPid !== trackedPid) {
-		console.log(
-			`Ghost Chrome detected: port ${PORT} has pid ${portPid}, but our PID file says ${trackedPid}.`,
-		);
-	} else if (!trackedPid) {
-		console.log(
-			`Ghost Chrome detected: unknown process ${portPid} on port ${PORT} (no PID file).`,
-		);
-	}
-
-	console.log(`Killing ghost Chrome (pid ${portPid})...`);
+	console.log(`Ghost Chrome on port ${PORT} (pid ${portPid}) — cleaning up...`);
 	killProcess(portPid);
-
-	// Clean up stale files
 	try {
 		unlinkSync(PID_FILE);
 	} catch {}
 	try {
 		unlinkSync(ACTIVE_PORT);
 	} catch {}
-	console.log("Cleaned up stale Chrome files.");
 }
 
 function httpGet(url, timeoutMs = 1000) {
@@ -177,7 +265,6 @@ function httpGet(url, timeoutMs = 1000) {
 }
 
 async function writePortFile(timeoutMs = 15000) {
-	// Chrome on Windows doesn't write DevToolsActivePort — we build it from the HTTP API.
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		const { ok, body } = await httpGet(
@@ -187,14 +274,11 @@ async function writePortFile(timeoutMs = 15000) {
 		if (ok) {
 			try {
 				const { webSocketDebuggerUrl } = JSON.parse(body);
-				// webSocketDebuggerUrl = "ws://localhost:9223/devtools/browser/..."
 				const wsPath = new URL(webSocketDebuggerUrl).pathname;
-				// Write in DevToolsActivePort format: port on line 1, path on line 2
-				const content = `${PORT}\n${wsPath}`;
-				writeFileSync(ACTIVE_PORT, content, "utf8");
+				writeFileSync(ACTIVE_PORT, `${PORT}\n${wsPath}`, "utf8");
 				return true;
 			} catch {
-				/* malformed response, retry */
+				/* ignore */
 			}
 		}
 		await new Promise((r) => setTimeout(r, 400));
@@ -203,19 +287,21 @@ async function writePortFile(timeoutMs = 15000) {
 }
 
 // ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
 async function main() {
 	const arg = process.argv[2];
 
-	// Clean up any ghost Chrome on port 9222 before doing anything else
 	cleanupGhostChrome();
 
 	if (arg === "--kill") {
 		const pid = isRunning();
 		if (pid) {
 			const ok = killProcess(pid);
-			if (ok) console.log(`Stopped Chrome (pid ${pid}).`);
-			else console.error(`Failed to stop pid ${pid}.`);
+			console.log(
+				ok ? `Stopped Chrome (pid ${pid}).` : `Failed to stop pid ${pid}.`,
+			);
 		} else {
 			console.log("GreedySearch Chrome is not running.");
 		}
@@ -224,29 +310,22 @@ async function main() {
 
 	if (arg === "--status") {
 		const pid = isRunning();
-		if (pid)
-			console.log(
-				`Running — pid ${pid}, port ${PORT}, DevToolsActivePort redirected.`,
-			);
-		else console.log("Not running.");
+		if (pid) {
+			console.log(`Running — pid ${pid}, port ${PORT}`);
+		} else {
+			console.log("Not running.");
+		}
 		return;
 	}
 
-	// Already running?
 	const existing = isRunning();
 	if (existing) {
 		const ready = await writePortFile(5000);
 		if (ready) {
-			console.log(
-				`GreedySearch Chrome already running (pid ${existing}, port ${PORT}).`,
-			);
-			console.log("Dedicated GreedySearch DevToolsActivePort is ready.");
+			console.log(`GreedySearch Chrome already running (pid ${existing}).`);
 			return;
 		}
-		// Stale PID — process alive but not Chrome on port 9223. Fall through to fresh launch.
-		console.log(
-			`Stale PID ${existing} detected (not Chrome on port ${PORT}) — launching fresh.`,
-		);
+		console.log(`Stale PID ${existing} — launching fresh.`);
 		try {
 			unlinkSync(PID_FILE);
 		} catch {}
@@ -254,35 +333,34 @@ async function main() {
 
 	const CHROME_EXE = process.env.CHROME_PATH || findChrome();
 	if (!CHROME_EXE) {
-		console.error("Chrome not found. Tried standard paths for your OS.");
-		console.error(
-			"Set the CHROME_PATH environment variable to point to your Chrome binary.",
-		);
+		console.error("Chrome not found. Set CHROME_PATH env var.");
 		process.exit(1);
 	}
 
 	mkdirSync(PROFILE_DIR, { recursive: true });
 
 	console.log(`Launching GreedySearch Chrome on port ${PORT}...`);
+	if (!isVisible()) {
+		console.log("Window will be minimized");
+	}
+
 	const proc = spawn(CHROME_EXE, CHROME_FLAGS, {
 		detached: true,
 		stdio: "ignore",
-		windowsHide: false,
 	});
 	proc.unref();
 	writeFileSync(PID_FILE, String(proc.pid));
 
-	// Wait for Chrome HTTP endpoint and build the dedicated DevToolsActivePort file
 	const portFileReady = await writePortFile();
 	if (!portFileReady) {
 		console.error("Chrome did not become ready within 15s.");
 		process.exit(1);
 	}
 
-	console.log(`Ready. No more "Allow remote debugging?" dialogs.`);
-	console.log(
-		"GreedySearch now uses its own isolated DevToolsActivePort file.",
-	);
+	// Minimize window via CDP
+	await minimizeViaCDP();
+
+	console.log("Ready.");
 }
 
 main();

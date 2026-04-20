@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// search.mjs — unified CLI for GreedySearch extractors
+// search.mjs - unified CLI for GreedySearch extractors
 //
 // Usage:
 //   node search.mjs <engine> "<query>"
@@ -11,7 +11,7 @@
 //   bing       | copilot | b
 //   google     | g
 //   gemini     | gem
-//   all        — fan-out to all engines in parallel
+//   all        - fan-out to all engines in parallel
 //
 // Output: JSON to stdout, errors to stderr
 //
@@ -296,4 +296,93 @@ function pickTopSource(out) {
 	return null;
 }
 
-main();
+/**
+ * Minimize Chrome window via CDP after search completes.
+ * Called at the end of search to keep window minimized.
+ */
+async function minimizeChrome() {
+	if (process.env.GREEDY_SEARCH_VISIBLE === "1") return;
+
+	try {
+		const http = await import("node:http");
+		const version = await new Promise((resolve, reject) => {
+			http
+				.get(`http://localhost:9222/json/version`, (res) => {
+					let body = "";
+					res.on("data", (d) => (body += d));
+					res.on("end", () => resolve(JSON.parse(body)));
+				})
+				.on("error", reject);
+		});
+
+		const wsUrl = version.webSocketDebuggerUrl;
+		const WebSocket = globalThis.WebSocket;
+		if (!WebSocket) return;
+
+		const ws = new WebSocket(wsUrl);
+		let requestId = 0;
+		const pending = new Map();
+
+		ws.onopen = () => {
+			const id = ++requestId;
+			pending.set(id, {
+				resolve: (result) => {
+					const targets = result.targetInfos || [];
+					const pageTarget = targets.find((t) => t.type === "page");
+					if (!pageTarget) {
+						ws.close();
+						return;
+					}
+
+					const winId = ++requestId;
+					pending.set(winId, {
+						resolve: (winResult) => {
+							const windowId = winResult.windowId;
+							const minId = ++requestId;
+							pending.set(minId, { resolve: () => {}, reject: () => {} });
+							ws.send(
+								JSON.stringify({
+									id: minId,
+									method: "Browser.setWindowBounds",
+									params: { windowId, bounds: { windowState: "minimized" } },
+								}),
+							);
+							setTimeout(() => ws.close(), 500);
+						},
+						reject: () => ws.close(),
+					});
+					ws.send(
+						JSON.stringify({
+							id: winId,
+							method: "Browser.getWindowForTarget",
+							params: { targetId: pageTarget.targetId },
+						}),
+					);
+				},
+				reject: () => ws.close(),
+			});
+			ws.send(JSON.stringify({ id, method: "Target.getTargets", params: {} }));
+		};
+
+		ws.onmessage = (event) => {
+			const msg = JSON.parse(event.data);
+			if (msg.id && pending.has(msg.id)) {
+				const { resolve, reject } = pending.get(msg.id);
+				pending.delete(msg.id);
+				if (msg.error) reject?.(msg.error);
+				else resolve?.(msg.result);
+			}
+		};
+
+		setTimeout(() => ws.close(), 3000);
+	} catch {
+		// Best-effort
+	}
+}
+
+main().finally(async () => {
+	// Ensure window is minimized after search completes
+	await minimizeChrome();
+	// Give minimize time to complete before exit
+	await new Promise((r) => setTimeout(r, 1500));
+});
