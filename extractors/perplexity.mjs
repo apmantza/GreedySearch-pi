@@ -36,7 +36,9 @@ const GLOBAL_VAR = "__pplxClipboard";
 function findCopyButtonJsExpression() {
 	// Perplexity uses SVG icons via <use xlink:href="#pplx-icon-copy">
 	// This works across all locales since it doesn't depend on aria-label text
-	return `Array.from(document.querySelectorAll('button')).find(b => b.innerHTML.includes('#pplx-icon-copy'))`;
+	// Use .pop() to get the last matching button (the answer copy button),
+	// not the first one which is the question copy button
+	return `Array.from(document.querySelectorAll('button')).filter(b => b.innerHTML.includes('#pplx-icon-copy')).pop()`;
 }
 
 // ============================================================================

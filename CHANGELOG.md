@@ -2,6 +2,9 @@
 
 ## v1.8.3 (2026-04-24)
 
+### Fixes
+- **Perplexity extraction fixed** — The copy button selector was returning the first matching button ("Copy question") instead of the answer copy button. Changed `.find()` to `.filter().pop()` to get the last matching button, which correctly copies the answer text. Fixes `--full` flag returning only the query text instead of the full answer.
+
 ### Features
 - **Reddit JSON API support** — Reddit post URLs now use Reddit's public `.json` API instead of HTML scraping. Gets structured post data + top comments with nesting. Falls back to HTTP fetch if API fails.
 
