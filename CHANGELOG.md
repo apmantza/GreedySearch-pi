@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.8.3 (2026-04-24)
+
+### Features
+- **Reddit JSON API support** — Reddit post URLs now use Reddit's public `.json` API instead of HTML scraping. Gets structured post data + top comments with nesting. Falls back to HTTP fetch if API fails.
+
 ## v1.8.2 (2026-04-20)
 
 ### Cross-Platform Testing

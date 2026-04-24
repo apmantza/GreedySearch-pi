@@ -8,9 +8,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fetchSourceHttp, shouldUseBrowser } from "../fetcher.mjs";
 import { fetchGitHubContent, parseGitHubUrl } from "../github.mjs";
+import { fetchRedditContent, parseRedditUrl } from "../reddit.mjs";
 import { trimContentHeadTail } from "../utils/content.mjs";
-import { cdp } from "./chrome.mjs";
-import { openNewTab, closeTab, closeTabs } from "./chrome.mjs";
+import { cdp, closeTab, closeTabs, openNewTab } from "./chrome.mjs";
 import { SOURCE_FETCH_CONCURRENCY } from "./constants.mjs";
 import { trimText } from "./sources.mjs";
 
@@ -48,6 +48,38 @@ export async function fetchSourceContent(url, maxChars = 8000) {
 				`[greedysearch] GitHub API fetch failed, trying HTTP: ${ghResult.error}\n`,
 			);
 		}
+	}
+
+	// Check if it's a Reddit URL (posts and comments)
+	const redditInfo = parseRedditUrl(url);
+	if (redditInfo?.type === "post") {
+		process.stderr.write(
+			`[greedysearch] Using Reddit JSON API for: ${url.slice(0, 60)}...\n`,
+		);
+		const redditResult = await fetchRedditContent(url, maxChars);
+		if (redditResult.ok) {
+			const content = trimContentHeadTail(redditResult.markdown, maxChars);
+			return {
+				url,
+				finalUrl: redditResult.finalUrl,
+				status: redditResult.status,
+				contentType: "text/markdown",
+				lastModified: redditResult.lastModified || "",
+				publishedTime: redditResult.publishedTime || "",
+				byline: redditResult.byline || "",
+				siteName: redditResult.siteName || "",
+				lang: redditResult.lang || "",
+				title: redditResult.title,
+				snippet: redditResult.excerpt,
+				content,
+				contentChars: content.length,
+				source: "reddit-api",
+				duration: Date.now() - start,
+			};
+		}
+		process.stderr.write(
+			`[greedysearch] Reddit API fetch failed, falling back to HTTP: ${redditResult.error}\n`,
+		);
 	}
 
 	// Try HTTP first
