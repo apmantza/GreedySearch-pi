@@ -3,12 +3,26 @@
 //
 // Extracted from search.mjs to reduce file complexity.
 
-import { trimText } from "./sources.mjs";
 import { ALL_ENGINES } from "./constants.mjs";
+import { trimText } from "./sources.mjs";
 
 export function parseStructuredJson(text) {
 	if (!text) return null;
-	const trimmed = String(text).trim();
+	let trimmed = String(text).trim();
+
+	// Look for BEGIN_JSON/END_JSON markers first
+	const beginIdx = trimmed.indexOf("BEGIN_JSON");
+	const endIdx = trimmed.indexOf("END_JSON");
+	if (beginIdx !== -1 && endIdx !== -1 && beginIdx < endIdx) {
+		trimmed = trimmed.slice(beginIdx + "BEGIN_JSON".length, endIdx).trim();
+	} else {
+		// Strip out common LLM preamble text before the actual JSON
+		const jsonStart = trimmed.indexOf("{");
+		if (jsonStart > 0) {
+			trimmed = trimmed.slice(jsonStart);
+		}
+	}
+
 	const candidates = [
 		trimmed,
 		trimmed
@@ -18,7 +32,7 @@ export function parseStructuredJson(text) {
 			.trim(),
 	];
 
-	const objectMatch = trimmed.match(/\{[\s\S]*\}/);
+	const objectMatch = trimmed.match(/\{[\s\S]*\}$/);
 	if (objectMatch) candidates.push(objectMatch[0]);
 
 	for (const candidate of candidates) {
@@ -31,7 +45,11 @@ export function parseStructuredJson(text) {
 	return null;
 }
 
-export function normalizeSynthesisPayload(payload, sources, fallbackAnswer = "") {
+export function normalizeSynthesisPayload(
+	payload,
+	sources,
+	fallbackAnswer = "",
+) {
 	const sourceIds = new Set(sources.map((source) => source.id));
 	const agreementLevel = [
 		"high",
@@ -61,8 +79,13 @@ export function normalizeSynthesisPayload(payload, sources, fallbackAnswer = "")
 		? payload.recommendedSources.filter((id) => sourceIds.has(id)).slice(0, 6)
 		: [];
 
+	// Clean up fallback answer if it contains preamble text
+	const cleanFallback = fallbackAnswer
+		? fallbackAnswer.replace(/^[\s\S]*?\{/m, "{").replace(/}\s*[\s\S]*$/m, "}")
+		: "";
+
 	return {
-		answer: trimText(payload?.answer || fallbackAnswer, 4000),
+		answer: trimText(payload?.answer || cleanFallback || fallbackAnswer, 4000),
 		agreement: {
 			level: agreementLevel,
 			summary: trimText(payload?.agreement?.summary || "", 280),
@@ -127,44 +150,32 @@ export function buildSynthesisPrompt(
 		engines: source.engines,
 		engineCount: source.engineCount,
 		perEngine: source.perEngine,
-		fetch:
-			source.fetch?.attempted
-				? {
-						ok: source.fetch.ok,
-						status: source.fetch.status,
-						publishedTime: source.fetch.publishedTime || "",
-						lastModified: source.fetch.lastModified || "",
-						byline: source.fetch.byline || "",
-						siteName: source.fetch.siteName || "",
-						...(grounded ? { snippet: trimText(source.fetch.snippet || "", 700) } : {}),
-					}
-				: undefined,
+		fetch: source.fetch?.attempted
+			? {
+					ok: source.fetch.ok,
+					status: source.fetch.status,
+					publishedTime: source.fetch.publishedTime || "",
+					lastModified: source.fetch.lastModified || "",
+					byline: source.fetch.byline || "",
+					siteName: source.fetch.siteName || "",
+					...(grounded
+						? { snippet: trimText(source.fetch.snippet || "", 700) }
+						: {}),
+				}
+			: undefined,
 	}));
 
 	return [
-		"You are synthesizing results from Perplexity, Bing Copilot, and Google AI.",
-		grounded
-			? "Use the fetched source snippets as the strongest evidence. Use engine answers for perspective and conflict detection."
-			: "Use the engine answers for perspective. Use the source registry for provenance and citations.",
-		"Prefer official docs, release notes, repositories, and maintainer-authored sources when available.",
-		"When publishedTime or lastModified is available, flag sources older than 2 years as potentially stale in caveats.",
-		"If the engines disagree, say so explicitly.",
-		"Do not invent sources. Only reference source IDs from the source registry.",
-		"Return valid JSON only. No markdown fences, no prose outside the JSON object.",
+		"Synthesize the following search results into a concise answer.",
+		"Compare the three engine responses (Perplexity, Bing, Google) and identify:",
+		"1. The main answer to the query",
+		"2. Where the engines agree",
+		"3. Where they disagree (if anywhere)",
+		"4. Any caveats or limitations",
+		"Use source IDs like S1, S2 when citing sources.",
+		"Format: Start with a brief answer, then list key points.",
 		"",
-		"JSON schema:",
-		"{",
-		'  "answer": "short direct answer",',
-		'  "agreement": { "level": "high|medium|low|mixed|conflicting", "summary": "..." },',
-		'  "differences": ["..."],',
-		'  "caveats": ["..."],',
-		'  "claims": [',
-		'    { "claim": "...", "support": "strong|moderate|weak|conflicting", "sourceIds": ["S1"] }',
-		"  ],",
-		'  "recommendedSources": ["S1", "S2"]',
-		"}",
-		"",
-		`User query: ${query}`,
+		`Query: ${query}`,
 		"",
 		`Engine results:\n${JSON.stringify(engineSummaries, null, 2)}`,
 		"",

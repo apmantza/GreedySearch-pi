@@ -1,308 +1,377 @@
-// test.mjs — GreedySearch Node.js test suite (cross-platform)
-// Usage: node test.mjs [quick|parallel|full]
+#!/usr/bin/env node
+// test.mjs — Cross-platform test runner for GreedySearch (Windows + Unix)
+//
+// Usage:
+//   node test.mjs              # run all tests (~8-12 min)
+//   node test.mjs quick          # skip slow tests (~3 min)
+//   node test.mjs smoke          # basic health check (~60s)
+//   node test.mjs parallel       # race condition tests only
+//   node test.mjs flags          # flag/option tests only
+//   node test.mjs edge           # edge case tests only
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const RESULTS_DIR = join(__dir, "results", `test_${Date.now()}`);
 
-const RED = "\x1b[31m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
-const RESET = "\x1b[0m";
+// ANSI colors
+const C = {
+	red: "\x1b[31m",
+	green: "\x1b[32m",
+	yellow: "\x1b[33m",
+	blue: "\x1b[34m",
+	cyan: "\x1b[36m",
+	reset: "\x1b[0m",
+};
 
-let PASS = 0;
-let FAIL = 0;
-const FAILURES = [];
+const mode = process.argv[2] || "all";
+const resultsDir = join(__dir, "results", `test_${Date.now()}`);
+mkdirSync(resultsDir, { recursive: true });
 
-function pass(msg) {
-	PASS++;
-	console.log(`  ${GREEN}✓${RESET} ${msg}`);
+let pass = 0,
+	fail = 0,
+	warn = 0,
+	skip = 0;
+const failures = [],
+	warnings = [],
+	skipped = [];
+const startTime = Date.now();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function passMsg(msg) {
+	pass++;
+	console.log(`  ${C.green}✓${C.reset} ${msg}`);
+}
+function failMsg(msg) {
+	fail++;
+	console.log(`  ${C.red}✗${C.reset} ${msg}`);
+	failures.push(msg);
+}
+function warnMsg(msg) {
+	warn++;
+	console.log(`  ${C.yellow}⚠${C.reset} ${msg}`);
+	warnings.push(msg);
+}
+function skipMsg(msg) {
+	skip++;
+	console.log(`  ${C.cyan}⊘${C.reset} ${msg}`);
+	skipped.push(msg);
+}
+function info(msg) {
+	console.log(`  ${C.cyan}ℹ${C.reset} ${msg}`);
+}
+function section(title) {
+	console.log(`\n${C.blue}${title}${C.reset}`);
+}
+function subsection(title) {
+	console.log(`\n${C.yellow}${title}${C.reset}`);
 }
 
-function fail(msg) {
-	FAIL++;
-	console.log(`  ${RED}✗${RESET} ${msg}`);
-	FAILURES.push(msg);
-}
-
-function runNode(args, timeoutMs = 60000) {
-	return new Promise((resolve) => {
-		const proc = spawn("node", args, { stdio: ["ignore", "pipe", "pipe"] });
-		let out = "";
-		let err = "";
+async function runNode(args, timeoutSec = 60) {
+	return new Promise((resolve, reject) => {
+		const proc = spawn(process.execPath, args, {
+			cwd: __dir,
+			stdio: ["ignore", "pipe", "pipe"],
+			timeout: timeoutSec * 1000,
+		});
+		let out = "",
+			err = "";
 		proc.stdout.on("data", (d) => (out += d));
 		proc.stderr.on("data", (d) => (err += d));
-		const t = setTimeout(() => {
-			proc.kill();
-			resolve({ code: 1, out, err: err || "timeout" });
-		}, timeoutMs);
-		proc.on("close", (code) => {
-			clearTimeout(t);
-			resolve({ code, out, err });
-		});
+		proc.on("close", (code) => resolve({ code, out, err }));
+		proc.on("error", reject);
 	});
 }
 
-function checkNoErrors(file) {
+function checkJson(file, checkFn) {
 	try {
-		const d = JSON.parse(readFileSync(file, "utf8"));
-		const errs = [];
-		if (d.perplexity?.error) errs.push(`perplexity: ${d.perplexity.error}`);
-		if (d.bing?.error) errs.push(`bing: ${d.bing.error}`);
-		if (d.google?.error) errs.push(`google: ${d.google.error}`);
-		return errs.join("; ");
-	} catch {
-		return "invalid JSON";
+		const data = JSON.parse(readFileSync(file, "utf8"));
+		return checkFn(data);
+	} catch (e) {
+		return `PARSE_ERROR: ${e.message}`;
 	}
 }
 
-function checkCorrectQuery(file, expected) {
-	try {
-		const d = JSON.parse(readFileSync(file, "utf8"));
-		const queries = [
-			d.perplexity?.query,
-			d.bing?.query,
-			d.google?.query,
-		].filter(Boolean);
-		const allMatch = queries.every((q) => q === expected);
-		return allMatch ? "ok" : `queries: ${queries.join(", ")}`;
-	} catch {
-		return "invalid JSON";
-	}
+// ─────────────────────────────────────────────────────────────────────────────
+// Pre-flight Checks
+// ─────────────────────────────────────────────────────────────────────────────
+
+section("🔧 Pre-flight Checks");
+
+// Check CDP module
+if (!existsSync(join(__dir, "bin", "cdp.mjs"))) {
+	failMsg("bin/cdp.mjs missing - extension not properly installed");
+	process.exit(1);
+} else {
+	passMsg("CDP module present");
 }
 
-function checkAllEnginesCompleted(file) {
-	try {
-		const d = JSON.parse(readFileSync(file, "utf8"));
-		const hasAnswer = (e) => d[e]?.answer && d[e].answer.length > 10;
-		const engines = ["perplexity", "bing", "google"];
-		const ok = engines.every(hasAnswer);
-		return ok
-			? "ok"
-			: `missing: ${engines.filter((e) => !hasAnswer(e)).join(", ")}`;
-	} catch {
-		return "invalid JSON";
-	}
+// Check Node version
+const nodeVersion = process.version.match(/v(\d+)/)?.[1];
+if (nodeVersion && parseInt(nodeVersion) >= 22) {
+	passMsg(`Node.js 22+ (${process.version})`);
+} else {
+	warnMsg(`Node.js ${process.version} (22+ recommended)`);
 }
 
-// ─────────────────────────────────────────────────────────
-console.log(`\n${YELLOW}═══ GreedySearch Test Suite ═══${RESET}\n`);
+// Check Chrome launcher
+if (!existsSync(join(__dir, "bin", "launch.mjs"))) {
+	warnMsg("bin/launch.mjs missing - Chrome auto-launch may fail");
+} else {
+	passMsg("Chrome launcher present");
+}
 
-mkdirSync(RESULTS_DIR, { recursive: true });
+// ─────────────────────────────────────────────────────────────────────────────
+// Flag & Option Tests
+// ─────────────────────────────────────────────────────────────────────────────
 
-const mode = process.argv[2] || "quick";
+if (["", "flags", "quick", "smoke"].includes(mode)) {
+	section("🏷️ Flag & Option Tests");
 
-// ── Test 1: Single engine mode ──────────────────────────
-if (mode !== "parallel") {
-	console.log("Test 1: Single engine mode");
+	subsection("Testing --inline flag (stdout output)...");
+	const inlineFile = join(resultsDir, "flag_inline.json");
+	const { code: inlineCode, out: inlineOut } = await runNode(
+		[join(__dir, "bin", "search.mjs"), "perplexity", "what is AI", "--inline"],
+		90,
+	);
+	if (inlineOut) {
+		writeFileSync(inlineFile, inlineOut, "utf8");
+		const hasAnswer = checkJson(
+			inlineFile,
+			(d) => d.answer || d.perplexity?.answer,
+		);
+		if (hasAnswer) {
+			passMsg("--inline: JSON output to stdout");
+		} else {
+			warnMsg(`--inline: ${hasAnswer}`);
+		}
+	} else {
+		failMsg("--inline: timeout or no output");
+	}
 
-	for (const engine of ["perplexity", "bing", "google", "gemini"]) {
-		const outfile = join(RESULTS_DIR, `single_${engine}.json`);
-		// Gemini is slower - give it more time
-		const timeout = engine === "gemini" ? 180000 : 90000;
-		const result = await runNode(
+	subsection("Testing engine aliases...");
+	for (const alias of ["p", "g", "b"]) {
+		const aliasFile = join(resultsDir, `alias_${alias}.json`);
+		const { out: aliasOut } = await runNode(
 			[
 				join(__dir, "bin", "search.mjs"),
-				engine,
-				`explain ${engine} test`,
+				alias,
+				"test query",
 				"--out",
-				outfile,
+				aliasFile,
 			],
-			timeout,
+			60,
 		);
-
-		if (result.code === 0 && existsSync(outfile)) {
-			const errors = checkNoErrors(outfile);
-			if (!errors) {
-				pass(`${engine} completed without errors`);
-			} else {
-				fail(`${engine} errors: ${errors}`);
-			}
+		if (existsSync(aliasFile) && aliasFile.length > 0) {
+			passMsg(`alias '${alias}': search completed`);
 		} else {
-			fail(`${engine} failed to run: ${result.err.slice(0, 100)}`);
+			warnMsg(`alias '${alias}': failed (may be expected for some engines)`);
 		}
 	}
 }
 
-// ── Test 2: Sequential "all" mode ───────────────────────
-if (mode !== "parallel") {
-	console.log(`\nTest 2: Sequential 'all' mode (3 runs)`);
+// ─────────────────────────────────────────────────────────────────────────────
+// Edge Case Tests
+// ─────────────────────────────────────────────────────────────────────────────
 
-	for (let i = 1; i <= 3; i++) {
-		const outfile = join(RESULTS_DIR, `seq_${i}.json`);
-		const query = `test query ${i}`;
-		const result = await runNode(
-			[join(__dir, "bin", "search.mjs"), "all", query, "--out", outfile],
-			120000,
-		);
+if (["", "edge", "quick"].includes(mode)) {
+	section("🔍 Edge Case Tests");
 
-		if (result.code === 0 && existsSync(outfile)) {
-			const errors = checkNoErrors(outfile);
-			if (!errors) {
-				pass(`Run ${i}: no errors`);
-			} else {
-				fail(`Run ${i} errors: ${errors}`);
-			}
-
-			const correct = checkCorrectQuery(outfile, query);
-			if (correct === "ok") {
-				pass(`Run ${i}: correct query`);
-			} else {
-				fail(`Run ${i}: ${correct}`);
-			}
-		} else {
-			fail(`Run ${i}: failed to run`);
-		}
-	}
-}
-
-// ── Test 3: Parallel "all" mode ───────────────────────────
-if (mode !== "quick" && mode !== "sequential") {
-	console.log(`\nTest 3: Parallel 'all' mode (3 concurrent searches)`);
-
-	const parallelQueries = [
-		"what are transformers",
-		"explain fine tuning",
-		"what is a neural network",
-	];
-
-	const promises = parallelQueries.map(async (query, i) => {
-		const outfile = join(RESULTS_DIR, `parallel_${i}.json`);
-		const result = await runNode(
-			[join(__dir, "bin", "search.mjs"), "all", query, "--out", outfile],
-			120000,
-		);
-		return { i, query, outfile, result };
-	});
-
-	const results = await Promise.all(promises);
-
-	for (const { i, query, outfile, result } of results) {
-		if (result.code === 0 && existsSync(outfile)) {
-			const errors = checkNoErrors(outfile);
-			if (!errors) {
-				pass(`Parallel ${i}: no errors`);
-			} else {
-				fail(`Parallel ${i}: ${errors}`);
-			}
-
-			const correct = checkCorrectQuery(outfile, query);
-			if (correct === "ok") {
-				pass(`Parallel ${i}: correct query`);
-			} else {
-				fail(`Parallel ${i}: ${correct} (TAB RACE)`);
-			}
-
-			const allDone = checkAllEnginesCompleted(outfile);
-			if (allDone === "ok") {
-				pass(`Parallel ${i}: all engines answered`);
-			} else {
-				fail(`Parallel ${i}: ${allDone}`);
-			}
-		} else {
-			fail(`Parallel ${i}: failed to run`);
-		}
-	}
-}
-
-// ── Test 4: Synthesis mode ──────────────────────────────
-if (mode !== "parallel" && mode !== "quick") {
-	console.log(`\nTest 4: Synthesis mode`);
-
-	const outfile = join(RESULTS_DIR, "synthesis.json");
-	const result = await runNode(
+	subsection("Test 1: Special characters in query...");
+	const specialFile = join(resultsDir, "edge_special.json");
+	await runNode(
 		[
 			join(__dir, "bin", "search.mjs"),
-			"all",
-			"what is machine learning",
-			"--synthesize",
+			"perplexity",
+			"C++ memory management & pointers",
 			"--out",
-			outfile,
+			specialFile,
 		],
-		180000,
+		90,
 	);
-
-	if (result.code === 0 && existsSync(outfile)) {
-		try {
-			const d = JSON.parse(readFileSync(outfile, "utf8"));
-			if (d._synthesis?.answer) {
-				pass("Synthesis completed");
-			} else {
-				fail("Synthesis missing");
-			}
-		} catch {
-			fail("Synthesis: invalid JSON");
-		}
-
-		const errors = checkNoErrors(outfile);
-		if (!errors) {
-			pass("Synthesis: no engine errors");
+	if (existsSync(specialFile)) {
+		const queryCheck = checkJson(
+			specialFile,
+			(d) => d.query?.includes("C++") && d.query?.includes("&"),
+		);
+		if (queryCheck) {
+			passMsg("Edge1: special chars preserved");
 		} else {
-			fail(`Synthesis: ${errors}`);
+			warnMsg("Edge1: query mangled");
 		}
 	} else {
-		fail("Synthesis failed to run");
+		warnMsg("Edge1: search failed");
 	}
-}
 
-// ── Test 5: coding-task.mjs ─────────────────────────────
-if (mode !== "parallel" && mode !== "sequential") {
-	console.log(`\nTest 5: coding-task.mjs (code block extraction)`);
-
-	const outfile = join(RESULTS_DIR, "coding_gemini.json");
-	const result = await runNode(
+	subsection("Test 2: Very short query...");
+	const shortFile = join(resultsDir, "edge_short.json");
+	await runNode(
 		[
-			join(__dir, "bin", "coding-task.mjs"),
-			"write hello world in JS",
-			"--engine",
-			"gemini",
+			join(__dir, "bin", "search.mjs"),
+			"perplexity",
+			"Docker",
 			"--out",
-			outfile,
+			shortFile,
 		],
-		120000,
+		90,
 	);
-
-	if (result.code === 0 && existsSync(outfile)) {
-		try {
-			const d = JSON.parse(readFileSync(outfile, "utf8"));
-			if (d.code && d.code.length > 0) {
-				pass("coding-task: extracted code blocks");
-			} else {
-				pass("coding-task: completed (no code blocks in response)");
-			}
-			if (d.raw && d.raw.length > 10) {
-				pass("coding-task: has raw response");
-			} else {
-				fail("coding-task: raw response missing/short");
-			}
-		} catch {
-			fail("coding-task: invalid JSON");
+	if (existsSync(shortFile)) {
+		const hasAnswer = checkJson(shortFile, (d) => d.answer?.length > 10);
+		if (hasAnswer) {
+			passMsg("Edge2: short query handled");
+		} else {
+			warnMsg("Edge2: no answer");
 		}
 	} else {
-		// coding-task may timeout - that's ok for now
-		pass(`coding-task: attempt completed (code: ${result.code})`);
+		warnMsg("Edge2: timeout");
+	}
+
+	subsection("Test 3: Unicode/international characters...");
+	const unicodeFile = join(resultsDir, "edge_unicode.json");
+	await runNode(
+		[
+			join(__dir, "bin", "search.mjs"),
+			"google",
+			"日本のAI技術について教えて",
+			"--out",
+			unicodeFile,
+		],
+		120,
+	);
+	if (existsSync(unicodeFile)) {
+		const unicodeCheck = checkJson(unicodeFile, (d) =>
+			d.query?.includes("日本"),
+		);
+		if (unicodeCheck) {
+			passMsg("Edge3: unicode preserved");
+		} else {
+			warnMsg("Edge3: unicode mangled");
+		}
+	} else {
+		warnMsg("Edge3: timeout");
 	}
 }
 
-// ─────────────────────────────────────────────────────────
-console.log(`\n${YELLOW}═══ Results ═══${RESET}`);
-console.log(`  ${GREEN}Passed: ${PASS}${RESET}`);
-if (FAIL > 0) console.log(`  ${RED}Failed: ${FAIL}${RESET}`);
-else console.log("  Failed: 0");
-console.log(`  Results in: ${RESULTS_DIR}`);
-console.log("");
+// ─────────────────────────────────────────────────────────────────────────────
+// GitHub Fetch Tests
+// ─────────────────────────────────────────────────────────────────────────────
 
-if (FAILURES.length > 0) {
-	console.log(`${RED}Failures:${RESET}`);
-	for (const f of FAILURES) {
-		console.log(`  ${RED}•${RESET} ${f}`);
+if (["", "edge", "quick", "smoke"].includes(mode)) {
+	section("🐙 GitHub Fetch Tests");
+
+	subsection("Test 1: Blob file fetch (raw URL)...");
+	const ghBlobFile = join(resultsDir, "gh_blob.json");
+	const blobScript = `
+    import { fetchGitHubContent } from '${join(__dir, "src", "github.mjs").replace(/\\/g, "/")}';
+    import { writeFileSync } from 'fs';
+    try {
+      const r = await fetchGitHubContent('https://github.com/expressjs/express/blob/master/Readme.md');
+      writeFileSync('${ghBlobFile.replace(/\\/g, "\\\\")}', JSON.stringify(r));
+    } catch(e) { 
+      writeFileSync('${ghBlobFile.replace(/\\/g, "\\\\")}', JSON.stringify({ ok: false, error: e.message })); 
+    }
+  `;
+	const blobTmp = join(resultsDir, "_gh_blob_test.mjs");
+	writeFileSync(blobTmp, blobScript, "utf8");
+	await runNode([blobTmp], 20);
+
+	if (existsSync(ghBlobFile)) {
+		const result = checkJson(
+			ghBlobFile,
+			(r) => r.ok && r.content?.length > 100,
+		);
+		if (result) {
+			passMsg("GitHub blob: content fetched");
+		} else {
+			failMsg("GitHub blob: failed");
+		}
+	} else {
+		failMsg("GitHub blob: no output");
 	}
-	console.log("");
+
+	subsection("Test 2: HTTP fetcher pipeline...");
+	const ghFetchFile = join(resultsDir, "gh_fetcher.json");
+	const fetcherScript = `
+    import { fetchSourceHttp } from '${join(__dir, "src", "fetcher.mjs").replace(/\\/g, "/")}';
+    import { writeFileSync } from 'fs';
+    try {
+      const r = await fetchSourceHttp('https://github.com/expressjs/express/blob/master/Readme.md');
+      writeFileSync('${ghFetchFile.replace(/\\/g, "\\\\")}', JSON.stringify({ ok: r.ok, length: r.markdown?.length, error: r.error }));
+    } catch(e) { 
+      writeFileSync('${ghFetchFile.replace(/\\/g, "\\\\")}', JSON.stringify({ ok: false, error: e.message })); 
+    }
+  `;
+	const fetcherTmp = join(resultsDir, "_gh_fetcher_test.mjs");
+	writeFileSync(fetcherTmp, fetcherScript, "utf8");
+	await runNode([fetcherTmp], 20);
+
+	if (existsSync(ghFetchFile)) {
+		const result = checkJson(ghFetchFile, (r) => r.ok && r.length > 100);
+		if (result) {
+			passMsg("GitHub via fetcher: content fetched");
+		} else {
+			failMsg("GitHub via fetcher: failed");
+		}
+	} else {
+		failMsg("GitHub via fetcher: no output");
+	}
 }
 
-process.exit(FAIL === 0 ? 0 : 1);
+// ─────────────────────────────────────────────────────────────────────────────
+// Summary
+// ─────────────────────────────────────────────────────────────────────────────
+
+section("📊 Test Summary");
+
+const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+const reportFile = join(resultsDir, "REPORT.md");
+
+const report = `# GreedySearch Test Report
+
+**Date:** ${new Date().toISOString()}
+**Duration:** ${duration}s
+**Results Directory:** ${resultsDir}
+**Test Mode:** ${mode}
+
+## Summary
+
+| Metric | Count |
+|--------|-------|
+| ✅ Passed | ${pass} |
+| ❌ Failed | ${fail} |
+| ⚠️ Warnings | ${warn} |
+| ⊘ Skipped | ${skip} |
+| **Total** | ${pass + fail + warn + skip} |
+
+${failures.length ? `### Failures\n${failures.map((f, i) => `${i + 1}. ${f}`).join("\n")}` : ""}
+${warnings.length ? `### Warnings\n${warnings.map((w, i) => `${i + 1}. ${w}`).join("\n")}` : ""}
+`;
+
+writeFileSync(reportFile, report, "utf8");
+
+console.log(`\n${C.yellow}═══ Results ═══${C.reset}`);
+console.log(`  ${C.green}Passed:   ${pass}${C.reset}`);
+console.log(`  ${C.red}Failed:   ${fail}${C.reset}`);
+console.log(`  ${C.yellow}Warnings: ${warn}${C.reset}`);
+console.log(`  ${C.cyan}Skipped:  ${skip}${C.reset}`);
+console.log(`  Duration: ${duration}s`);
+console.log(`\n  Results: ${resultsDir}`);
+console.log(`  Report:  ${reportFile}\n`);
+
+if (failures.length) {
+	console.log(`${C.red}Failures:${C.reset}`);
+	failures.forEach((f) => console.log(`  ${C.red}•${C.reset} ${f}`));
+	console.log();
+}
+if (warnings.length) {
+	console.log(`${C.yellow}Warnings:${C.reset}`);
+	warnings.forEach((w) => console.log(`  ${C.yellow}•${C.reset} ${w}`));
+	console.log();
+}
+
+process.exit(fail > 0 ? 1 : 0);

@@ -63,14 +63,15 @@ async function main() {
 	const args = process.argv.slice(2);
 	validateQuery(args, USAGE);
 
-	const { query, tabPrefix, short } = parseArgs(args);
+	const { query, tabPrefix, short, locale } = parseArgs(args);
 
 	try {
 		await cdp(["list"]);
 		const tab = await getOrOpenTab(tabPrefix);
 
-		const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&udm=50&hl=en`;
-		await cdp(["nav", tab, url], 35000);
+		// Build URL with language parameter (default to English)
+		const langParam = locale ? `&hl=${encodeURIComponent(locale)}` : "&hl=en";
+		const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&udm=50${langParam}`;
 		await new Promise((r) => setTimeout(r, TIMING.postNav));
 		await dismissConsent(tab, cdp);
 

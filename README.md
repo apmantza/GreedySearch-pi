@@ -55,14 +55,39 @@ node ~/.pi/agent/git/GreedySearch-pi/bin/launch.mjs --kill
 ## Requirements
 
 - Chrome
-- Node.js 22+
+- Node.js 20.11.0+ (22+ recommended)
+
+## Source fetching
+
+When using `depth: "standard"` or `depth: "deep"`, source content is fetched and synthesized:
+
+- **Reddit** — Uses Reddit's public `.json` API for posts and comments (no scraping)
+- **GitHub** — Uses GitHub REST API for repos, READMEs, and file trees
+- **General web** — Mozilla Readability extraction with browser fallback for bot-blocked pages
+- **Metadata** — title, author/byline, site name, publish date, language, excerpt
 
 ## Project layout
 
 - `bin/` - runtime CLIs (`search.mjs`, `launch.mjs`, `cdp.mjs`, `coding-task.mjs`)
 - `extractors/` - engine-specific automation
-- `src/` - ranking/fetching/formatting internals
+- `src/` - ranking/fetching/formatting internals (includes `reddit.mjs`, `github.mjs`, `fetcher.mjs`)
 - `skills/` - Pi skill metadata
+
+## Testing
+
+Cross-platform test runner (Windows + Unix):
+```bash
+npm test              # run all tests
+npm run test:quick    # skip slow tests
+npm run test:smoke    # basic health check
+```
+
+Full bash test suite (Unix only):
+```bash
+npm run test:bash           # comprehensive tests
+./test.sh parallel          # race condition tests
+./test.sh flags             # flag/option tests
+```
 
 ## Changelog
 

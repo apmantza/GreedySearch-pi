@@ -122,7 +122,8 @@ async function main() {
 		// Scroll to bottom every ~6s while waiting to trigger lazy-loaded content
 		await waitForCopyButton(tab, S.copyButton, {
 			timeout: 120000,
-			onPoll: (tick) => tick % 10 === 0 ? scrollToBottom(tab) : Promise.resolve(),
+			onPoll: (tick) =>
+				tick % 10 === 0 ? scrollToBottom(tab) : Promise.resolve(),
 		});
 
 		const { answer, sources } = await extractAnswer(tab);
