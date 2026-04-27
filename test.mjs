@@ -102,7 +102,7 @@ function checkJson(file, checkFn) {
 // Unit Tests (no Chrome required)
 // ─────────────────────────────────────────────────────────────────────────────
 
-if (["", "unit", "quick", "smoke"].includes(mode)) {
+if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 	section("🧪 Unit Tests");
 
 	subsection("stripQuotes — param double-escaping workaround (issue #2)");
@@ -188,7 +188,7 @@ if (!existsSync(join(__dir, "bin", "launch.mjs"))) {
 // Flag & Option Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-if (["", "flags", "quick", "smoke"].includes(mode)) {
+if (["", "all", "flags", "quick", "smoke"].includes(mode)) {
 	section("🏷️ Flag & Option Tests");
 
 	subsection("Testing --inline flag (stdout output)...");
@@ -237,7 +237,7 @@ if (["", "flags", "quick", "smoke"].includes(mode)) {
 // Edge Case Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-if (["", "edge", "quick"].includes(mode)) {
+if (["", "all", "edge", "quick"].includes(mode)) {
 	section("🔍 Edge Case Tests");
 
 	subsection("Test 1: Special characters in query...");
@@ -319,7 +319,7 @@ if (["", "edge", "quick"].includes(mode)) {
 // GitHub Fetch Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-if (["", "edge", "quick", "smoke"].includes(mode)) {
+if (["", "all", "edge", "quick", "smoke"].includes(mode)) {
 	section("🐙 GitHub Fetch Tests");
 
 	subsection("Test 1: Blob file fetch (raw URL)...");
