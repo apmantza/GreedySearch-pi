@@ -110,31 +110,43 @@ if (["", "unit", "quick", "smoke"].includes(mode)) {
 
 	const stripCases = [
 		// [input, expected, label]
-		['"all"',      "all",      'double-escaped enum: \\"all\\"'],
+		['"all"', "all", 'double-escaped enum: \\"all\\"'],
 		['"standard"', "standard", 'double-escaped enum: \\"standard\\"'],
-		['"deep"',     "deep",     'double-escaped enum: \\"deep\\"'],
-		["all",        "all",      "already clean: all"],
-		["standard",   "standard", "already clean: standard"],
-		["",           "",         "empty string"],
+		['"deep"', "deep", 'double-escaped enum: \\"deep\\"'],
+		["all", "all", "already clean: all"],
+		["standard", "standard", "already clean: standard"],
+		["", "", "empty string"],
 	];
 	for (const [input, expected, label] of stripCases) {
 		const got = stripQuotes(input);
 		if (got === expected) passMsg(`stripQuotes: ${label}`);
-		else failMsg(`stripQuotes: ${label} — expected "${expected}", got "${got}"`);
+		else
+			failMsg(`stripQuotes: ${label} — expected "${expected}", got "${got}"`);
 	}
 
 	subsection("Tool param normalization — greedy_search engine/depth");
-	const normalizeEnum = (val, fallback) => stripQuotes(val ?? fallback) || fallback;
+	const normalizeEnum = (val, fallback) =>
+		stripQuotes(val ?? fallback) || fallback;
 
 	const normCases = [
 		// [raw, fallback, expected, label]
-		['"all"',      "all",      "all",      'engine \\"all\\" (double-escaped)'],
-		['"perplexity"', "all",    "perplexity", 'engine \\"perplexity\\" (double-escaped)'],
-		['"standard"', "standard", "standard", 'depth \\"standard\\" (double-escaped)'],
-		['"deep"',     "standard", "deep",     'depth \\"deep\\" (double-escaped)'],
-		[undefined,    "all",      "all",      "engine undefined → default"],
-		[undefined,    "standard", "standard", "depth undefined → default"],
-		["gemini",     "all",      "gemini",   "engine clean string"],
+		['"all"', "all", "all", 'engine \\"all\\" (double-escaped)'],
+		[
+			'"perplexity"',
+			"all",
+			"perplexity",
+			'engine \\"perplexity\\" (double-escaped)',
+		],
+		[
+			'"standard"',
+			"standard",
+			"standard",
+			'depth \\"standard\\" (double-escaped)',
+		],
+		['"deep"', "standard", "deep", 'depth \\"deep\\" (double-escaped)'],
+		[undefined, "all", "all", "engine undefined → default"],
+		[undefined, "standard", "standard", "depth undefined → default"],
+		["gemini", "all", "gemini", "engine clean string"],
 	];
 	for (const [raw, fallback, expected, label] of normCases) {
 		const got = normalizeEnum(raw, fallback);
@@ -313,7 +325,7 @@ if (["", "edge", "quick", "smoke"].includes(mode)) {
 	subsection("Test 1: Blob file fetch (raw URL)...");
 	const ghBlobFile = join(resultsDir, "gh_blob.json");
 	const blobScript = `
-    import { fetchGitHubContent } from '${join(__dir, "src", "github.mjs").replace(/\\/g, "/")}';
+    import { fetchGitHubContent } from '../../src/github.mjs';
     import { writeFileSync } from 'fs';
     try {
       const r = await fetchGitHubContent('https://github.com/expressjs/express/blob/master/Readme.md');
@@ -343,7 +355,7 @@ if (["", "edge", "quick", "smoke"].includes(mode)) {
 	subsection("Test 2: HTTP fetcher pipeline...");
 	const ghFetchFile = join(resultsDir, "gh_fetcher.json");
 	const fetcherScript = `
-    import { fetchSourceHttp } from '${join(__dir, "src", "fetcher.mjs").replace(/\\/g, "/")}';
+    import { fetchSourceHttp } from '../../src/fetcher.mjs';
     import { writeFileSync } from 'fs';
     try {
       const r = await fetchSourceHttp('https://github.com/expressjs/express/blob/master/Readme.md');
