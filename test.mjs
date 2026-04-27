@@ -8,6 +8,7 @@
 //   node test.mjs parallel       # race condition tests only
 //   node test.mjs flags          # flag/option tests only
 //   node test.mjs edge           # edge case tests only
+//   node test.mjs unit           # fast unit tests only (no Chrome needed)
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -94,6 +95,51 @@ function checkJson(file, checkFn) {
 		return checkFn(data);
 	} catch (e) {
 		return `PARSE_ERROR: ${e.message}`;
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unit Tests (no Chrome required)
+// ─────────────────────────────────────────────────────────────────────────────
+
+if (["", "unit", "quick", "smoke"].includes(mode)) {
+	section("🧪 Unit Tests");
+
+	subsection("stripQuotes — param double-escaping workaround (issue #2)");
+	const { stripQuotes } = await import("./src/tools/shared.ts");
+
+	const stripCases = [
+		// [input, expected, label]
+		['"all"',      "all",      'double-escaped enum: \\"all\\"'],
+		['"standard"', "standard", 'double-escaped enum: \\"standard\\"'],
+		['"deep"',     "deep",     'double-escaped enum: \\"deep\\"'],
+		["all",        "all",      "already clean: all"],
+		["standard",   "standard", "already clean: standard"],
+		["",           "",         "empty string"],
+	];
+	for (const [input, expected, label] of stripCases) {
+		const got = stripQuotes(input);
+		if (got === expected) passMsg(`stripQuotes: ${label}`);
+		else failMsg(`stripQuotes: ${label} — expected "${expected}", got "${got}"`);
+	}
+
+	subsection("Tool param normalization — greedy_search engine/depth");
+	const normalizeEnum = (val, fallback) => stripQuotes(val ?? fallback) || fallback;
+
+	const normCases = [
+		// [raw, fallback, expected, label]
+		['"all"',      "all",      "all",      'engine \\"all\\" (double-escaped)'],
+		['"perplexity"', "all",    "perplexity", 'engine \\"perplexity\\" (double-escaped)'],
+		['"standard"', "standard", "standard", 'depth \\"standard\\" (double-escaped)'],
+		['"deep"',     "standard", "deep",     'depth \\"deep\\" (double-escaped)'],
+		[undefined,    "all",      "all",      "engine undefined → default"],
+		[undefined,    "standard", "standard", "depth undefined → default"],
+		["gemini",     "all",      "gemini",   "engine clean string"],
+	];
+	for (const [raw, fallback, expected, label] of normCases) {
+		const got = normalizeEnum(raw, fallback);
+		if (got === expected) passMsg(`normalize: ${label}`);
+		else failMsg(`normalize: ${label} — expected "${expected}", got "${got}"`);
 	}
 }
 

@@ -18,7 +18,7 @@ import { formatCodingTask } from "./src/formatters/coding.js";
 import { DEFAULTS } from "./src/search/defaults.mjs";
 import { registerDeepResearchTool } from "./src/tools/deep-research-handler.js";
 import { registerGreedySearchTool } from "./src/tools/greedy-search-handler.js";
-import { cdpAvailable, type ProgressUpdate } from "./src/tools/shared.js";
+import { cdpAvailable, stripQuotes, type ProgressUpdate } from "./src/tools/shared.js";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -53,28 +53,14 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 		promptSnippet: "Browser-based coding assistant with Gemini and Copilot",
 		parameters: Type.Object({
 			task: Type.String({ description: "The coding task or question" }),
-			engine: Type.Union(
-				[Type.Literal("all"), Type.Literal("gemini"), Type.Literal("copilot")],
-				{
-					description:
-						'Engine to use. "all" runs both Gemini and Copilot in parallel.',
-					default: "gemini",
-				},
-			),
-			mode: Type.Union(
-				[
-					Type.Literal("code"),
-					Type.Literal("review"),
-					Type.Literal("plan"),
-					Type.Literal("test"),
-					Type.Literal("debug"),
-				],
-				{
-					description:
-						"Task mode: code (default), review (code review), plan (architect review), test (write tests), debug (root cause analysis)",
-					default: "code",
-				},
-			),
+			engine: Type.String({
+				description: 'Engine to use: "all" (runs both Gemini and Copilot in parallel), "gemini" (default), "copilot".',
+				default: "gemini",
+			}),
+			mode: Type.String({
+				description: 'Task mode: "code" (default), "review" (code review), "plan" (architect review), "test" (write tests), "debug" (root cause analysis).',
+				default: "code",
+			}),
 			context: Type.Optional(
 				Type.String({
 					description: "Optional code context/snippet to include with the task",
@@ -82,17 +68,9 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, signal, onUpdate) => {
-			const {
-				task,
-				engine = "gemini",
-				mode = "code",
-				context,
-			} = params as {
-				task: string;
-				engine: string;
-				mode: string;
-				context?: string;
-			};
+			const { task, context } = params as { task: string; engine: string; mode: string; context?: string };
+			const engine = stripQuotes((params as any).engine ?? "gemini") || "gemini";
+			const mode = stripQuotes((params as any).mode ?? "code") || "code";
 
 			if (!cdpAvailable(__dir)) {
 				return {

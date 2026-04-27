@@ -38,3 +38,6 @@ jobs:
         run: |
           TARBALL=$(ls *.tgz)
           npm install -g "$TARBALL"
+
+      - name: Run unit tests
+        run: node test.mjs unit

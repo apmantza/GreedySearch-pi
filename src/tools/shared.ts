@@ -13,6 +13,11 @@ export type { ProgressUpdate, ToolResult } from "../types.js";
 const ALL_ENGINES = ["perplexity", "bing", "google"] as const;
 export { ALL_ENGINES };
 
+/** Strip surrounding double-quotes that some framework versions inject into string params */
+export function stripQuotes(val: string): string {
+	return val.replace(/^"|"$/g, "");
+}
+
 /**
  * Check if the CDP module is available in the package directory
  */

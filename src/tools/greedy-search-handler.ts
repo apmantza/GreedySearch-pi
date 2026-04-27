@@ -5,7 +5,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { formatResults } from "../formatters/results.js";
-import { ALL_ENGINES, cdpAvailable, cdpMissingResult, errorResult, makeProgressTracker, runSearch } from "./shared.js";
+import { ALL_ENGINES, cdpAvailable, cdpMissingResult, errorResult, makeProgressTracker, runSearch, stripQuotes } from "./shared.js";
 
 export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 	pi.registerTool({
@@ -19,20 +19,16 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 		promptSnippet: "Multi-engine AI web search with streaming progress",
 		parameters: Type.Object({
 			query: Type.String({ description: "The search query" }),
-			engine: Type.Union(
-				[Type.Literal("all"), Type.Literal("perplexity"), Type.Literal("bing"), Type.Literal("google"), Type.Literal("gemini"), Type.Literal("gem")],
-				{ description: 'Engine to use. "all" fans out to Perplexity, Bing, and Google in parallel (default).', default: "all" },
-			),
-			depth: Type.Union(
-				[Type.Literal("fast"), Type.Literal("standard"), Type.Literal("deep")],
-				{ description: "Search depth: fast (single engine, ~15-30s), standard (3 engines + synthesis, ~30-90s), deep (3 engines + source fetching + synthesis + confidence, ~60-180s). Default: standard.", default: "standard" },
-			),
+			engine: Type.String({ description: 'Engine to use: "all" (default), "perplexity", "bing", "google", "gemini", "gem". "all" fans out to Perplexity, Bing, and Google in parallel.', default: "all" }),
+			depth: Type.String({ description: 'Search depth: "fast" (single engine, ~15-30s), "standard" (3 engines + synthesis, ~30-90s), "deep" (3 engines + source fetching + synthesis + confidence, ~60-180s). Default: "standard".', default: "standard" }),
 			fullAnswer: Type.Optional(Type.Boolean({ description: "When true, returns the complete answer instead of a truncated preview (default: false, answers are shortened to ~300 chars to save tokens).", default: false })),
 		}),
 		execute: async (_toolCallId, params, signal, onUpdate) => {
-			const { query, engine = "all", depth = "standard", fullAnswer: fullAnswerParam } = params as {
+			const { query, fullAnswer: fullAnswerParam } = params as {
 				query: string; engine: string; depth?: "fast" | "standard" | "deep"; fullAnswer?: boolean;
 			};
+			const engine = stripQuotes((params as any).engine ?? "all") || "all";
+			const depth = (stripQuotes((params as any).depth ?? "standard") || "standard") as "fast" | "standard" | "deep";
 
 			if (!cdpAvailable(baseDir)) return cdpMissingResult();
 

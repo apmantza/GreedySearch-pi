@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.8.4 (2026-04-27)
+
+### Fixes
+- **Double-escaped enum params (issue #2)** — `pi-coding-agent` v0.70.2 wraps string enum values in extra quotes (e.g. `"all"` → `"\"all\""`) before validation, causing `greedy_search`, `deep_research`, and `coding_task` to reject every call with a validation error. Fixed by switching `engine`, `depth`, and `mode` parameters from strict `Type.Union([Type.Literal(...)])` to `Type.String()` (so the call passes validation), then stripping the extra quotes in each handler via a shared `stripQuotes()` utility.
+
+### Tests
+- **Unit tests added** — `node test.mjs unit` runs 13 fast, Chrome-free tests covering `stripQuotes` and param normalization for all affected tools. Included in `quick` and `smoke` modes.
+- **CI now runs unit tests** — GitHub Actions workflow runs `node test.mjs unit` after install on all three OS targets (ubuntu, windows, macos).
+
 ## v1.8.3 (2026-04-24)
 
 ### Fixes
