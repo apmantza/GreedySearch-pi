@@ -15,6 +15,13 @@
   - `S7780` — Wrapped 8 CDP eval templates containing backslash sequences in `String.raw()` to eliminate double-escaping.
   - `S7735` — Eliminated 13 negated-condition ternaries by inverting the conditional logic (`!== -1 ? ... : null` → `=== -1 ? null : ...`).
 
+### Security Hotspot Review
+
+- **SonarCloud: 20 security hotspots reviewed and marked Safe** — All outstanding hotspots were assessed and resolved in SonarCloud:
+  - `S4721` OS Command Injection (×2) — Inputs are hardcoded (`port=9222`) or parsed from system output and validated via `Number.parseInt`. Not user-controlled.
+  - `S5852` Regex ReDoS (×10) — Regexes operate on bounded input with negated char classes or short fixed patterns. No practical denial-of-service risk.
+  - `S4036` PATH environment variable (×8) — Local CLI extension spawning package-internal Node scripts. PATH is host-controlled; no untrusted input reaches the command.
+
 ### Tooling
 
 - **SonarCloud configuration** — Added `sonar-project.properties` with exclusions for `test/**`, `test.mjs`, `test.sh`, `test_unit.mjs`, and `scripts/**` so test-only code does not skew source quality metrics.
