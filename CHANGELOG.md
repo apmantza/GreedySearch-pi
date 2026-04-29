@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.8.5 (2026-04-29)
+
 ### Security
 
 - **CodeQL: Incomplete URL substring sanitization (6 alerts)** — Replaced loose `includes()` / `endsWith()` checks on raw URL strings with proper hostname parsing in `src/github.mjs`, `src/reddit.mjs`, `src/fetcher.mjs`, and `extractors/bing-copilot.mjs`. Prevents bypasses where arbitrary subdomains could spoof trusted domains (e.g. `evilgithub.com`, `reddit.com.evil.com`).
