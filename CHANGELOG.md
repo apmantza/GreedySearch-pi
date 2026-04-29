@@ -8,6 +8,14 @@
 - **CodeQL: Resource exhaustion (1 alert)** — `cdp loadall` now bounds `intervalMs` to 100–30,000ms to prevent unbounded `setTimeout` durations from untrusted CLI input.
 - **CodeQL: Missing workflow permissions (2 alerts)** — Added explicit `permissions: contents: read` blocks to `.github/workflows/ci.yml` and `.github/workflows/mirror-to-claude.yml`, limiting `GITHUB_TOKEN` scope to the minimum required.
 
+### Dependencies
+
+- **Dependabot security updates** — Bumped `basic-ftp`, `yaml`, `brace-expansion`, `protobufjs`, `fast-xml-parser`, and `@mozilla/readability` to latest patched versions.
+
+### Tests
+
+- **GitHub fetch test fixes** — Corrected ES module import paths and added `'all'` mode to test block conditions so cross-platform test runs pass cleanly.
+
 ## v1.8.4 (2026-04-27)
 
 ### Fixes
