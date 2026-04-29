@@ -11,19 +11,23 @@
 
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cdp, injectClipboardInterceptor, waitForCopyButton } from "../extractors/common.mjs";
+import {
+	cdp,
+	injectClipboardInterceptor,
+	waitForCopyButton,
+} from "../extractors/common.mjs";
 import { dismissConsent, handleVerification } from "../extractors/consent.mjs";
 
 const MAX_FILE_SIZE = 50 * 1024; // 50KB per file
 const MAX_FILES = 5;
 
 const __dir = fileURLToPath(new URL(".", import.meta.url));
-const PAGES_CACHE = `${tmpdir().replace(/\\/g, "/")}/cdp-pages.json`;
+const PAGES_CACHE = `${tmpdir().replaceAll("\\", "/")}/cdp-pages.json`;
 
 // Target the dedicated GreedySearch Chrome instance (port 9222)
-const GREEDY_PROFILE_DIR = `${tmpdir().replace(/\\/g, "/")}/greedysearch-chrome-profile`;
+const GREEDY_PROFILE_DIR = `${tmpdir().replaceAll("\\", "/")}/greedysearch-chrome-profile`;
 process.env.CDP_PROFILE_DIR = GREEDY_PROFILE_DIR;
 
 // Mode system prompts — prepended to the user's task
@@ -106,7 +110,9 @@ const ENGINES = {
 		},
 
 		async waitForCopyButton(tab) {
-			await waitForCopyButton(tab, 'button[aria-label="Copy"]', { timeout: STREAM_TIMEOUT });
+			await waitForCopyButton(tab, 'button[aria-label="Copy"]', {
+				timeout: STREAM_TIMEOUT,
+			});
 		},
 
 		async extract(tab) {
@@ -154,7 +160,11 @@ const ENGINES = {
 		},
 
 		async waitForCopyButton(tab) {
-			await waitForCopyButton(tab, 'button[data-testid="copy-ai-message-button"]', { timeout: STREAM_TIMEOUT });
+			await waitForCopyButton(
+				tab,
+				'button[data-testid="copy-ai-message-button"]',
+				{ timeout: STREAM_TIMEOUT },
+			);
 		},
 
 		async extract(tab) {
@@ -196,8 +206,8 @@ function extractCodeBlocks(text) {
 
 function extractExplanation(text, _codeBlocks) {
 	// Remove code blocks from text to get the explanation
-	let explanation = text.replace(/```[\s\S]*?```/g, "").trim();
-	explanation = explanation.replace(/\n{3,}/g, "\n\n").trim();
+	let explanation = text.replaceAll(/```[\s\S]*?```/g, "").trim();
+	explanation = explanation.replaceAll(/\n{3,}/g, "\n\n").trim();
 	return explanation.slice(0, 1000); // cap explanation at 1000 chars
 }
 
@@ -288,14 +298,14 @@ async function main() {
 	}
 
 	const engineFlagIdx = args.indexOf("--engine");
-	const engineArg = engineFlagIdx !== -1 ? args[engineFlagIdx + 1] : "gemini";
+	const engineArg = engineFlagIdx === -1 ? "gemini" : args[engineFlagIdx + 1];
 	const contextFlagIdx = args.indexOf("--context");
 	const outIdx = args.indexOf("--out");
-	const outFile = outIdx !== -1 ? args[outIdx + 1] : null;
+	const outFile = outIdx === -1 ? null : args[outIdx + 1];
 	const tabFlagIdx = args.indexOf("--tab");
-	const tabPrefix = tabFlagIdx !== -1 ? args[tabFlagIdx + 1] : null;
+	const tabPrefix = tabFlagIdx === -1 ? null : args[tabFlagIdx + 1];
 	const modeFlagIdx = args.indexOf("--mode");
-	const mode = modeFlagIdx !== -1 ? args[modeFlagIdx + 1] : "code";
+	const mode = modeFlagIdx === -1 ? "code" : args[modeFlagIdx + 1];
 
 	if (!Object.hasOwn(MODE_PROMPTS, mode)) {
 		process.stderr.write(
@@ -316,7 +326,9 @@ async function main() {
 
 	// Validate file paths: limit count, check readability, enforce size
 	if (filePaths.length > MAX_FILES) {
-		process.stderr.write(`Error: too many --file arguments (max ${MAX_FILES})\n`);
+		process.stderr.write(
+			`Error: too many --file arguments (max ${MAX_FILES})\n`,
+		);
 		process.exit(1);
 	}
 	for (const p of filePaths) {
@@ -325,12 +337,16 @@ async function main() {
 			process.exit(1);
 		}
 		if (isAbsolute(p) && !p.startsWith(process.cwd())) {
-			process.stderr.write(`Error: file must be within project directory: ${p}\n`);
+			process.stderr.write(
+				`Error: file must be within project directory: ${p}\n`,
+			);
 			process.exit(1);
 		}
 		const stat = statSync(p);
 		if (stat.size > MAX_FILE_SIZE) {
-			process.stderr.write(`Error: file too large (${Math.round(stat.size / 1024)}KB, max ${MAX_FILE_SIZE / 1024}KB): ${p}\n`);
+			process.stderr.write(
+				`Error: file too large (${Math.round(stat.size / 1024)}KB, max ${MAX_FILE_SIZE / 1024}KB): ${p}\n`,
+			);
 			process.exit(1);
 		}
 	}
@@ -342,7 +358,7 @@ async function main() {
 					.join("\n\n")
 			: null;
 	const context =
-		fileContext || (contextFlagIdx !== -1 ? args[contextFlagIdx + 1] : null);
+		fileContext || (contextFlagIdx === -1 ? null : args[contextFlagIdx + 1]);
 
 	const skipFlags = new Set([
 		...(engineFlagIdx >= 0 ? [engineFlagIdx, engineFlagIdx + 1] : []),

@@ -200,7 +200,7 @@ export async function fetchGitHubContent(url) {
 
 			const description = info?.description ? `\n\n> ${info.description}` : "";
 			const stars =
-				info?.stargazers_count != null ? ` ⭐ ${info.stargazers_count}` : "";
+				info?.stargazers_count == null ? "" : ` ⭐ ${info.stargazers_count}`;
 			const language = info?.language ? ` · ${info.language}` : "";
 
 			let content = `# ${owner}/${repo}${stars}${language}${description}\n\n`;

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Security
+
+- **SonarCloud: Log injection vulnerability (1 alert)** — `bin/launch.mjs` no longer logs the raw WebSocket debugger URL (user-controlled data). Replaced with a static "WebSocket URL received" message to prevent query/URL content from leaking into logs.
+
+### Code Quality
+
+- **SonarCloud batch fixes (~52 issues resolved)** across 16 source files:
+  - `S7781` — Replaced 18 `String#replace()` calls with `String#replaceAll()` for global replacements (regex → literal where applicable).
+  - `S1128` — Removed 15 unused imports (`dirname`, `join`, `relative`, `spawn`, `tmpdir`, `existsSync`, `shouldUseBrowser`, `closeTabs`, `cdp`, `openNewTab`, `closeTab`, `activateTab`, `trimText`).
+  - `S7773` — Migrated 11 `parseInt`/`parseFloat` calls to `Number.parseInt`/`Number.parseFloat`.
+  - `S7780` — Wrapped 8 CDP eval templates containing backslash sequences in `String.raw()` to eliminate double-escaping.
+  - `S7735` — Eliminated 13 negated-condition ternaries by inverting the conditional logic (`!== -1 ? ... : null` → `=== -1 ? null : ...`).
+
+### Tooling
+
+- **SonarCloud configuration** — Added `sonar-project.properties` with exclusions for `test/**`, `test.mjs`, `test.sh`, `test_unit.mjs`, and `scripts/**` so test-only code does not skew source quality metrics.
+
 ## v1.8.5 (2026-04-29)
 
 ### Security

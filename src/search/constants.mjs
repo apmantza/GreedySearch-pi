@@ -3,9 +3,9 @@
 import { tmpdir } from "node:os";
 
 export const GREEDY_PORT = 9222;
-export const GREEDY_PROFILE_DIR = `${tmpdir().replace(/\\/g, "/")}/greedysearch-chrome-profile`;
+export const GREEDY_PROFILE_DIR = `${tmpdir().replaceAll("\\", "/")}/greedysearch-chrome-profile`;
 export const ACTIVE_PORT_FILE = `${GREEDY_PROFILE_DIR}/DevToolsActivePort`;
-export const PAGES_CACHE = `${tmpdir().replace(/\\/g, "/")}/cdp-pages.json`;
+export const PAGES_CACHE = `${tmpdir().replaceAll("\\", "/")}/cdp-pages.json`;
 
 export const ALL_ENGINES = ["perplexity", "bing", "google"];
 
@@ -31,7 +31,7 @@ export const ENGINES = {
 
 export const SOURCE_FETCH_CONCURRENCY = Math.max(
 	1,
-	parseInt(process.env.GREEDY_FETCH_CONCURRENCY || "2", 10) || 2,
+	Number.parseInt(process.env.GREEDY_FETCH_CONCURRENCY || "2", 10) || 2,
 );
 
 // Tell cdp.mjs to prefer the GreedySearch Chrome profile's DevToolsActivePort

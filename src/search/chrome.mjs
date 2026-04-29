@@ -15,11 +15,12 @@ import {
 } from "node:fs";
 import http from "node:http";
 import { join } from "node:path";
-
-import { GREEDY_PORT, ACTIVE_PORT_FILE, PAGES_CACHE } from "./constants.mjs";
 import { cdp as _cdp } from "../../extractors/common.mjs";
+import { ACTIVE_PORT_FILE, GREEDY_PORT, PAGES_CACHE } from "./constants.mjs";
 
-const __dir = import.meta.dirname || new URL(".", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
+const __dir =
+	import.meta.dirname ||
+	new URL(".", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
 
 /** Re-export cdp() from the canonical location in extractors/common.mjs */
 export const cdp = _cdp;
@@ -204,20 +205,24 @@ export async function refreshPortFile() {
 
 export async function ensureChrome() {
 	const ready = await probeGreedyChrome();
-	if (!ready) {
+	if (ready) {
+		// Chrome already running — refresh the port file
+		await refreshPortFile();
+	} else {
 		process.stderr.write(
 			`GreedySearch Chrome not running on port ${GREEDY_PORT} — auto-launching...\n`,
 		);
 		await new Promise((resolve, reject) => {
-			const proc = spawn("node", [join(__dir, "..", "..", "bin", "launch.mjs")], {
-				stdio: ["ignore", process.stderr, process.stderr],
-			});
+			const proc = spawn(
+				"node",
+				[join(__dir, "..", "..", "bin", "launch.mjs")],
+				{
+					stdio: ["ignore", process.stderr, process.stderr],
+				},
+			);
 			proc.on("close", (code) =>
 				code === 0 ? resolve() : reject(new Error("launch.mjs failed")),
 			);
 		});
-	} else {
-		// Chrome already running — refresh the port file
-		await refreshPortFile();
 	}
 }

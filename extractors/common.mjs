@@ -33,8 +33,8 @@ export function cdp(args, timeoutMs = 30000) {
 		}, timeoutMs);
 		proc.on("close", (code) => {
 			clearTimeout(timer);
-			if (code !== 0) reject(new Error(err.trim() || `cdp exit ${code}`));
-			else resolve(out.trim());
+			if (code === 0) resolve(out.trim());
+			else reject(new Error(err.trim() || `cdp exit ${code}`));
 		});
 	});
 }
@@ -230,13 +230,13 @@ export function parseArgs(args) {
 	let rest = args.filter((a) => a !== "--short");
 
 	const tabFlagIdx = rest.indexOf("--tab");
-	const tabPrefix = tabFlagIdx !== -1 ? rest[tabFlagIdx + 1] : null;
+	const tabPrefix = tabFlagIdx === -1 ? null : rest[tabFlagIdx + 1];
 	if (tabFlagIdx !== -1) {
 		rest = rest.filter((_, i) => i !== tabFlagIdx && i !== tabFlagIdx + 1);
 	}
 
 	const localeIdx = rest.indexOf("--locale");
-	const locale = localeIdx !== -1 ? rest[localeIdx + 1] : null;
+	const locale = localeIdx === -1 ? null : rest[localeIdx + 1];
 	if (localeIdx !== -1) {
 		rest = rest.filter((_, i) => i !== localeIdx && i !== localeIdx + 1);
 	}

@@ -2,17 +2,18 @@
 //
 // Extracted from search.mjs.
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-const __dir = import.meta.dirname || new URL(".", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
+const __dir =
+	import.meta.dirname ||
+	new URL(".", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
 
 export function slugify(query) {
 	return query
 		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-|-$/g, "")
+		.replaceAll(/[^a-z0-9]+/g, "-")
+		.replaceAll(/^-|-$/g, "")
 		.slice(0, 60);
 }
 
@@ -42,8 +43,8 @@ export function writeOutput(
 
 	const ts = new Date()
 		.toISOString()
-		.replace("T", "_")
-		.replace(/[:.]/g, "-")
+		.replaceAll("T", "_")
+		.replaceAll(/[:.]/g, "-")
 		.slice(0, 19);
 	const slug = slugify(query);
 	const base = join(resultsDir(), `${ts}_${slug}`);

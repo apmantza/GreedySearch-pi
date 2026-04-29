@@ -131,7 +131,7 @@ async function main() {
 	const fetchSource = args.includes("--fetch-top-source");
 	const inline = args.includes("--inline");
 	const outIdx = args.indexOf("--out");
-	const outFile = outIdx !== -1 ? args[outIdx + 1] : null;
+	const outFile = outIdx === -1 ? null : args[outIdx + 1];
 
 	// Locale handling: CLI flag > env var > config file > default (en)
 	const localeIdx = args.indexOf("--locale");

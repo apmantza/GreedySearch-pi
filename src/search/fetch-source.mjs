@@ -3,14 +3,11 @@
 // Extracted from search.mjs. Uses fetchSourceHttp from src/fetcher.mjs
 // with browser fallback via CDP, plus GitHub content fetching.
 
-import { spawn } from "node:child_process";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fetchSourceHttp, shouldUseBrowser } from "../fetcher.mjs";
+import { fetchSourceHttp } from "../fetcher.mjs";
 import { fetchGitHubContent, parseGitHubUrl } from "../github.mjs";
 import { fetchRedditContent, parseRedditUrl } from "../reddit.mjs";
 import { trimContentHeadTail } from "../utils/content.mjs";
-import { cdp, closeTab, closeTabs, openNewTab } from "./chrome.mjs";
+import { cdp, closeTab, openNewTab } from "./chrome.mjs";
 import { SOURCE_FETCH_CONCURRENCY } from "./constants.mjs";
 import { trimText } from "./sources.mjs";
 
@@ -124,13 +121,13 @@ async function fetchSourceContentBrowser(url, maxChars = 8000) {
 		const content = await cdp([
 			"eval",
 			tab,
-			`
+			String.raw`
 			(function(){
 				var el = document.querySelector('article, [role="main"], main, .post-content, .article-body, #content, .content');
 				var text = (el || document.body).innerText;
 				return JSON.stringify({
 					title: document.title,
-					content: text.replace(/\\s+/g, ' ').trim(),
+					content: text.replace(/\s+/g, ' ').trim(),
 					url: location.href
 				});
 			})()
@@ -180,7 +177,10 @@ export async function fetchMultipleSources(
 
 	const workerCount = Math.min(
 		toFetch.length,
-		Math.max(1, parseInt(String(concurrency), 10) || SOURCE_FETCH_CONCURRENCY),
+		Math.max(
+			1,
+			Number.parseInt(String(concurrency), 10) || SOURCE_FETCH_CONCURRENCY,
+		),
 	);
 
 	process.stderr.write(
@@ -245,11 +245,11 @@ export async function fetchTopSource(url) {
 		const content = await cdp([
 			"eval",
 			tab,
-			`
+			String.raw`
       (function(){
         var el = document.querySelector('article, [role="main"], main, .post-content, .article-body, #content, .content');
         var text = (el || document.body).innerText;
-        return text.replace(/\\s+/g, ' ').trim();
+        return text.replace(/\s+/g, ' ').trim();
       })()
     `,
 		]);

@@ -5,11 +5,15 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { GREEDY_PROFILE_DIR } from "./constants.mjs";
-import { parseStructuredJson, normalizeSynthesisPayload, buildSynthesisPrompt } from "./synthesis.mjs";
-import { cdp, openNewTab, closeTab, activateTab } from "./chrome.mjs";
-import { trimText } from "./sources.mjs";
+import {
+	buildSynthesisPrompt,
+	normalizeSynthesisPayload,
+	parseStructuredJson,
+} from "./synthesis.mjs";
 
-const __dir = import.meta.dirname || new URL(".", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
+const __dir =
+	import.meta.dirname ||
+	new URL(".", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
 
 export async function synthesizeWithGemini(
 	query,
@@ -25,7 +29,11 @@ export async function synthesizeWithGemini(
 		const extraArgs = tabPrefix ? ["--tab", String(tabPrefix)] : [];
 		const proc = spawn(
 			"node",
-			[join(__dir, "..", "..", "extractors", "gemini.mjs"), prompt, ...extraArgs],
+			[
+				join(__dir, "..", "..", "extractors", "gemini.mjs"),
+				prompt,
+				...extraArgs,
+			],
 			{
 				stdio: ["ignore", "pipe", "pipe"],
 				env: { ...process.env, CDP_PROFILE_DIR: GREEDY_PROFILE_DIR },

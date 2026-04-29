@@ -49,13 +49,14 @@ export function runExtractor(
 		}, timeoutMs);
 		proc.on("close", (code) => {
 			clearTimeout(t);
-			if (code !== 0) reject(new Error(err.trim() || `extractor exit ${code}`));
-			else {
+			if (code === 0) {
 				try {
 					resolve(JSON.parse(out.trim()));
 				} catch {
 					reject(new Error(`bad JSON from ${script}: ${out.slice(0, 100)}`));
 				}
+			} else {
+				reject(new Error(err.trim() || `extractor exit ${code}`));
 			}
 		});
 	});

@@ -28,7 +28,7 @@ const DAEMON_CONNECT_RETRIES = 20;
 const DAEMON_CONNECT_DELAY = 300;
 const MIN_TARGET_PREFIX_LEN = 8;
 
-const _tmpdir = tmpdir().replace(/\\/g, "/");
+const _tmpdir = tmpdir().replaceAll("\\", "/");
 const PAGES_CACHE = `${_tmpdir}/cdp-pages.json`;
 
 function sockPath(targetId) {
@@ -66,7 +66,7 @@ function getWsUrl() {
 	// so GreedySearch targets its own Chrome, not the user's main session.
 	const profileDir = process.env.CDP_PROFILE_DIR;
 	if (profileDir) {
-		const p = `${profileDir.replace(/\\/g, "/")}/DevToolsActivePort`;
+		const p = `${profileDir.replaceAll("\\", "/")}/DevToolsActivePort`;
 		if (existsSync(p)) {
 			const lines = readFileSync(p, "utf8").trim().split("\n");
 			return `ws://localhost:${lines[0]}${lines[1]}`;
@@ -365,7 +365,7 @@ async function shotStr(cdp, sid, filePath) {
 	if (dpr === 1) {
 		try {
 			const raw = await evalStr(cdp, sid, "window.devicePixelRatio");
-			const parsed = parseFloat(raw);
+			const parsed = Number.parseFloat(raw);
 			if (parsed > 0) dpr = parsed;
 		} catch {}
 	}
@@ -482,8 +482,8 @@ async function clickStr(cdp, sid, selector) {
 }
 
 async function clickXyStr(cdp, sid, x, y) {
-	const cx = parseFloat(x);
-	const cy = parseFloat(y);
+	const cx = Number.parseFloat(x);
+	const cy = Number.parseFloat(y);
 	if (Number.isNaN(cx) || Number.isNaN(cy))
 		throw new Error("x and y must be numbers (CSS pixels)");
 	const base = { x: cx, y: cy, button: "left", clickCount: 1, modifiers: 0 };
@@ -514,7 +514,10 @@ async function typeStr(cdp, sid, text) {
 
 async function loadAllStr(cdp, sid, selector, intervalMs = 1500) {
 	if (!selector) throw new Error("CSS selector required");
-	intervalMs = Math.min(Math.max(parseInt(intervalMs, 10) || 1500, 100), 30000);
+	intervalMs = Math.min(
+		Math.max(Number.parseInt(intervalMs, 10) || 1500, 100),
+		30000,
+	);
 	let clicks = 0;
 	const deadline = Date.now() + 5 * 60 * 1000;
 	while (Date.now() < deadline) {
@@ -662,7 +665,7 @@ async function runDaemon(targetId) {
 						cdp,
 						sessionId,
 						args[0],
-						args[1] ? parseInt(args[1], 10) : 1500,
+						args[1] ? Number.parseInt(args[1], 10) : 1500,
 					);
 					break;
 				case "evalraw":

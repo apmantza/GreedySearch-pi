@@ -39,8 +39,8 @@ function findChrome() {
 	const candidates =
 		os === "win32"
 			? [
-					"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-					"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+					"C:/Program Files/Google/Chrome/Application/chrome.exe",
+					"C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
 				]
 			: os === "darwin"
 				? [
@@ -95,7 +95,7 @@ async function minimizeViaCDP() {
 		});
 
 		const wsUrl = version.webSocketDebuggerUrl;
-		console.log("[minimize] WebSocket URL:", wsUrl.slice(0, 40) + "...");
+		console.log("[minimize] WebSocket URL received");
 
 		const WebSocket = globalThis.WebSocket;
 		if (!WebSocket) {
@@ -185,7 +185,7 @@ async function minimizeViaCDP() {
 
 function isRunning() {
 	if (!existsSync(PID_FILE)) return false;
-	const pid = parseInt(readFileSync(PID_FILE, "utf8").trim(), 10);
+	const pid = Number.parseInt(readFileSync(PID_FILE, "utf8").trim(), 10);
 	if (!pid) return false;
 	try {
 		process.kill(pid, 0);
@@ -201,19 +201,19 @@ function getPortPid(port) {
 		if (os === "win32") {
 			const out = execSync(`netstat -ano -p TCP 2>nul`, { encoding: "utf8" });
 			const regex = new RegExp(
-				`TCP\\s+[^\\s]*:${port}\\s+[^\\s]*:0\\s+LISTENING\\s+(\\d+)`,
+				String.raw`TCP\s+[^\s]*:${port}\s+[^\s]*:0\s+LISTENING\s+(\d+)`,
 				"i",
 			);
 			const match = out.match(regex);
-			return match ? parseInt(match[1], 10) : null;
+			return match ? Number.parseInt(match[1], 10) : null;
 		}
 		const out = execSync(
-			`lsof -i :${port} -t 2>/dev/null || ss -tlnp 2>/dev/null | grep :${port} | grep -oP 'pid=\\K\\d+'`,
+			String.raw`lsof -i :${port} -t 2>/dev/null || ss -tlnp 2>/dev/null | grep :${port} | grep -oP 'pid=\K\d+'`,
 			{
 				encoding: "utf8",
 			},
 		).trim();
-		return out ? parseInt(out.split("\n")[0], 10) : null;
+		return out ? Number.parseInt(out.split("\n")[0], 10) : null;
 	} catch {
 		return null;
 	}

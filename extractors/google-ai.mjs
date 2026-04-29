@@ -34,14 +34,14 @@ async function extractAnswer(tab) {
 	const raw = await cdp([
 		"eval",
 		tab,
-		`
+		String.raw`
     (function() {
       var el = document.querySelector('${S.answerContainer}');
       if (!el) return JSON.stringify({ answer: '', sources: [] });
       var answer = el.innerText.trim();
       var sources = Array.from(document.querySelectorAll('${S.sourceLink}'))
         .filter(a => ${excludeFilter})
-        .map(a => ({ url: a.href.split('#')[0], title: (a.closest('${S.sourceHeadingParent}')?.querySelector('h3, [role=heading]')?.innerText || a.innerText?.trim().split('\\n')[0] || '').slice(0, 100) }))
+        .map(a => ({ url: a.href.split('#')[0], title: (a.closest('${S.sourceHeadingParent}')?.querySelector('h3, [role=heading]')?.innerText || a.innerText?.trim().split('\n')[0] || '').slice(0, 100) }))
         .filter(s => s.url && s.url.length > 10)
         .filter((v, i, arr) => arr.findIndex(x => x.url === v.url) === i)
         .slice(0, 10);

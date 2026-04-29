@@ -65,7 +65,7 @@ export async function fetchRedditContent(url, maxChars = 8000) {
 
 	try {
 		// Append .json to get API response
-		const jsonUrl = url.replace(/\/?$/, ".json");
+		const jsonUrl = url.replaceAll(/\/?$/g, ".json");
 
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -205,7 +205,7 @@ function formatComment(comment, depth) {
 	let md = "";
 
 	md += `${indent}**u/${comment.author}** (${comment.score} pts)\n`;
-	md += `${indent}${comment.body.replace(/\n/g, "\n" + indent)}\n`;
+	md += `${indent}${comment.body.replaceAll("\n", "\n" + indent)}\n`;
 
 	// Handle nested replies (limit depth to 3)
 	if (depth < 3 && comment.replies?.data?.children) {

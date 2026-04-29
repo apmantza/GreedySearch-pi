@@ -38,7 +38,7 @@ export const NEWS_HOSTS = [
 ];
 
 export function trimText(text = "", maxChars = 240) {
-	const clean = String(text).replace(/\s+/g, " ").trim();
+	const clean = String(text).replaceAll(/\s+/g, " ").trim();
 	if (clean.length <= maxChars) return clean;
 	return `${clean.slice(0, maxChars).replace(/\s+\S*$/, "")}...`;
 }

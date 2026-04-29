@@ -206,7 +206,7 @@ export async function fetchSourceHttp(url, options = {}) {
 				lastModified,
 				markdown: text,
 				contentLength: text.length,
-				excerpt: text.slice(0, 300).replace(/\n/g, " "),
+				excerpt: text.slice(0, 300).replaceAll(/\n/g, " "),
 				needsBrowser: false,
 			};
 		}
@@ -492,7 +492,7 @@ function extractContent(html, url) {
 
 	if (article && article.content) {
 		const markdown = turndown.turndown(article.content);
-		const cleanMarkdown = markdown.replace(/\n{3,}/g, "\n\n").trim();
+		const cleanMarkdown = markdown.replaceAll(/\n{3,}/g, "\n\n").trim();
 
 		const publishedTime =
 			article.publishedTime || extractMetaDate(document) || "";
@@ -504,7 +504,7 @@ function extractContent(html, url) {
 			lang: article.lang || "",
 			publishedTime,
 			markdown: cleanMarkdown,
-			excerpt: cleanMarkdown.slice(0, 300).replace(/\n/g, " "),
+			excerpt: cleanMarkdown.slice(0, 300).replaceAll(/\n/g, " "),
 		};
 	}
 
@@ -517,7 +517,7 @@ function extractContent(html, url) {
 			.querySelectorAll("script, style, nav, footer, header, aside")
 			.forEach((el) => el.remove());
 		const text = clone.textContent || "";
-		const cleanText = text.replace(/\s+/g, " ").trim();
+		const cleanText = text.replaceAll(/\s+/g, " ").trim();
 
 		return {
 			title: document.title || url,
