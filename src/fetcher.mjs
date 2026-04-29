@@ -93,7 +93,12 @@ export function rewriteGitHubUrl(url) {
 		const parsed = new URL(url);
 
 		// Only process github.com
-		if (!parsed.hostname.endsWith("github.com")) {
+		if (
+			!(
+				parsed.hostname === "github.com" ||
+				parsed.hostname.endsWith(".github.com")
+			)
+		) {
 			return url;
 		}
 
@@ -181,10 +186,12 @@ export async function fetchSourceHttp(url, options = {}) {
 		const lastModified = response.headers.get("last-modified") || "";
 
 		// Handle raw text/plain from GitHub (raw file content)
-		if (
-			contentType.includes("text/plain") &&
-			finalUrl.includes("raw.githubusercontent.com")
-		) {
+		let isRawGitHub = false;
+		try {
+			const finalHost = new URL(finalUrl).hostname.toLowerCase();
+			isRawGitHub = finalHost === "raw.githubusercontent.com";
+		} catch {}
+		if (contentType.includes("text/plain") && isRawGitHub) {
 			const text = await response.text();
 			return {
 				ok: true,
@@ -465,7 +472,8 @@ function extractMetaDate(document) {
 	];
 	for (const sel of selectors) {
 		const el = document.querySelector(sel);
-		const val = el?.getAttribute("content") || el?.getAttribute("datetime") || "";
+		const val =
+			el?.getAttribute("content") || el?.getAttribute("datetime") || "";
 		if (val) return val;
 	}
 	return "";
@@ -486,7 +494,8 @@ function extractContent(html, url) {
 		const markdown = turndown.turndown(article.content);
 		const cleanMarkdown = markdown.replace(/\n{3,}/g, "\n\n").trim();
 
-		const publishedTime = article.publishedTime || extractMetaDate(document) || "";
+		const publishedTime =
+			article.publishedTime || extractMetaDate(document) || "";
 
 		return {
 			title: article.title || document.title || url,

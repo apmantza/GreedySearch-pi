@@ -87,7 +87,14 @@ async function main() {
 				tab,
 				"document.location.href",
 			]).catch(() => "");
-			if (!currentUrl.includes("copilot.microsoft.com")) {
+			let onCopilot = false;
+			try {
+				const host = new URL(currentUrl).hostname.toLowerCase();
+				onCopilot =
+					host === "copilot.microsoft.com" ||
+					host.endsWith(".copilot.microsoft.com");
+			} catch {}
+			if (!onCopilot) {
 				await cdp(["nav", tab, "https://copilot.microsoft.com/"], 35000);
 				await new Promise((r) => setTimeout(r, TIMING.postNavSlow));
 				await dismissConsent(tab, cdp);

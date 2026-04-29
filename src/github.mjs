@@ -15,7 +15,12 @@ const DEFAULT_HEADERS = {
 export function parseGitHubUrl(url) {
 	try {
 		const parsed = new URL(url);
-		if (!parsed.hostname.endsWith("github.com")) {
+		if (
+			!(
+				parsed.hostname === "github.com" ||
+				parsed.hostname.endsWith(".github.com")
+			)
+		) {
 			return null;
 		}
 
@@ -88,23 +93,31 @@ async function fetchReadme(owner, repo) {
 async function fetchTree(owner, repo, ref = "HEAD", subPath = "") {
 	try {
 		// Resolve ref to a tree SHA first when using HEAD or a branch name
-		const refData = await apiGet(`/repos/${owner}/${repo}/git/ref/heads/${ref === "HEAD" ? "main" : ref}`).catch(() =>
-			apiGet(`/repos/${owner}/${repo}/git/ref/heads/master`).catch(() => null)
+		const refData = await apiGet(
+			`/repos/${owner}/${repo}/git/ref/heads/${ref === "HEAD" ? "main" : ref}`,
+		).catch(() =>
+			apiGet(`/repos/${owner}/${repo}/git/ref/heads/master`).catch(() => null),
 		);
 
 		let treeSha;
 		if (refData?.object?.sha) {
 			// Get commit to get tree SHA
-			const commit = await apiGet(`/repos/${owner}/${repo}/git/commits/${refData.object.sha}`);
+			const commit = await apiGet(
+				`/repos/${owner}/${repo}/git/commits/${refData.object.sha}`,
+			);
 			treeSha = commit.tree.sha;
 		} else {
 			// Fall back to repo default branch info
 			const repoInfo = await apiGet(`/repos/${owner}/${repo}`);
-			const branch = await apiGet(`/repos/${owner}/${repo}/branches/${repoInfo.default_branch}`);
+			const branch = await apiGet(
+				`/repos/${owner}/${repo}/branches/${repoInfo.default_branch}`,
+			);
 			treeSha = branch.commit.commit.tree.sha;
 		}
 
-		const treeData = await apiGet(`/repos/${owner}/${repo}/git/trees/${treeSha}`);
+		const treeData = await apiGet(
+			`/repos/${owner}/${repo}/git/trees/${treeSha}`,
+		);
 		let items = treeData.tree || [];
 
 		// Filter to subPath if requested
@@ -175,7 +188,10 @@ export async function fetchGitHubContent(url) {
 
 			// If repo info failed (e.g. 404 — repo doesn't exist), bail out
 			if (repoInfo.status === "rejected") {
-				return { ok: false, error: repoInfo.reason?.message || "Repo not found" };
+				return {
+					ok: false,
+					error: repoInfo.reason?.message || "Repo not found",
+				};
 			}
 
 			const info = repoInfo.value;
@@ -183,7 +199,8 @@ export async function fetchGitHubContent(url) {
 			const treeItems = tree.status === "fulfilled" ? tree.value : [];
 
 			const description = info?.description ? `\n\n> ${info.description}` : "";
-			const stars = info?.stargazers_count != null ? ` ⭐ ${info.stargazers_count}` : "";
+			const stars =
+				info?.stargazers_count != null ? ` ⭐ ${info.stargazers_count}` : "";
 			const language = info?.language ? ` · ${info.language}` : "";
 
 			let content = `# ${owner}/${repo}${stars}${language}${description}\n\n`;

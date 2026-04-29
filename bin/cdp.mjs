@@ -514,6 +514,7 @@ async function typeStr(cdp, sid, text) {
 
 async function loadAllStr(cdp, sid, selector, intervalMs = 1500) {
 	if (!selector) throw new Error("CSS selector required");
+	intervalMs = Math.min(Math.max(parseInt(intervalMs, 10) || 1500, 100), 30000);
 	let clicks = 0;
 	const deadline = Date.now() + 5 * 60 * 1000;
 	while (Date.now() < deadline) {

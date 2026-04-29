@@ -17,7 +17,7 @@ export function parseRedditUrl(url) {
 		const hostname = parsed.hostname.toLowerCase();
 
 		// Support reddit.com, old.reddit.com, www.reddit.com
-		if (!hostname.endsWith("reddit.com")) {
+		if (!(hostname === "reddit.com" || hostname.endsWith(".reddit.com"))) {
 			return null;
 		}
 
@@ -149,9 +149,20 @@ function formatRedditPost(post, commentsListing, maxChars) {
 	if (post.selftext) {
 		md += post.selftext;
 		md += "\n\n";
-	} else if (post.url && !post.url.includes("reddit.com")) {
-		// External link post
-		md += `**Link:** ${post.url}\n\n`;
+	} else if (post.url) {
+		try {
+			const postUrlHost = new URL(post.url).hostname.toLowerCase();
+			if (
+				postUrlHost !== "reddit.com" &&
+				!postUrlHost.endsWith(".reddit.com")
+			) {
+				// External link post
+				md += `**Link:** ${post.url}\n\n`;
+			}
+		} catch {
+			// If URL parsing fails, treat as external link
+			md += `**Link:** ${post.url}\n\n`;
+		}
 	}
 
 	// Comments section
