@@ -1,7 +1,6 @@
 // src/search/chrome.mjs — Chrome launch, probe, port file management, and CDP wrapper
 //
 // Extracted from search.mjs to reduce file complexity.
-// Also used by coding-task.mjs (via import).
 //
 // cdp() is re-exported from extractors/common.mjs to avoid duplication.
 //
