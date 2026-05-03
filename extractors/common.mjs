@@ -292,6 +292,31 @@ export async function waitForStreamComplete(tab, options = {}) {
 // ============================================================================
 
 /**
+ * Prepare args — if --stdin is present, read the query/prompt from stdin
+ * and replace the --stdin flag with the content. This avoids leaking queries
+ * and prompts via command-line arguments visible in the process table.
+ * Call this before parseArgs().
+ * @param {string[]} args - process.argv.slice(2)
+ * @returns {Promise<string[]>} modified args with query in place of --stdin
+ */
+export async function prepareArgs(args) {
+	const stdinIdx = args.indexOf("--stdin");
+	if (stdinIdx === -1) return args;
+
+	const query = await new Promise((resolve) => {
+		let data = "";
+		process.stdin.setEncoding("utf8");
+		process.stdin.on("data", (chunk) => (data += chunk));
+		process.stdin.on("end", () => resolve(data.trim()));
+	});
+
+	// Replace --stdin with the query text (parseArgs will extract it as query)
+	const modified = [...args];
+	modified[stdinIdx] = query;
+	return modified;
+}
+
+/**
  * Parse standard extractor CLI arguments
  * @param {string[]} args - process.argv.slice(2)
  * @returns {{query: string, tabPrefix: string|null, short: boolean, locale: string|null}}

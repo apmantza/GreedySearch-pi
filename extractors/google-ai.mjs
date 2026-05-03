@@ -16,6 +16,7 @@ import {
 	handleError,
 	outputJson,
 	parseArgs,
+	prepareArgs,
 	TIMING,
 	validateQuery,
 	waitForStreamComplete,
@@ -60,7 +61,7 @@ const USAGE =
 	'Usage: node extractors/google-ai.mjs "<query>" [--tab <prefix>]\n';
 
 async function main() {
-	const args = process.argv.slice(2);
+	const args = await prepareArgs(process.argv.slice(2));
 	validateQuery(args, USAGE);
 
 	const { query, tabPrefix, short, locale } = parseArgs(args);

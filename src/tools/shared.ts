@@ -72,9 +72,12 @@ export function runSearch(
 			allFlags.push("--headless");
 		const proc = spawn(
 			"node",
-			[searchBin, engine, "--inline", ...allFlags, query],
-			{ stdio: ["ignore", "pipe", "pipe"] },
+			[searchBin, engine, "--inline", "--stdin", ...allFlags],
+			{ stdio: ["pipe", "pipe", "pipe"] },
 		);
+		// Pipe query via stdin to avoid leaking it in process table command-line
+		proc.stdin.write(query);
+		proc.stdin.end();
 		let out = "";
 		let err = "";
 
@@ -122,13 +125,15 @@ export function makeProgressTracker(
 	suffix: "Searching" | "Researching",
 	depth: string,
 ) {
-	const completed = new Set<string>();
+	const completed = new Map<string, "done" | "error">();
 
-	return (eng: string, _status: "done" | "error") => {
-		completed.add(eng);
+	return (eng: string, status: "done" | "error") => {
+		completed.set(eng, status);
 		const parts: string[] = [];
 		for (const e of engines) {
-			if (completed.has(e)) parts.push(`✅ ${e} done`);
+			const s = completed.get(e);
+			if (s === "done") parts.push(`✅ ${e} done`);
+			else if (s === "error") parts.push(`❌ ${e} failed`);
 			else parts.push(`⏳ ${e}`);
 		}
 		if (depth !== "fast" && completed.size >= 3) parts.push("🔄 synthesizing");

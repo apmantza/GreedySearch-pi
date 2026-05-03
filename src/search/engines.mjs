@@ -33,12 +33,15 @@ export function runExtractor(
 	return new Promise((resolve, reject) => {
 		const proc = spawn(
 			"node",
-			[join(__dir, "..", "..", "extractors", script), query, ...extraArgs],
+			[join(__dir, "..", "..", "extractors", script), "--stdin", ...extraArgs],
 			{
-				stdio: ["ignore", "pipe", "pipe"],
+				stdio: ["pipe", "pipe", "pipe"],
 				env: { ...process.env, CDP_PROFILE_DIR: GREEDY_PROFILE_DIR },
 			},
 		);
+		// Pipe query via stdin to avoid leaking it in process table command-line
+		proc.stdin.write(query);
+		proc.stdin.end();
 		let out = "";
 		let err = "";
 		proc.stdout.on("data", (d) => (out += d));

@@ -61,6 +61,17 @@ function loadUserConfig() {
 	return {};
 }
 
+/** Read query/prompt from stdin (used with --stdin to avoid command-line leakage) */
+async function readStdin() {
+	return new Promise((resolve) => {
+		let data = "";
+		process.stdin.setEncoding("utf8");
+		process.stdin.on("data", (chunk) => (data += chunk));
+		process.stdin.on("end", () => resolve(data.trim()));
+		if (process.stdin.isTTY) resolve("");
+	});
+}
+
 // ─── Main ──────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -78,8 +89,8 @@ async function main() {
 				"  --deep-research     Deprecated: source fetching is now default",
 				"  --fetch-top-source  Fetch content from top source",
 				"  --inline            Output JSON to stdout (for piping)",
-				"  --headless          Run Chrome in headless mode (default: on)",
 				"  --locale <lang>     Force results language (en, de, fr, etc.)",
+				"  --stdin              Read query from stdin (avoids command-line leakage)",
 				"",
 				"Environment:",
 				"  GREEDY_SEARCH_VISIBLE   Set to 1 to show Chrome window (disables headless)",
@@ -164,15 +175,23 @@ async function main() {
 			a !== "--deep-research" &&
 			a !== "--deep" &&
 			a !== "--inline" &&
-			a !== "--headless" &&
+			a !== "--stdin" &&
+		a !== "--headless" &&
 			a !== "--depth" &&
 			a !== "--out" &&
 			a !== "--help" &&
 			(depthIdx === -1 || i !== depthIdx + 1) &&
 			(outIdx === -1 || i !== outIdx + 1),
 	);
-	const engine = rest[0].toLowerCase();
-	const query = rest.slice(1).join(" ");
+	const engine = rest[0]?.toLowerCase();
+	// Read query from stdin when --stdin flag is set (avoids leaking query in process table)
+	const useStdin = args.includes("--stdin");
+	let query;
+	if (useStdin) {
+		query = await readStdin();
+	} else {
+		query = rest.slice(1).join(" ");
+	}
 
 	if (engine === "all") {
 		await cdp(["list"]); // refresh pages cache

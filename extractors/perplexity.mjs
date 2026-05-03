@@ -20,6 +20,7 @@ import {
 	outputJson,
 	parseArgs,
 	parseSourcesFromMarkdown,
+	prepareArgs,
 	validateQuery,
 	waitForStreamComplete,
 } from "./common.mjs";
@@ -75,7 +76,7 @@ const USAGE =
 	'Usage: node extractors/perplexity.mjs "<query>" [--tab <prefix>]\n';
 
 async function main() {
-	const args = process.argv.slice(2);
+	const args = await prepareArgs(process.argv.slice(2));
 	validateQuery(args, USAGE);
 
 	const { query, tabPrefix, short } = parseArgs(args);

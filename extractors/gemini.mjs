@@ -18,6 +18,7 @@ import {
 	outputJson,
 	parseArgs,
 	parseSourcesFromMarkdown,
+	prepareArgs,
 	TIMING,
 	validateQuery,
 	waitForCopyButton,
@@ -81,7 +82,7 @@ async function extractAnswer(tab) {
 const USAGE = 'Usage: node extractors/gemini.mjs "<query>" [--tab <prefix>]\n';
 
 async function main() {
-	const args = process.argv.slice(2);
+	const args = await prepareArgs(process.argv.slice(2));
 	validateQuery(args, USAGE);
 
 	const { query, tabPrefix, short } = parseArgs(args);

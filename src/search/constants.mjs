@@ -7,7 +7,7 @@ export const GREEDY_PROFILE_DIR = `${tmpdir().replaceAll("\\", "/")}/greedysearc
 export const ACTIVE_PORT_FILE = `${GREEDY_PROFILE_DIR}/DevToolsActivePort`;
 export const PAGES_CACHE = `${tmpdir().replaceAll("\\", "/")}/cdp-pages.json`;
 
-export const ALL_ENGINES = ["perplexity", "bing", "google"];
+export const ALL_ENGINES = ["perplexity", "bing", "google", "googlesearch"];
 
 export const ENGINE_DOMAINS = {
 	perplexity: "perplexity.ai",
@@ -27,6 +27,8 @@ export const ENGINES = {
 	g: "google-ai.mjs",
 	gemini: "gemini.mjs",
 	gem: "gemini.mjs",
+	googlesearch: "google-search.mjs",
+	gs: "google-search.mjs",
 };
 
 export const SOURCE_FETCH_CONCURRENCY = Math.max(

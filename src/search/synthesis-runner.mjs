@@ -31,14 +31,17 @@ export async function synthesizeWithGemini(
 			"node",
 			[
 				join(__dir, "..", "..", "extractors", "gemini.mjs"),
-				prompt,
+				"--stdin",
 				...extraArgs,
 			],
 			{
-				stdio: ["ignore", "pipe", "pipe"],
+				stdio: ["pipe", "pipe", "pipe"],
 				env: { ...process.env, CDP_PROFILE_DIR: GREEDY_PROFILE_DIR },
 			},
 		);
+		// Pipe synthesis prompt via stdin to avoid leaking the full prompt in process table
+		proc.stdin.write(prompt);
+		proc.stdin.end();
 		let out = "";
 		let err = "";
 		proc.stdout.on("data", (d) => (out += d));
@@ -54,7 +57,19 @@ export async function synthesizeWithGemini(
 			else {
 				try {
 					const raw = JSON.parse(out.trim());
-					const structured = parseStructuredJson(raw.answer || "");
+					let structured = parseStructuredJson(raw.answer || "");
+
+					// Detect if Gemini echoed back the engine summaries instead of a synthesis.
+					// Happens when Gemini can't synthesize (e.g. only 1 engine responded) and
+					// echoes the prompt JSON. The engine summary JSON has per-engine keys
+					// (perplexity/bing/google) but no synthesis fields (answer/agreement).
+					const SYNTHESIS_FIELDS = ["answer", "agreement", "claims", "differences", "caveats"];
+					const hasSynthesisFields = structured && SYNTHESIS_FIELDS.some((f) => f in structured);
+					const hasEngineKeys = structured && ["perplexity", "bing", "google"].some((e) => e in structured);
+					if (hasEngineKeys && !hasSynthesisFields) {
+						structured = null; // Treat as parse failure — Gemini echoed input
+					}
+
 					resolve({
 						...normalizeSynthesisPayload(structured, sources, raw.answer || ""),
 						rawAnswer: raw.answer || "",
