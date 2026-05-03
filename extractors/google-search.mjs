@@ -17,6 +17,7 @@ import {
 	handleError,
 	outputJson,
 	parseArgs,
+	prepareArgs,
 	TIMING,
 	validateQuery,
 } from "./common.mjs";
@@ -168,7 +169,7 @@ const USAGE =
 	'Usage: node extractors/google-search.mjs "<query>" [--tab <prefix>] [--max <n>]\n';
 
 async function main() {
-	const args = process.argv.slice(2);
+	const args = await prepareArgs(process.argv.slice(2));
 	validateQuery(args, USAGE);
 
 	// Parse --max flag BEFORE parseArgs so it doesn't leak into query
