@@ -93,16 +93,15 @@
     GreedySearch
   </text>
 
-  <!-- Pi logo icon (replaces "for Pi" badge) -->
-  <g transform="translate(870, 230)" opacity="0.85">
+  <!-- Pi logo icon -->
+  <g transform="translate(905, 218)" opacity="0.85">
     <!-- Outer circle -->
-    <circle cx="30" cy="18" r="22" fill="none" stroke="#8b5cf6" stroke-width="1.5" opacity="0.5"/>
-    <!-- Pi P shape scaled down -->
-    <g transform="translate(12, 4) scale(1.5)">
+    <circle cx="15" cy="15" r="22" fill="none" stroke="#8b5cf6" stroke-width="1.5" opacity="0.5"/>
+    <!-- Pi P shape -->
+    <g transform="translate(-3, 1) scale(1.5)">
       <path fill="#8b5cf6" fill-rule="evenodd" d="M0 0H15V10H10V15H5V20H0ZM5 5V10H10V5Z"/>
       <rect x="15" y="10" width="5" height="10" fill="#8b5cf6"/>
     </g>
-    <text x="62" y="23" font-family="'Segoe UI', -apple-system, sans-serif" font-size="14" font-weight="600" fill="#8b5cf6" opacity="0.7">for Pi</text>
   </g>
 
   <!-- ===== TAGLINE ===== -->
