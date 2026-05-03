@@ -21,7 +21,7 @@ import {
 	prepareArgs,
 	TIMING,
 	validateQuery,
-	waitForCopyButton,
+	waitForStreamComplete,
 } from "./common.mjs";
 import { dismissConsent, handleVerification } from "./consent.mjs";
 import { SELECTORS } from "./selectors.mjs";
@@ -61,10 +61,15 @@ async function scrollToBottom(tab) {
 }
 
 async function extractAnswer(tab) {
+	// Click the LAST copy button (assistant's response at the bottom),
+	// not the first (which could be the user's echoed query).
 	await cdp([
 		"eval",
 		tab,
-		`document.querySelector('${S.copyButton}')?.click()`,
+		`(() => {
+			const buttons = document.querySelectorAll('${S.copyButton}');
+			buttons[buttons.length - 1]?.click();
+		})()`,
 	]);
 	await new Promise((r) => setTimeout(r, 400));
 
@@ -120,12 +125,17 @@ async function main() {
 			`document.querySelector('${S.sendButton}')?.click()`,
 		]);
 
-		// Scroll to bottom every ~6s while waiting to trigger lazy-loaded content
-		await waitForCopyButton(tab, S.copyButton, {
-			timeout: 60000,
-			onPoll: (tick) =>
-				tick % 10 === 0 ? scrollToBottom(tab) : Promise.resolve(),
-		});
+		// Wait for Gemini's response to finish streaming before extracting.
+		// Periodic scrolling keeps lazy-loaded content triggered in the viewport.
+		let pollTick = 0;
+		const scrollInterval = setInterval(() => {
+			if (++pollTick % 10 === 0) scrollToBottom(tab).catch(() => null);
+		}, 6000);
+		try {
+			await waitForStreamComplete(tab, { timeout: 90000, minLength: 50 });
+		} finally {
+			clearInterval(scrollInterval);
+		}
 
 		const { answer, sources } = await extractAnswer(tab);
 		if (!answer) throw new Error("No answer captured from Gemini clipboard");

@@ -21,7 +21,7 @@ import {
 	prepareArgs,
 	TIMING,
 	validateQuery,
-	waitForCopyButton,
+	waitForStreamComplete,
 } from "./common.mjs";
 import { dismissConsent, handleVerification } from "./consent.mjs";
 import { SELECTORS } from "./selectors.mjs";
@@ -34,10 +34,15 @@ const GLOBAL_VAR = "__bingClipboard";
 // ============================================================================
 
 async function extractAnswer(tab) {
+	// Click the LAST copy button (assistant's response at the bottom),
+	// not the first (which could be the user's echoed query).
 	await cdp([
 		"eval",
 		tab,
-		`document.querySelector('${S.copyButton}')?.click()`,
+		`(() => {
+			const buttons = document.querySelectorAll('${S.copyButton}');
+			buttons[buttons.length - 1]?.click();
+		})()`,
 	]);
 	await new Promise((r) => setTimeout(r, 400));
 
@@ -140,7 +145,8 @@ async function main() {
 			`document.querySelector('${S.input}')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,keyCode:13})), 'ok'`,
 		]);
 
-		await waitForCopyButton(tab, S.copyButton, { timeout: 30000 });
+		// Wait for Bing Copilot's response to finish streaming before extracting.
+		await waitForStreamComplete(tab, { timeout: 60000, minLength: 50 });
 
 		const { answer, sources } = await extractAnswer(tab);
 		if (!answer)
