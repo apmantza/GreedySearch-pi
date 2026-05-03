@@ -4,26 +4,33 @@
 
 ### Headless Mode (default)
 
-- **Chrome now runs headless by default** — no window, no GUI, purely background. Set `GREEDY_SEARCH_VISIBLE=1` to restore the visible (minimized) window.
+- **Chrome now runs headless by default** — no window, no GUI, purely background. Set `GREEDY_SEARCH_VISIBLE=1` to show the browser window.
 - **Anti-detection stealth** — Patches injected via `Page.addScriptToEvaluateOnNewDocument` (runs before any page JS):
   - `Runtime.enable` / CDP marker deletion (`__REBROWSER_*`, `__nightmare`, `__phantom`, etc.)
   - `navigator.webdriver` → `false`, `navigator.plugins` → realistic list, `navigator.languages` → `['en-US', 'en']`
   - `window.chrome` shim, WebGL vendor → Intel Iris, `hardwareConcurrency` → 8, `deviceMemory` → 8
   - `TrustedTypes` policy, `requestAnimationFrame` keep-alive (prevents headless stall detection)
   - `--disable-blink-features=AutomationControlled`, realistic `--user-agent`, `--window-size=1920,1080`
-- **Human click simulation** — `humanClickXY()` / `humanClickElement()` in consent.mjs: multi-event `mouseMoved→pressed→released` with ±3px coordinate jitter and random delays (80–180ms hover, 30–90ms hold). Used for Turnstile/Cloudflare verification bypass.
-- **Idle auto-cleanup** — Headless Chrome auto-killed after `GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES` (default 5 min) of inactivity. Only kills the PID-tracked instance on port 9222 — never touches the main Chrome session.
-- **Activity tracking** — Timestamp file written at search start and end; `checkAndKillIdle()` runs from `ensureChrome()` before reusing the existing instance.
+- **Human click simulation** — All verification/clicks now use CDP `Input.dispatchMouseEvent` with multi-event `mouseMoved→pressed→released`, ±3px coordinate jitter, and random delays (80–180ms hover, 30–90ms hold). Detection scripts return element selectors instead of clicking in-page; `handleVerification` performs human clicks via `humanClickElement()`/`humanClickXY()`. Applies to Turnstile iframes, reCAPTCHA, Cloudflare challenges, Microsoft auth, Copilot modals, and all generic verify/continue buttons.
+- **Idle auto-cleanup** — Headless Chrome auto-killed after `GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES` (default 5 min) of inactivity. Kills only the PID-tracked instance on port 9222 — never touches the main Chrome session. Activity timestamp written at search start and end.
+
+### Performance
+
+- **Timeouts cut ~40–50%** across all extractors — typical search ~60–90s → ~30–45s:
+  - `TIMING`: postNav 1500→800ms, postNavSlow 2000→1000ms, postClick 400→250ms, postType 400→250ms, inputPoll 400→300ms, copyPoll 600→400ms, afterVerify 3000→2000ms
+  - Defaults: waitForCopyButton 60s→30s, waitForStreamComplete 30s→20s, handleVerification 60s→30s
+  - Per-extractor: Google stream 45s→30s, Gemini copyButton 120s→60s + inputDeadline 10s→8s, Perplexity inputDeadline 8s→5s + stream 30s→20s, Bing verification 90s→30s + copyButton 60s→30s
+  - Engine process timeout: 90s→60s (180s→120s Gemini)
 
 ### Removed
 
-- **`coding_task` tool removed** — `bin/coding-task.mjs`, `src/formatters/coding.ts`, and the tool registration in `index.ts` deleted (644 lines). Use `greedy_search` with `engine: "gemini"` for similar functionality.
-- **`deep_research` tool removed** — `src/tools/deep-research-handler.ts`, `test/deep-research-compare.mjs`, and associated formatter (`formatDeepResearch` + 4 helper functions) deleted (521 lines). Use `greedy_search` with `depth: "deep"`.
+- **`coding_task` tool removed** — `bin/coding-task.mjs`, `src/formatters/coding.ts`, registration deleted (644 lines).
+- **`deep_research` tool removed** — handler, test, and `formatDeepResearch` + helpers deleted (521 lines). Use `greedy_search` with `depth: "deep"`.
+- **Minimize debug logs** — Removed 9 verbose `[minimize]` console.log statements from launch.mjs.
 
 ### Fixes
 
-- **`cdp.mjs` `getPages()` filter** — Now allows `chrome://newtab/` (headless Chrome's default initial tab is a new tab page, not `about:blank`). Prevents "No Chrome tabs found" on headless cold start.
-- **`launch.mjs` cleanup** — Removed 9 verbose `[minimize]` console.log statements.
+- **`cdp.mjs` `getPages()` filter** — Allows `chrome://newtab/` (headless Chrome default initial tab). Prevents "No Chrome tabs found" on cold start.
 
 ### Security
 
