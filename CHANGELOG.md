@@ -22,6 +22,12 @@
   - Per-extractor: Google stream 45s→30s, Gemini copyButton 120s→60s + inputDeadline 10s→8s, Perplexity inputDeadline 8s→5s + stream 30s→20s, Bing verification 90s→30s + copyButton 60s→30s
   - Engine process timeout: 90s→60s (180s→120s Gemini)
 
+### Security
+
+- **SonarCloud security hotspots fixed** — Two open hotspots resolved:
+  - _Weak cryptography (S2245)_ in `extractors/consent.mjs`: replaced `Math.random()` with `crypto.randomInt()` for the mouse-jitter RNG. Not actually security-sensitive (used only for ±3px jitter and timing delays), but compliant now.
+  - _PATH injection (S4036)_ in `src/search/chrome.mjs`: `spawn("node", ...)` replaced with `spawn(process.execPath, ...)` so the launcher doesn't rely on the `PATH` environment variable.
+
 ### Removed
 
 - **`coding_task` tool removed** — `bin/coding-task.mjs`, `src/formatters/coding.ts`, registration deleted (644 lines).

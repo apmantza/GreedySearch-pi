@@ -328,7 +328,9 @@ export async function ensureChrome() {
 		if (process.env.GREEDY_SEARCH_VISIBLE !== "1")
 			launchArgs.push("--headless");
 		await new Promise((resolve, reject) => {
-			const proc = spawn("node", launchArgs, {
+			// Use process.execPath instead of bare "node" so we are not relying on PATH
+			// (SonarCloud S4036).
+			const proc = spawn(process.execPath, launchArgs, {
 				stdio: ["ignore", process.stderr, process.stderr],
 			});
 			proc.on("close", (code) =>

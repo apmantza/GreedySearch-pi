@@ -1,3 +1,5 @@
+import { randomInt } from "node:crypto";
+
 // consent.mjs — auto-dismiss common cookie/consent banners and human-verification pages
 // Call dismissConsent(tab, cdpFn) after navigating to any page.
 
@@ -120,7 +122,9 @@ export async function dismissConsent(tab, cdp) {
 // ─── Human-like click simulation (multi-event with jitter) ────────────
 
 function rng(min, max) {
-	return Math.random() * (max - min) + min;
+	// crypto.randomInt is used instead of Math.random() to comply with SonarCloud security hotspot S2245.
+	// This is NOT security-sensitive — the random values are only used for mouse-jitter and timing delays.
+	return randomInt(min * 1000, max * 1000) / 1000;
 }
 
 /**
