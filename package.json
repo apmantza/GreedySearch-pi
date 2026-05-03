@@ -11,6 +11,7 @@
 		"url": "git+https://github.com/apmantza/GreedySearch-pi.git"
 	},
 	"author": "Apostolos Mantzaris",
+	"image": "docs/banner.png",
 	"license": "MIT",
 	"scripts": {
 		"test": "node test.mjs",
@@ -31,7 +32,8 @@
 		"skills/",
 		"extractors/",
 		"CHANGELOG.md",
-		"README.md"
+		"README.md",
+		"docs/banner.png"
 	],
 	"pi": {
 		"extensions": [
@@ -42,8 +44,8 @@
 		]
 	},
 	"dependencies": {
-		"jsdom": "^24.0.0",
 		"@mozilla/readability": "^0.6.0",
+		"jsdom": "^24.0.0",
 		"turndown": "^7.1.2"
 	},
 	"peerDependencies": {
