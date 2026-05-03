@@ -70,7 +70,7 @@ async function main() {
 		await dismissConsent(tab, cdp);
 
 		// Handle verification challenges (Cloudflare Turnstile, Microsoft auth, etc.)
-		const verifyResult = await handleVerification(tab, cdp, 90000);
+		const verifyResult = await handleVerification(tab, cdp, 30000);
 		if (verifyResult === "needs-human") {
 			throw new Error(
 				"Copilot verification required — please solve it manually in the browser window",
@@ -139,7 +139,7 @@ async function main() {
 			`document.querySelector('${S.input}')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,keyCode:13})), 'ok'`,
 		]);
 
-		await waitForCopyButton(tab, S.copyButton, { timeout: 60000 });
+		await waitForCopyButton(tab, S.copyButton, { timeout: 30000 });
 
 		const { answer, sources } = await extractAnswer(tab);
 		if (!answer)

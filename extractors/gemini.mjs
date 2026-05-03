@@ -97,7 +97,7 @@ async function main() {
 		await handleVerification(tab, cdp, 60000);
 
 		// Wait for input to be ready
-		const deadline = Date.now() + 10000;
+		const deadline = Date.now() + 8000;
 		while (Date.now() < deadline) {
 			const ready = await cdp([
 				"eval",
@@ -121,7 +121,7 @@ async function main() {
 
 		// Scroll to bottom every ~6s while waiting to trigger lazy-loaded content
 		await waitForCopyButton(tab, S.copyButton, {
-			timeout: 120000,
+			timeout: 60000,
 			onPoll: (tick) =>
 				tick % 10 === 0 ? scrollToBottom(tab) : Promise.resolve(),
 		});

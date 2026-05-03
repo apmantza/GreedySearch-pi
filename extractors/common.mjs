@@ -252,7 +252,7 @@ export async function waitForCopyButton(tab, selector, options = {}) {
  */
 export async function waitForStreamComplete(tab, options = {}) {
 	const {
-		timeout = 30000,
+		timeout = 20000,
 		interval = 600,
 		stableRounds = 3,
 		selector = "document.body",

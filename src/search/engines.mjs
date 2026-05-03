@@ -23,7 +23,7 @@ export function runExtractor(
 ) {
 	// Gemini is slower - use longer timeout
 	if (timeoutMs === null) {
-		timeoutMs = script.includes("gemini") ? 180000 : 90000;
+		timeoutMs = script.includes("gemini") ? 120000 : 60000;
 	}
 	const extraArgs = [
 		...(tabPrefix ? ["--tab", tabPrefix] : []),

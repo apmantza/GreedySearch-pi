@@ -28,9 +28,13 @@ pi install git:github.com/apmantza/GreedySearch-pi
 ## Quick usage
 
 ```js
-greedy_search({ query: "React 19 changes" })
-greedy_search({ query: "Prisma vs Drizzle", engine: "all", depth: "fast" })
-greedy_search({ query: "Best auth architecture 2026", engine: "all", depth: "deep" })
+greedy_search({ query: "React 19 changes" });
+greedy_search({ query: "Prisma vs Drizzle", engine: "all", depth: "fast" });
+greedy_search({
+  query: "Best auth architecture 2026",
+  engine: "all",
+  depth: "deep",
+});
 // Headless is the default — no window. To see the browser:
 // Set GREEDY_SEARCH_VISIBLE=1 before launching Pi
 ```
@@ -45,12 +49,12 @@ greedy_search({ query: "Best auth architecture 2026", engine: "all", depth: "dee
 
 ## Environment variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GREEDY_SEARCH_VISIBLE` | (unset) | Set to `1` to show Chrome window instead of headless |
-| `GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES` | `5` | Minutes of inactivity before auto-killing headless Chrome |
-| `GREEDY_SEARCH_LOCALE` | `en` | Default result language (en, de, fr, es, ja, etc.) |
-| `CHROME_PATH` | auto-detected | Path to Chrome/Chromium executable |
+| Variable                             | Default       | Description                                               |
+| ------------------------------------ | ------------- | --------------------------------------------------------- |
+| `GREEDY_SEARCH_VISIBLE`              | (unset)       | Set to `1` to show Chrome window instead of headless      |
+| `GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES` | `5`           | Minutes of inactivity before auto-killing headless Chrome |
+| `GREEDY_SEARCH_LOCALE`               | `en`          | Default result language (en, de, fr, es, ja, etc.)        |
+| `CHROME_PATH`                        | auto-detected | Path to Chrome/Chromium executable                        |
 
 ## Depth modes
 
@@ -74,6 +78,7 @@ node ~/.pi/agent/git/GreedySearch-pi/bin/launch.mjs --kill
 ## Anti-detection
 
 Headless Chrome auto-injects stealth patches before any page JavaScript runs:
+
 - `navigator.webdriver` hidden, plugins/languages faked, `window.chrome` shimmed
 - WebGL vendor spoofed (Intel Iris), realistic hardware concurrency / memory
 - CDP automation markers deleted, `requestAnimationFrame` kept alive
@@ -98,6 +103,7 @@ When using `depth: "standard"` or `depth: "deep"`, source content is fetched and
 ## Testing
 
 Cross-platform test runner (Windows + Unix):
+
 ```bash
 npm test              # run all tests
 npm run test:quick    # skip slow tests
@@ -105,6 +111,7 @@ npm run test:smoke    # basic health check
 ```
 
 Full bash test suite (Unix only):
+
 ```bash
 npm run test:bash           # comprehensive tests
 ./test.sh parallel          # race condition tests

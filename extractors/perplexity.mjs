@@ -91,7 +91,7 @@ async function main() {
 		await dismissConsent(tab, cdp);
 
 		// Wait for React app to mount input (up to 8s)
-		const deadline = Date.now() + 8000;
+		const deadline = Date.now() + 5000;
 		while (Date.now() < deadline) {
 			const found = await cdp([
 				"eval",
@@ -117,7 +117,7 @@ async function main() {
 		]);
 
 		await waitForStreamComplete(tab, {
-			timeout: 30000,
+			timeout: 20000,
 			interval: 600,
 			stableRounds: 3,
 			selector: "document.body",

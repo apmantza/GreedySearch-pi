@@ -259,7 +259,7 @@ const GET_IFRAME_CENTER_JS = `
 `;
 
 // Returns 'clear' | 'clicked' | 'needs-human'
-export async function handleVerification(tab, cdp, waitMs = 60000) {
+export async function handleVerification(tab, cdp, waitMs = 30000) {
 	const result = await cdp(["eval", tab, VERIFY_DETECT_JS]).catch(() => null);
 
 	if (!result || result === "null") return "clear";
