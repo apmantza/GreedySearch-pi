@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **`google-search` engine** — plain Google search extractor (locale-agnostic, `textarea[name="q"]`). Returns title/URL/snippet for traditional 10-blue-link results. Aliases: `gs`, `googlesearch`.
+
 ### Headless Mode (default)
 
 - **Chrome now runs headless by default** — no window, no GUI, purely background. Set `GREEDY_SEARCH_VISIBLE=1` to show the browser window.
