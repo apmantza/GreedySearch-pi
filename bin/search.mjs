@@ -236,7 +236,10 @@ async function main() {
 			const cfBlocked = [];
 			if (out.perplexity?.error && /ask-input/.test(out.perplexity.error))
 				cfBlocked.push("perplexity");
-			if (out.bing?.error && /input not found|verification/i.test(out.bing.error))
+			if (
+				out.bing?.error &&
+				/input not found|verification/i.test(out.bing.error)
+			)
 				cfBlocked.push("bing");
 
 			if (cfBlocked.length > 0 && process.env.GREEDY_SEARCH_VISIBLE !== "1") {

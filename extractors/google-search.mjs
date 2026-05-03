@@ -30,10 +30,10 @@ const SEARCH_BOX = 'textarea[name="q"], input[name="q"]';
 // Submit: form button or keyboard Enter (we'll use Enter which is universal)
 // Result containers: try multiple selectors that work across Google layouts
 const RESULT_SELECTORS = [
-	'.g',                    // classic result container
-	'[data-sokoban-container]', // newer layout
-	'.MjjYud',               // mobile-first layout
-	'div:has(> a > h3)',     // catch-all: div containing a link with heading
+	".g", // classic result container
+	"[data-sokoban-container]", // newer layout
+	".MjjYud", // mobile-first layout
+	"div:has(> a > h3)", // catch-all: div containing a link with heading
 ];
 
 // ─── Type into search box (locale-agnostic) ─────────────────────────
@@ -148,7 +148,7 @@ async function waitForResults(tab, timeoutMs = 15000) {
 		const found = await cdp([
 			"eval",
 			tab,
-			'document.querySelectorAll(\'a[href^="http"] h3\').length',
+			"document.querySelectorAll('a[href^=\"http\"] h3').length",
 		]).catch(() => "0");
 		const count = parseInt(found, 10) || 0;
 		if (count >= 3) return count;
@@ -156,7 +156,7 @@ async function waitForResults(tab, timeoutMs = 15000) {
 	const found = await cdp([
 		"eval",
 		tab,
-		'document.querySelectorAll(\'a[href^="http"] h3\').length',
+		"document.querySelectorAll('a[href^=\"http\"] h3').length",
 	]).catch(() => "0");
 	return parseInt(found, 10) || 0;
 }
