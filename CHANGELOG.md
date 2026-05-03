@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Headless Mode (default)
+
+- **Chrome now runs headless by default** — no window, no GUI, purely background. Set `GREEDY_SEARCH_VISIBLE=1` to restore the visible (minimized) window.
+- **Anti-detection stealth** — Patches injected via `Page.addScriptToEvaluateOnNewDocument` (runs before any page JS):
+  - `Runtime.enable` / CDP marker deletion (`__REBROWSER_*`, `__nightmare`, `__phantom`, etc.)
+  - `navigator.webdriver` → `false`, `navigator.plugins` → realistic list, `navigator.languages` → `['en-US', 'en']`
+  - `window.chrome` shim, WebGL vendor → Intel Iris, `hardwareConcurrency` → 8, `deviceMemory` → 8
+  - `TrustedTypes` policy, `requestAnimationFrame` keep-alive (prevents headless stall detection)
+  - `--disable-blink-features=AutomationControlled`, realistic `--user-agent`, `--window-size=1920,1080`
+- **Human click simulation** — `humanClickXY()` / `humanClickElement()` in consent.mjs: multi-event `mouseMoved→pressed→released` with ±3px coordinate jitter and random delays (80–180ms hover, 30–90ms hold). Used for Turnstile/Cloudflare verification bypass.
+- **Idle auto-cleanup** — Headless Chrome auto-killed after `GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES` (default 5 min) of inactivity. Only kills the PID-tracked instance on port 9222 — never touches the main Chrome session.
+- **Activity tracking** — Timestamp file written at search start and end; `checkAndKillIdle()` runs from `ensureChrome()` before reusing the existing instance.
+
+### Removed
+
+- **`coding_task` tool removed** — `bin/coding-task.mjs`, `src/formatters/coding.ts`, and the tool registration in `index.ts` deleted (644 lines). Use `greedy_search` with `engine: "gemini"` for similar functionality.
+- **`deep_research` tool removed** — `src/tools/deep-research-handler.ts`, `test/deep-research-compare.mjs`, and associated formatter (`formatDeepResearch` + 4 helper functions) deleted (521 lines). Use `greedy_search` with `depth: "deep"`.
+
+### Fixes
+
+- **`cdp.mjs` `getPages()` filter** — Now allows `chrome://newtab/` (headless Chrome's default initial tab is a new tab page, not `about:blank`). Prevents "No Chrome tabs found" on headless cold start.
+- **`launch.mjs` cleanup** — Removed 9 verbose `[minimize]` console.log statements.
+
 ### Security
 
 - **SonarCloud: Log injection vulnerability (1 alert)** — `bin/launch.mjs` no longer logs the raw WebSocket debugger URL (user-controlled data). Replaced with a static "WebSocket URL received" message to prevent query/URL content from leaking into logs.
