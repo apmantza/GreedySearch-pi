@@ -65,7 +65,12 @@ export async function getOrOpenTab(tabPrefix) {
 	]);
 	const { targetId } = JSON.parse(raw);
 	await cdp(["list"]); // refresh cache
-	return targetId.slice(0, 8);
+	const tid = targetId.slice(0, 8);
+	// Inject stealth patches in headless mode (before any navigation)
+	if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
+		injectHeadlessStealth(tid).catch(() => {});
+	}
+	return tid;
 }
 
 // ============================================================================
@@ -101,6 +106,72 @@ export async function injectClipboardInterceptor(tab, globalVar) {
     };
   `;
 	await cdp(["eval", tab, code]);
+}
+
+// ============================================================================
+// Headless stealth injection
+// ============================================================================
+
+/**
+ * Inject anti-detection patches into a page in headless mode.
+ * Based on production patterns from screenshotrun.com.
+ */
+export async function injectHeadlessStealth(tab) {
+	const code = `
+(function() {
+  // ── Runtime.enable / CDP detection masking ──────────────
+  try { delete window.__REBROWSER_RUNTIME_ENABLE; } catch(_) {}
+  try { delete window.__REBROWSER_DEVTOOLS; } catch(_) {}
+  try { delete window.__nightmare; } catch(_) {}
+  try { delete window.__phantom; } catch(_) {}
+  try { delete window.callPhantom; } catch(_) {}
+  try { delete window._phantom; } catch(_) {}
+  try { delete window.Buffer; } catch(_) {}
+
+  Object.defineProperty(navigator, 'webdriver', { get: () => false });
+  Object.defineProperty(navigator, 'plugins', {
+    get: () => {
+      var p = [
+        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+      ];
+      p.length = 3;
+      return p;
+    },
+  });
+  Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+  if (!window.chrome) {
+    window.chrome = {
+      runtime: { connect: () => {}, sendMessage: () => {}, onMessage: { addListener: () => {} } },
+      loadTimes: () => ({}),
+      csi: () => ({}),
+    };
+  }
+  var origQuery = navigator.permissions?.query;
+  if (origQuery) {
+    navigator.permissions.query = function(params) {
+      if (params.name === 'notifications') return Promise.resolve({ state: Notification.permission });\n      return origQuery(params);
+    };
+  }
+  try {
+    var getParam = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(p) {
+      if (p === 37445) return 'Intel Inc.';
+      if (p === 37446) return 'Intel Iris OpenGL Engine';
+      return getParam.call(this, p);
+    };
+  } catch(_) {}
+  Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+  Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+})();
+`;
+	await cdp([
+		"evalraw",
+		tab,
+		"Page.addScriptToEvaluateOnNewDocument",
+		JSON.stringify({ source: code }),
+	]);
 }
 
 // ============================================================================

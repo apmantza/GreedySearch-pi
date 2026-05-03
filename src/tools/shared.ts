@@ -11,6 +11,7 @@ export type { ProgressUpdate, ToolResult } from "../types.js";
 
 // Canonical source is src/search/constants.mjs — keep in sync
 const ALL_ENGINES = ["perplexity", "bing", "google"] as const;
+
 export { ALL_ENGINES };
 
 /** Strip surrounding double-quotes that some framework versions inject into string params */
@@ -62,11 +63,14 @@ export function runSearch(
 	searchBin: string,
 	signal?: AbortSignal,
 	onProgress?: (engine: string, status: "done" | "error") => void,
+	headless?: boolean,
 ): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
+		const allFlags = [...flags];
+		if (headless) allFlags.push("--headless");
 		const proc = spawn(
 			"node",
-			[searchBin, engine, "--inline", ...flags, query],
+			[searchBin, engine, "--inline", ...allFlags, query],
 			{ stdio: ["ignore", "pipe", "pipe"] },
 		);
 		let out = "";
@@ -97,7 +101,9 @@ export function runSearch(
 				try {
 					resolve(JSON.parse(out.trim()));
 				} catch {
-					reject(new Error(`Invalid JSON from search.mjs: ${out.slice(0, 200)}`));
+					reject(
+						new Error(`Invalid JSON from search.mjs: ${out.slice(0, 200)}`),
+					);
 				}
 			}
 		});
@@ -123,8 +129,7 @@ export function makeProgressTracker(
 			if (completed.has(e)) parts.push(`✅ ${e} done`);
 			else parts.push(`⏳ ${e}`);
 		}
-		if (depth !== "fast" && completed.size >= 3)
-			parts.push("🔄 synthesizing");
+		if (depth !== "fast" && completed.size >= 3) parts.push("🔄 synthesizing");
 
 		onUpdate?.({
 			content: [

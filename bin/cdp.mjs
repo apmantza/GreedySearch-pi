@@ -233,7 +233,9 @@ class CDP {
 async function getPages(cdp) {
 	const { targetInfos } = await cdp.send("Target.getTargets");
 	return targetInfos.filter(
-		(t) => t.type === "page" && !t.url.startsWith("chrome://"),
+		(t) =>
+			t.type === "page" &&
+			(!t.url.startsWith("chrome://") || t.url === "chrome://newtab/"),
 	);
 }
 

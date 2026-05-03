@@ -5,7 +5,14 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { formatDeepResearch } from "../formatters/results.js";
-import { ALL_ENGINES, cdpAvailable, cdpMissingResult, errorResult, makeProgressTracker, runSearch } from "./shared.js";
+import {
+	ALL_ENGINES,
+	cdpAvailable,
+	cdpMissingResult,
+	errorResult,
+	makeProgressTracker,
+	runSearch,
+} from "./shared.js";
 
 export function registerDeepResearchTool(pi: ExtensionAPI, baseDir: string) {
 	pi.registerTool({
@@ -23,12 +30,29 @@ export function registerDeepResearchTool(pi: ExtensionAPI, baseDir: string) {
 
 			if (!cdpAvailable(baseDir)) return cdpMissingResult();
 
-			const onProgress = makeProgressTracker(ALL_ENGINES, onUpdate, "Researching", "standard");
+			const onProgress = makeProgressTracker(
+				ALL_ENGINES,
+				onUpdate,
+				"Researching",
+				"standard",
+			);
 
 			try {
-				const data = await runSearch("all", query, ["--deep"], `${baseDir}/bin/search.mjs`, signal, onProgress);
+				const headless = process.env.GREEDY_SEARCH_HEADLESS === "1";
+				const data = await runSearch(
+					"all",
+					query,
+					["--deep"],
+					`${baseDir}/bin/search.mjs`,
+					signal,
+					onProgress,
+					headless,
+				);
 				const text = formatDeepResearch(data);
-				return { content: [{ type: "text", text: text || "No results returned." }], details: { raw: data } };
+				return {
+					content: [{ type: "text", text: text || "No results returned." }],
+					details: { raw: data },
+				};
 			} catch (e) {
 				return errorResult("Deep research failed", e);
 			}

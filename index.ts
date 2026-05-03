@@ -15,10 +15,15 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 import { formatCodingTask } from "./src/formatters/coding.js";
+import { touchActivity } from "./src/search/chrome.mjs";
 import { DEFAULTS } from "./src/search/defaults.mjs";
 import { registerDeepResearchTool } from "./src/tools/deep-research-handler.js";
 import { registerGreedySearchTool } from "./src/tools/greedy-search-handler.js";
-import { cdpAvailable, stripQuotes, type ProgressUpdate } from "./src/tools/shared.js";
+import {
+	cdpAvailable,
+	type ProgressUpdate,
+	stripQuotes,
+} from "./src/tools/shared.js";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -54,11 +59,13 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			task: Type.String({ description: "The coding task or question" }),
 			engine: Type.String({
-				description: 'Engine to use: "all" (runs both Gemini and Copilot in parallel), "gemini" (default), "copilot".',
+				description:
+					'Engine to use: "all" (runs both Gemini and Copilot in parallel), "gemini" (default), "copilot".',
 				default: "gemini",
 			}),
 			mode: Type.String({
-				description: 'Task mode: "code" (default), "review" (code review), "plan" (architect review), "test" (write tests), "debug" (root cause analysis).',
+				description:
+					'Task mode: "code" (default), "review" (code review), "plan" (architect review), "test" (write tests), "debug" (root cause analysis).',
 				default: "code",
 			}),
 			context: Type.Optional(
@@ -66,11 +73,28 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 					description: "Optional code context/snippet to include with the task",
 				}),
 			),
+			headless: Type.Optional(
+				Type.Boolean({
+					description:
+						"When true, runs Chrome in headless mode (no GUI window).",
+					default: false,
+				}),
+			),
 		}),
 		execute: async (_toolCallId, params, signal, onUpdate) => {
-			const { task, context } = params as { task: string; engine: string; mode: string; context?: string };
-			const engine = stripQuotes((params as any).engine ?? "gemini") || "gemini";
+			const { task, context } = params as {
+				task: string;
+				engine: string;
+				mode: string;
+				context?: string;
+				headless?: boolean;
+			};
+			const engine =
+				stripQuotes((params as any).engine ?? "gemini") || "gemini";
 			const mode = stripQuotes((params as any).mode ?? "code") || "code";
+			const headless =
+				(params as any).headless === true ||
+				process.env.GREEDY_SEARCH_HEADLESS === "1";
 
 			if (!cdpAvailable(__dir)) {
 				return {
@@ -81,8 +105,12 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 				};
 			}
 
+			// Touch activity for headless idle timeout
+			touchActivity();
+
 			const flags: string[] = ["--engine", engine, "--mode", mode];
 			if (context) flags.push("--context", context);
+			if (headless) flags.push("--headless");
 
 			try {
 				onUpdate?.({

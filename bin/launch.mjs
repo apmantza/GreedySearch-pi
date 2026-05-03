@@ -10,11 +10,13 @@
 //
 // Usage:
 //   node launch.mjs          — launch (or report if already running)
+//   node launch.mjs --headless — launch in headless mode (no GUI window)
 //   node launch.mjs --kill   — stop and restore original DevToolsActivePort
 //   node launch.mjs --status — check if running
 //
 // Environment:
 //   GREEDY_SEARCH_VISIBLE=1  — Show Chrome window instead of minimizing
+//   GREEDY_SEARCH_HEADLESS=1 — Run Chrome in headless mode (no GUI)
 //   CHROME_PATH              — Path to Chrome executable
 
 import { execSync, spawn } from "node:child_process";
@@ -57,7 +59,11 @@ function findChrome() {
 	return candidates.find(existsSync) || null;
 }
 
-const CHROME_FLAGS = [
+const isHeadless = () =>
+	process.env.GREEDY_SEARCH_HEADLESS === "1" ||
+	process.argv.includes("--headless");
+
+const BASE_CHROME_FLAGS = [
 	`--remote-debugging-port=${PORT}`,
 	"--disable-features=DevToolsPrivacyUI",
 	"--no-first-run",
@@ -65,8 +71,23 @@ const CHROME_FLAGS = [
 	"--disable-default-apps",
 	`--user-data-dir=${PROFILE_DIR}`,
 	"--profile-directory=Default",
-	"about:blank",
 ];
+
+function buildChromeFlags() {
+	const flags = [...BASE_CHROME_FLAGS];
+	if (isHeadless()) {
+		flags.push("--headless=new");
+		flags.push("--disable-gpu");
+		flags.push("--disable-blink-features=AutomationControlled");
+		flags.push("--window-size=1920,1080");
+		flags.push(
+			"--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+		);
+		if (platform() === "win32") flags.push("--disable-software-rasterizer");
+	}
+	flags.push("about:blank");
+	return flags;
+}
 
 const isVisible = () => process.env.GREEDY_SEARCH_VISIBLE === "1";
 
@@ -340,11 +361,13 @@ async function main() {
 	mkdirSync(PROFILE_DIR, { recursive: true });
 
 	console.log(`Launching GreedySearch Chrome on port ${PORT}...`);
-	if (!isVisible()) {
+	if (isHeadless()) {
+		console.log("Headless mode — no window will be shown");
+	} else if (!isVisible()) {
 		console.log("Window will be minimized");
 	}
 
-	const proc = spawn(CHROME_EXE, CHROME_FLAGS, {
+	const proc = spawn(CHROME_EXE, buildChromeFlags(), {
 		detached: true,
 		stdio: "ignore",
 	});
@@ -357,10 +380,14 @@ async function main() {
 		process.exit(1);
 	}
 
-	// Minimize window via CDP
-	await minimizeViaCDP();
-
-	console.log("Ready.");
+	if (isHeadless()) {
+		// No window to minimize in headless mode
+		console.log("Ready (headless).");
+	} else {
+		// Minimize window via CDP
+		await minimizeViaCDP();
+		console.log("Ready.");
+	}
 }
 
 main();

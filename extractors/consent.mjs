@@ -163,6 +163,90 @@ export async function dismissConsent(tab, cdp) {
 	}
 }
 
+// ─── Human-like click simulation (multi-event with jitter) ────────────
+
+function rng(min, max) {
+	return Math.random() * (max - min) + min;
+}
+
+/**
+ * Perform a human-like click at specific coordinates via CDP Input.dispatchMouseEvent.
+ * Sends: mouseMoved → randomPause → mousePressed → randomPause → mouseReleased
+ * with coordinate jitter and variable timing to mimic human motor variance.
+ */
+export async function humanClickXY(tab, cdpFn, x, y) {
+	const cx = Number.parseFloat(x);
+	const cy = Number.parseFloat(y);
+	if (Number.isNaN(cx) || Number.isNaN(cy)) {
+		throw new Error(`humanClickXY: invalid coordinates (${x}, ${y})`);
+	}
+
+	const base = { button: "left", clickCount: 1, modifiers: 0 };
+
+	// ── mouseMoved with slight jitter ──
+	const jx = cx + rng(-3, 3);
+	const jy = cy + rng(-3, 3);
+	await cdpFn([
+		"evalraw",
+		tab,
+		"Input.dispatchMouseEvent",
+		JSON.stringify({ ...base, type: "mouseMoved", x: jx, y: jy }),
+	]);
+	// Brief hover delay (80-180ms) — humans don't instant-click
+	await new Promise((r) => setTimeout(r, rng(80, 180)));
+
+	// ── mousePressed at jittered position ──
+	const px = cx + rng(-2, 2);
+	const py = cy + rng(-2, 2);
+	await cdpFn([
+		"evalraw",
+		tab,
+		"Input.dispatchMouseEvent",
+		JSON.stringify({ ...base, type: "mousePressed", x: px, y: py }),
+	]);
+	// Hold delay (30-90ms) — mimics human click duration
+	await new Promise((r) => setTimeout(r, rng(30, 90)));
+
+	// ── mouseReleased at jittered position ──
+	const rx = px + rng(-1, 1);
+	const ry = py + rng(-1, 1);
+	await cdpFn([
+		"evalraw",
+		tab,
+		"Input.dispatchMouseEvent",
+		JSON.stringify({ ...base, type: "mouseReleased", x: rx, y: ry }),
+	]);
+
+	// Post-click settle
+	await new Promise((r) => setTimeout(r, rng(100, 300)));
+
+	return `human-clicked at (${cx.toFixed(0)}, ${cy.toFixed(0)})`;
+}
+
+/**
+ * Find an element by CSS selector and perform a human-like click on its center.
+ */
+export async function humanClickElement(tab, cdpFn, selector) {
+	// Get element bounding rect
+	const rect = await cdpFn([
+		"eval",
+		tab,
+		`(function() {
+			var el = document.querySelector('${selector.replace(/'/g, "\\'")}');
+			if (!el) return 'null';
+			var r = el.getBoundingClientRect();
+			return JSON.stringify({x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height});
+		})()`,
+	]).catch(() => "null");
+
+	if (!rect || rect === "null") {
+		return null; // Element not found
+	}
+
+	const { x, y } = JSON.parse(rect);
+	return humanClickXY(tab, cdpFn, x, y);
+}
+
 // Get iframe bounding box for coordinate-based clicking (for cross-origin Turnstile)
 const GET_IFRAME_CENTER_JS = `
 (function() {
@@ -227,9 +311,9 @@ export async function handleVerification(tab, cdp, waitMs = 60000) {
 				try {
 					const { x, y } = JSON.parse(iframeCenter);
 					process.stderr.write(
-						`[greedysearch] Trying coordinate click on Turnstile iframe at (${x}, ${y})...\n`,
+						`[greedysearch] Human-clicking Turnstile at (${x}, ${y})...\n`,
 					);
-					await cdp(["clickxy", tab, String(x), String(y)]);
+					await humanClickXY(tab, cdp, x, y);
 					await new Promise((r) => setTimeout(r, 3000));
 				} catch {}
 			}
@@ -255,7 +339,10 @@ export async function handleVerification(tab, cdp, waitMs = 60000) {
 			);
 			try {
 				const { x, y } = JSON.parse(iframeCenter);
-				await cdp(["clickxy", tab, String(x), String(y)]);
+				process.stderr.write(
+					`[greedysearch] Human-clicking Turnstile at (${x}, ${y})...\n`,
+				);
+				await humanClickXY(tab, cdp, x, y);
 				await new Promise((r) => setTimeout(r, 3000));
 
 				// Check if it worked

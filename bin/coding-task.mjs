@@ -307,6 +307,9 @@ async function main() {
 	const modeFlagIdx = args.indexOf("--mode");
 	const mode = modeFlagIdx === -1 ? "code" : args[modeFlagIdx + 1];
 
+	// Headless mode: set env var so launch.mjs picks it up
+	if (args.includes("--headless")) process.env.GREEDY_SEARCH_HEADLESS = "1";
+
 	if (!Object.hasOwn(MODE_PROMPTS, mode)) {
 		process.stderr.write(
 			`Error: unknown mode "${mode}". Use: code, review, plan, test, debug\n`,
@@ -366,6 +369,7 @@ async function main() {
 		...(outIdx >= 0 ? [outIdx, outIdx + 1] : []),
 		...(tabFlagIdx >= 0 ? [tabFlagIdx, tabFlagIdx + 1] : []),
 		...(modeFlagIdx >= 0 ? [modeFlagIdx, modeFlagIdx + 1] : []),
+		...args.flatMap((a, i) => (a === "--headless" ? [i] : [])),
 		...fileIndices,
 	]);
 	const task = args.filter((_, i) => !skipFlags.has(i)).join(" ");
