@@ -30,6 +30,7 @@ import {
 	closeTab,
 	closeTabs,
 	ensureChrome,
+	killHeadlessChrome,
 	openNewTab,
 	touchActivity,
 } from "../src/search/chrome.mjs";
@@ -176,7 +177,7 @@ async function main() {
 			a !== "--deep" &&
 			a !== "--inline" &&
 			a !== "--stdin" &&
-		a !== "--headless" &&
+			a !== "--headless" &&
 			a !== "--depth" &&
 			a !== "--out" &&
 			a !== "--help" &&
@@ -226,6 +227,78 @@ async function main() {
 					out[r.value.engine] = r.value;
 				} else {
 					out[ALL_ENGINES[i]] = { error: r.reason?.message || "unknown error" };
+				}
+			}
+
+			// Cloudflare/verification recovery: if Perplexity or Bing were blocked
+			// in headless mode, retry in visible Chrome to establish cookies,
+			// then continue headless with the profile now carrying valid session state.
+			const cfBlocked = [];
+			if (out.perplexity?.error && /ask-input/.test(out.perplexity.error))
+				cfBlocked.push("perplexity");
+			if (out.bing?.error && /input not found|verification/i.test(out.bing.error))
+				cfBlocked.push("bing");
+
+			if (cfBlocked.length > 0 && process.env.GREEDY_SEARCH_VISIBLE !== "1") {
+				process.stderr.write(
+					`[greedysearch] 🔓 Cloudflare/verification blocked ${cfBlocked.join(", ")} in headless — retrying visible to establish cookies...\n`,
+				);
+				// Close headless tabs, kill headless Chrome
+				await closeTabs(engineTabs);
+				await killHeadlessChrome();
+				process.env.GREEDY_SEARCH_VISIBLE = "1";
+				delete process.env.GREEDY_SEARCH_HEADLESS;
+				await ensureChrome();
+				await cdp(["list"]);
+
+				// Retry blocked engines in visible Chrome
+				const retryTabs = [];
+				for (let i = 0; i < cfBlocked.length; i++) {
+					const tab = await openNewTab();
+					retryTabs.push(tab);
+				}
+				try {
+					const retries = await Promise.allSettled(
+						cfBlocked.map((e, i) =>
+							runExtractor(ENGINES[e], query, retryTabs[i], short, null, locale)
+								.then((r) => ({ engine: e, ...r }))
+								.catch((err) => ({ engine: e, error: err.message })),
+						),
+					);
+					let recovered = 0;
+					for (const r of retries) {
+						if (r.status === "fulfilled" && !r.value.error) {
+							out[r.value.engine] = r.value;
+							recovered++;
+						}
+					}
+					if (recovered > 0) {
+						process.stderr.write(
+							`[greedysearch] ✅ ${recovered}/${cfBlocked.length} engine(s) recovered — cookies cached for future headless runs.\n`,
+						);
+					} else {
+						process.stderr.write(
+							`[greedysearch] ⚠️ Recovery attempt failed — ${cfBlocked.join(", ")} still blocked in visible mode.\n`,
+						);
+					}
+				} finally {
+					// Kill visible Chrome, relaunch headless for remaining pipeline
+					await closeTabs(retryTabs);
+					process.stderr.write(
+						"[greedysearch] Switching back to headless Chrome...\n",
+					);
+					await killHeadlessChrome();
+					delete process.env.GREEDY_SEARCH_VISIBLE;
+					process.env.GREEDY_SEARCH_HEADLESS = "1";
+					await ensureChrome();
+					await cdp(["list"]);
+				}
+
+				// Reopen engineTabs so finally{} doesn't crash on closeTabs
+				engineTabs.length = 0;
+				for (let i = 0; i < ALL_ENGINES.length; i++) {
+					const tab = await openNewTab();
+					engineTabs.push(tab);
 				}
 			}
 
