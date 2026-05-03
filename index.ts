@@ -1,8 +1,8 @@
 /**
  * GreedySearch Pi Extension
  *
- * Adds `greedy_search` and `deep_research` tools to Pi.
- * Tool handlers are split into separate modules for maintainability.
+ * Adds `greedy_search` tool to Pi.
+ * Use depth: "deep" for deep research (source fetching + synthesis + confidence).
  *
  * Reports streaming progress as each engine completes.
  * Requires Chrome to be running (or it auto-launches a dedicated instance).
@@ -12,7 +12,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-import { registerDeepResearchTool } from "./src/tools/deep-research-handler.js";
 import { registerGreedySearchTool } from "./src/tools/greedy-search-handler.js";
 import { cdpAvailable } from "./src/tools/shared.js";
 
@@ -30,9 +29,6 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 
 	// ─── greedy_search ────────────────────────────────────────────────────────
 	registerGreedySearchTool(pi, __dir);
-
-	// ─── deep_research ────────────────────────────────────────────────────────
-	registerDeepResearchTool(pi, __dir);
 
 	// ─── /set-greedy-locale command ───────────────────────────────────────────
 	pi.registerCommand("set-greedy-locale", {

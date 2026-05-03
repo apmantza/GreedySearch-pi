@@ -63,11 +63,13 @@ export function runSearch(
 	searchBin: string,
 	signal?: AbortSignal,
 	onProgress?: (engine: string, status: "done" | "error") => void,
-	headless?: boolean,
+	headless?: boolean, // defaults to true (headless is the default)
 ): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
 		const allFlags = [...flags];
-		if (headless) allFlags.push("--headless");
+		// Headless is default — only skip if explicitly false or GREEDY_SEARCH_VISIBLE=1
+		if (headless !== false && process.env.GREEDY_SEARCH_VISIBLE !== "1")
+			allFlags.push("--headless");
 		const proc = spawn(
 			"node",
 			[searchBin, engine, "--inline", ...allFlags, query],

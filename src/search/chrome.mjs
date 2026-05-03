@@ -40,11 +40,10 @@ const IDLE_TIMEOUT_MINUTES =
 
 /** Record that the headless Chrome was just used / is active right now */
 export function touchActivity() {
-	if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
-		try {
-			writeFileSync(ACTIVITY_FILE, String(Date.now()), "utf8");
-		} catch {}
-	}
+	// Always track activity — headless is the default
+	try {
+		writeFileSync(ACTIVITY_FILE, String(Date.now()), "utf8");
+	} catch {}
 }
 
 /**
@@ -144,8 +143,9 @@ export async function openNewTab() {
 		'{"url":"about:blank"}',
 	]);
 	const { targetId } = JSON.parse(raw);
-	// Inject stealth patches in headless mode (via Page.addScriptToEvaluateOnNewDocument)
-	if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
+	// Inject stealth patches in headless mode (default: on)
+	// Set GREEDY_SEARCH_VISIBLE=1 to disable
+	if (process.env.GREEDY_SEARCH_VISIBLE !== "1") {
 		const tid = targetId.slice(0, 8);
 		injectHeadlessStealth(tid).catch(() => {});
 	}
@@ -324,7 +324,8 @@ export async function ensureChrome() {
 			`GreedySearch Chrome not running on port ${GREEDY_PORT} — auto-launching...\n`,
 		);
 		const launchArgs = [join(__dir, "..", "..", "bin", "launch.mjs")];
-		if (process.env.GREEDY_SEARCH_HEADLESS === "1")
+		// Headless is the default unless GREEDY_SEARCH_VISIBLE=1
+		if (process.env.GREEDY_SEARCH_VISIBLE !== "1")
 			launchArgs.push("--headless");
 		await new Promise((resolve, reject) => {
 			const proc = spawn("node", launchArgs, {

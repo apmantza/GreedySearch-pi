@@ -15,8 +15,7 @@
 //   node launch.mjs --status — check if running
 //
 // Environment:
-//   GREEDY_SEARCH_VISIBLE=1  — Show Chrome window instead of minimizing
-//   GREEDY_SEARCH_HEADLESS=1 — Run Chrome in headless mode (no GUI)
+//   GREEDY_SEARCH_VISIBLE=1  — Show Chrome window (disables headless mode)
 //   CHROME_PATH              — Path to Chrome executable
 
 import { execSync, spawn } from "node:child_process";
@@ -59,9 +58,7 @@ function findChrome() {
 	return candidates.find(existsSync) || null;
 }
 
-const isHeadless = () =>
-	process.env.GREEDY_SEARCH_HEADLESS === "1" ||
-	process.argv.includes("--headless");
+const isHeadless = () => process.env.GREEDY_SEARCH_VISIBLE !== "1";
 
 const BASE_CHROME_FLAGS = [
 	`--remote-debugging-port=${PORT}`,
@@ -97,14 +94,12 @@ const isVisible = () => process.env.GREEDY_SEARCH_VISIBLE === "1";
 
 async function minimizeViaCDP() {
 	if (isVisible()) return;
-	console.log("[minimize] Starting...");
 
 	// Wait for Chrome to be ready
 	await new Promise((r) => setTimeout(r, 1000));
 
 	try {
 		// Get browser WebSocket URL
-		console.log("[minimize] Getting version info...");
 		const version = await new Promise((resolve, reject) => {
 			http
 				.get(`http://localhost:${PORT}/json/version`, (res) => {
@@ -116,50 +111,34 @@ async function minimizeViaCDP() {
 		});
 
 		const wsUrl = version.webSocketDebuggerUrl;
-		console.log("[minimize] WebSocket URL received");
 
 		const WebSocket = globalThis.WebSocket;
-		if (!WebSocket) {
-			console.log("[minimize] WebSocket not available");
-			return;
-		}
+		if (!WebSocket) return;
 
 		const ws = new WebSocket(wsUrl);
 		let requestId = 0;
 		const pending = new Map();
 
 		ws.onopen = () => {
-			console.log("[minimize] Connected, getting targets...");
 			// Step 1: Get targets
 			const id = ++requestId;
 			pending.set(id, {
 				resolve: (result) => {
 					const targets = result.targetInfos || [];
-					console.log(`[minimize] Found ${targets.length} targets`);
 					const pageTarget = targets.find((t) => t.type === "page");
 					if (!pageTarget) {
-						console.log("[minimize] No page target, closing");
 						ws.close();
 						return;
 					}
 
-					console.log(`[minimize] Using target: ${pageTarget.targetId}`);
 					// Step 2: Get windowId for target
 					const winId = ++requestId;
 					pending.set(winId, {
 						resolve: (winResult) => {
 							const windowId = winResult.windowId;
-							console.log(
-								`[minimize] Got windowId: ${windowId}, minimizing...`,
-							);
 							// Step 3: Minimize window
 							const minId = ++requestId;
-							pending.set(minId, {
-								resolve: () =>
-									console.log("[minimize] Window minimized successfully"),
-								reject: (err) =>
-									console.log("[minimize] Minimize failed:", err),
-							});
+							pending.set(minId, { resolve: () => {}, reject: () => {} });
 							ws.send(
 								JSON.stringify({
 									id: minId,

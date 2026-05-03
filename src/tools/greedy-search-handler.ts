@@ -47,8 +47,8 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			headless: Type.Optional(
 				Type.Boolean({
 					description:
-						"When true, runs Chrome in headless mode (no GUI window). Set GREEDY_SEARCH_HEADLESS=1 environment variable to enable globally.",
-					default: false,
+						"Set to false to show Chrome window (headless is the default). Set GREEDY_SEARCH_VISIBLE=1 to disable headless globally.",
+					default: true,
 				}),
 			),
 		}),
@@ -64,8 +64,8 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			const depth = (stripQuotes((params as any).depth ?? "standard") ||
 				"standard") as "fast" | "standard" | "deep";
 			const headless =
-				(params as any).headless === true ||
-				process.env.GREEDY_SEARCH_HEADLESS === "1";
+				(params as any).headless !== false &&
+				process.env.GREEDY_SEARCH_VISIBLE !== "1";
 
 			if (!cdpAvailable(baseDir)) return cdpMissingResult();
 

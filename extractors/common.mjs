@@ -66,8 +66,8 @@ export async function getOrOpenTab(tabPrefix) {
 	const { targetId } = JSON.parse(raw);
 	await cdp(["list"]); // refresh cache
 	const tid = targetId.slice(0, 8);
-	// Inject stealth patches in headless mode (before any navigation)
-	if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
+	// Inject stealth patches (headless is default; skip if GREEDY_SEARCH_VISIBLE=1)
+	if (process.env.GREEDY_SEARCH_VISIBLE !== "1") {
 		injectHeadlessStealth(tid).catch(() => {});
 	}
 	return tid;

@@ -78,13 +78,12 @@ async function main() {
 				"  --deep-research     Deprecated: source fetching is now default",
 				"  --fetch-top-source  Fetch content from top source",
 				"  --inline            Output JSON to stdout (for piping)",
-				"  --headless          Run Chrome in headless mode (no GUI window)",
+				"  --headless          Run Chrome in headless mode (default: on)",
 				"  --locale <lang>     Force results language (en, de, fr, etc.)",
 				"",
 				"Environment:",
-				"  GREEDY_SEARCH_HEADLESS  Set to 1 to run Chrome headless",
+				"  GREEDY_SEARCH_VISIBLE   Set to 1 to show Chrome window (disables headless)",
 				"  GREEDY_SEARCH_LOCALE    Default locale (default: en)",
-				"  GREEDY_SEARCH_VISIBLE   Set to 1 to show Chrome window",
 				"",
 				"Examples:",
 				'  node search.mjs all "Node.js streams"           # Default: sources + synthesis',
@@ -136,8 +135,9 @@ async function main() {
 	const short = !full;
 	const fetchSource = args.includes("--fetch-top-source");
 	const inline = args.includes("--inline");
-	const headless = args.includes("--headless");
-	if (headless) process.env.GREEDY_SEARCH_HEADLESS = "1";
+	// Headless is the default — only disable if GREEDY_SEARCH_VISIBLE=1
+	if (process.env.GREEDY_SEARCH_VISIBLE !== "1")
+		process.env.GREEDY_SEARCH_HEADLESS = "1";
 	const outIdx = args.indexOf("--out");
 	const outFile = outIdx === -1 ? null : args[outIdx + 1];
 
@@ -311,8 +311,9 @@ function pickTopSource(out) {
  * Skipped in headless mode (no window to minimize).
  */
 async function minimizeChrome() {
-	if (process.env.GREEDY_SEARCH_HEADLESS === "1") return;
 	if (process.env.GREEDY_SEARCH_VISIBLE === "1") return;
+	// In headless mode (default), there's no window to minimize
+	if (process.env.GREEDY_SEARCH_HEADLESS === "1") return;
 
 	try {
 		const http = await import("node:http");
