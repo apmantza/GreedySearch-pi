@@ -1,5 +1,7 @@
 # GreedySearch for Pi
 
+![GreedySearch](docs/banner.svg)
+
 Multi-engine AI web search for Pi via browser automation.
 
 - No API keys
