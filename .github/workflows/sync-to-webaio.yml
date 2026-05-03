@@ -20,6 +20,8 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: github.repository == 'apmantza/GreedySearch-pi'
     steps:
       - uses: actions/checkout@v4

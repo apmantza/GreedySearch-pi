@@ -190,7 +190,7 @@ export async function humanClickElement(tab, cdpFn, selector) {
 		"eval",
 		tab,
 		`(function() {
-			var el = document.querySelector('${selector.replace(/'/g, "\\'")}');
+			var el = document.querySelector('${selector.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}');
 			if (!el) return 'null';
 			var r = el.getBoundingClientRect();
 			return JSON.stringify({x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height});
