@@ -31,6 +31,23 @@
 - **SonarCloud security hotspots fixed** — Two open hotspots resolved:
   - _Weak cryptography (S2245)_ in `extractors/consent.mjs`: replaced `Math.random()` with `crypto.randomInt()` for the mouse-jitter RNG. Not actually security-sensitive (used only for ±3px jitter and timing delays), but compliant now.
   - _PATH injection (S4036)_ in `src/search/chrome.mjs`: `spawn("node", ...)` replaced with `spawn(process.execPath, ...)` so the launcher doesn't rely on the `PATH` environment variable.
+- **Query/prompt leakage prevention** — Queries and synthesis prompts no longer appear in OS process tables. All `spawn()` calls now pipe query/prompt through stdin via `--stdin` flag instead of command-line arguments. Affects `runSearch`, `runExtractor`, `synthesizeWithGemini`, and all 5 extractors (`perplexity`, `bing-copilot`, `google-ai`, `google-search`, `gemini`).
+
+### Fixed
+
+- **Progress tracker shows false ✅ for errors** — `makeProgressTracker` in `shared.ts` completely ignored the `status` parameter, always showing `✅ done` for every engine. Now correctly tracks per-engine status and shows `❌ failed` when an engine errors.
+- **Synthesis echoes engine JSON when engines fail** — When Perplexity/Bing fail, Gemini was echoing the engine summary JSON back as its "answer". `synthesis-runner.mjs` now detects this pattern (engine keys without synthesis fields) and treats it as a parse failure, falling back to individual engine results.
+- **`headless=false` parameter ignored** — The `--headless` flag was never checked by `search.mjs` or `launch.mjs`; they only read `GREEDY_SEARCH_VISIBLE`. `shared.ts` now propagates the visibility preference via the env var when `headless=false` is passed.
+
+### Cloudflare / Verification Recovery
+
+- **Auto-recovery from Cloudflare blocks** — When Perplexity (`#ask-input` not found) or Bing (`input not found` / `verification required`) fail in headless mode, `search.mjs` now:
+  1. Detects the Cloudflare/verification error pattern
+  2. Kills headless Chrome, relaunches in visible mode
+  3. Retries the blocked engines — Cloudflare bypasses, cookies stored in Chrome profile
+  4. Kills visible Chrome, relaunches headless
+  5. Continues remaining pipeline (source fetch, synthesis)
+  6. Cookies persist — subsequent headless searches pass transparently
 
 ### Removed
 
