@@ -7,7 +7,9 @@ export const GREEDY_PROFILE_DIR = `${tmpdir().replaceAll("\\", "/")}/greedysearc
 export const ACTIVE_PORT_FILE = `${GREEDY_PROFILE_DIR}/DevToolsActivePort`;
 export const PAGES_CACHE = `${tmpdir().replaceAll("\\", "/")}/cdp-pages.json`;
 
-export const ALL_ENGINES = ["perplexity", "bing", "google", "googlesearch"];
+// ALL_ENGINES drives the "all" fan-out. Add engines here to include them in multi-engine searches.
+// Engines in ENGINES but not in ALL_ENGINES are available for explicit use only.
+export const ALL_ENGINES = ["perplexity", "bing", "google"];
 
 export const ENGINE_DOMAINS = {
 	perplexity: "perplexity.ai",
