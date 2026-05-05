@@ -22,6 +22,7 @@ import {
 	prepareArgs,
 	TIMING,
 	validateQuery,
+	waitForSelector,
 	waitForStreamComplete,
 } from "./common.mjs";
 import { dismissConsent, handleVerification } from "./consent.mjs";
@@ -204,25 +205,10 @@ async function main() {
 		}
 
 		// Wait for React app to mount input (up to 15s, longer after verification)
-		const inputDeadline = Date.now() + 15000;
-		while (Date.now() < inputDeadline) {
-			const found = await cdp([
-				"eval",
-				tab,
-				`!!document.querySelector('${S.input}')`,
-			]).catch(() => "false");
-			if (found === "true") break;
-			await new Promise((r) => setTimeout(r, jitter(500)));
-		}
+		const inputReady = await waitForSelector(tab, S.input, 15000, 500);
 		await new Promise((r) => setTimeout(r, jitter(300)));
 
-		// Verify input is actually there before proceeding
-		const inputReady = await cdp([
-			"eval",
-			tab,
-			`!!document.querySelector('${S.input}')`,
-		]).catch(() => "false");
-		if (inputReady !== "true") {
+		if (!inputReady) {
 			throw new Error(
 				"Copilot input not found — verification may have failed or page is in unexpected state",
 			);

@@ -21,7 +21,7 @@ import net from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
 import { join } from "node:path";
 
-const TIMEOUT = 15000;
+const TIMEOUT = 30000;
 const NAVIGATION_TIMEOUT = 30000;
 const IDLE_TIMEOUT = 20 * 60 * 1000;
 const DAEMON_CONNECT_RETRIES = 20;

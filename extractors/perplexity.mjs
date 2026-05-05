@@ -23,6 +23,7 @@ import {
 	parseSourcesFromMarkdown,
 	prepareArgs,
 	validateQuery,
+	waitForSelector,
 	waitForStreamComplete,
 } from "./common.mjs";
 import { dismissConsent } from "./consent.mjs";
@@ -92,17 +93,8 @@ async function main() {
 		await cdp(["nav", tab, "https://www.perplexity.ai/"], 35000);
 		await dismissConsent(tab, cdp);
 
-		// Wait for React app to mount input (up to 8s)
-		const deadline = Date.now() + 5000;
-		while (Date.now() < deadline) {
-			const found = await cdp([
-				"eval",
-				tab,
-				`!!document.querySelector('${S.input}')`,
-			]).catch(() => "false");
-			if (found === "true") break;
-			await new Promise((r) => setTimeout(r, jitter(400)));
-		}
+		// Wait for React app to mount input (up to 5s)
+		await waitForSelector(tab, S.input, 5000, 400);
 		await new Promise((r) => setTimeout(r, jitter(300)));
 
 		await injectClipboardInterceptor(tab, GLOBAL_VAR);

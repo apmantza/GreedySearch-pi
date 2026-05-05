@@ -340,7 +340,6 @@ export async function waitForStreamComplete(tab, options = {}) {
 		const _baseInterval = ${interval};
 		const _stableRounds = ${stableRounds};
 		const _minLength = ${minLength};
-		const _sel = ${selector};
 		let _lastLen = -1;
 		let _stableCount = 0;
 
@@ -350,7 +349,8 @@ export async function waitForStreamComplete(tab, options = {}) {
 
 		function _poll() {
 			try {
-				const el = _sel;
+				// Re-query DOM each tick — element may not exist at eval start
+				const el = ${selector};
 				const cur = el?.innerText?.length ?? 0;
 				if (cur >= _minLength) {
 					if (cur === _lastLen) {
@@ -381,6 +381,51 @@ export async function waitForStreamComplete(tab, options = {}) {
 
 	if (currentLen >= minLength) return currentLen;
 	throw new Error(`Generation did not stabilise within ${timeout}ms`);
+}
+
+// ============================================================================
+// DOM selector waiting (single eval, no polling)
+// ============================================================================
+
+/**
+ * Wait for a CSS selector to appear in the DOM using a single self-contained
+ * eval. The polling loop runs in the browser — zero CDP traffic until done.
+ *
+ * @param {string} tab - Tab identifier
+ * @param {string} selector - CSS selector to wait for
+ * @param {number} [timeoutMs=15000] - Maximum wait time in ms
+ * @param {number} [interval=500] - Base polling interval in ms (jittered ±20%)
+ * @returns {Promise<boolean>} true if selector was found, false on timeout
+ */
+export async function waitForSelector(
+	tab,
+	selector,
+	timeoutMs = 15000,
+	interval = 500,
+) {
+	const code = String.raw`
+	new Promise((resolve) => {
+		const _deadline = Date.now() + ${timeoutMs};
+		const _baseInterval = ${interval};
+
+		function _jitter(ms) {
+			return Math.max(50, ms + (Math.random() * ms * 0.4 - ms * 0.2));
+		}
+
+		function _poll() {
+			try {
+				if (document.querySelector('${selector}')) { resolve(true); return; }
+				if (Date.now() < _deadline) { setTimeout(_poll, _jitter(_baseInterval)); }
+				else { resolve(false); }
+			} catch(_) { resolve(false); }
+		}
+
+		_poll();
+	})
+	`;
+
+	const result = await cdp(["eval", tab, code], timeoutMs + 5000);
+	return result === "true";
 }
 
 // ============================================================================
