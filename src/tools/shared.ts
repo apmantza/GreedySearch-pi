@@ -62,7 +62,10 @@ export function runSearch(
 	flags: string[],
 	searchBin: string,
 	signal?: AbortSignal,
-	onProgress?: (engine: string, status: "done" | "error") => void,
+	onProgress?: (
+		engine: string,
+		status: "done" | "error" | "needs-human",
+	) => void,
 	headless?: boolean, // defaults to true (headless is the default)
 ): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
@@ -94,9 +97,9 @@ export function runSearch(
 		proc.stderr.on("data", (d: Buffer) => {
 			err += d;
 			for (const line of d.toString().split("\n")) {
-				const match = line.match(/^PROGRESS:(\w+):(done|error)$/);
+				const match = line.match(/^PROGRESS:(\w+):(done|error|needs-human)$/);
 				if (match && onProgress) {
-					onProgress(match[1], match[2] as "done" | "error");
+					onProgress(match[1], match[2] as "done" | "error" | "needs-human");
 				}
 			}
 		});
@@ -129,15 +132,17 @@ export function makeProgressTracker(
 	suffix: "Searching" | "Researching",
 	depth: string,
 ) {
-	const completed = new Map<string, "done" | "error">();
+	const completed = new Map<string, "done" | "error" | "needs-human">();
 
-	return (eng: string, status: "done" | "error") => {
+	return (eng: string, status: "done" | "error" | "needs-human") => {
 		completed.set(eng, status);
 		const parts: string[] = [];
 		for (const e of engines) {
 			const s = completed.get(e);
 			if (s === "done") parts.push(`✅ ${e} done`);
 			else if (s === "error") parts.push(`❌ ${e} failed`);
+			else if (s === "needs-human")
+				parts.push(`🔓 ${e} needs manual verification`);
 			else parts.push(`⏳ ${e}`);
 		}
 		if (depth !== "fast" && completed.size >= 3) parts.push("🔄 synthesizing");

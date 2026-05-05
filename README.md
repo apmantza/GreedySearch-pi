@@ -66,16 +66,37 @@ greedy_search({
 
 ## Runtime commands
 
-```bash
+````bash
+# Headless (default, no GUI)
 node ~/.pi/agent/git/GreedySearch-pi/bin/launch.mjs
 node ~/.pi/agent/git/GreedySearch-pi/bin/launch.mjs --status
 node ~/.pi/agent/git/GreedySearch-pi/bin/launch.mjs --kill
-```
+
+# Visible (show browser window — useful for one-time Cloudflare clearance)
+node ~/.pi/agent/git/GreedySearch-pi/bin/launch-visible.mjs
+node ~/.pi/agent/git/GreedySearch-pi/bin/launch-visible.mjs --kill
+
+# Chrome auto-cleaned after 5 min idle (prevents OOM)
+# Override: GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES=10
 
 ## Requirements
 
 - Chrome
 - Node.js 20.11.0+ (22+ recommended)
+
+## Known engine quirks
+
+### Bing Copilot
+
+Bing Copilot detects headless Chrome and sandboxes all AI responses inside nested iframes (`copilot.microsoft.com` → `copilot.fun` → `blob:`). In this mode the copy button is hidden and the Cloudflare Turnstile challenge blocks content delivery. The clipboard-based extraction cannot work.
+
+**Auto-recovery:** When Bing fails with any extraction error (clipboard, verification, Cloudflare), GreedySearch automatically switches to **visible Chrome**, retries the search, and caches Cloudflare clearance cookies in the Chrome profile. You may need to solve the Cloudflare challenge **once** manually when the visible Chrome window appears. After that, all subsequent headless searches bypass the challenge — the cookies persist in the profile.
+
+If you prefer to skip the auto-recovery delay, launch visible Chrome ahead of time:
+
+```bash
+node ~/.pi/agent/git/GreedySearch-pi/bin/launch-visible.mjs
+````
 
 ## Anti-detection
 
@@ -86,7 +107,7 @@ Headless Chrome auto-injects stealth patches before any page JavaScript runs:
 - CDP automation markers deleted, `requestAnimationFrame` kept alive
 - Human-like click simulation with coordinate jitter and variable delays
 
-This bypasses casual bot detection (Cloudflare checkbox challenges, basic `navigator.webdriver` checks) but does not defeat commercial anti-bot services (DataDome, PerimeterX, Kasada).
+This bypasses casual bot detection (basic `navigator.webdriver` checks) but does not defeat commercial anti-bot services (DataDome, PerimeterX, Kasada). **Bing Copilot specifically detects headless and sandboxes responses behind Cloudflare Turnstile** — see [Known engine quirks](#known-engine-quirks) for the auto-recovery mechanism.
 
 When using `depth: "standard"` or `depth: "deep"`, source content is fetched and synthesized:
 
@@ -97,7 +118,7 @@ When using `depth: "standard"` or `depth: "deep"`, source content is fetched and
 
 ## Project layout
 
-- `bin/` — runtime CLIs (`search.mjs`, `launch.mjs`, `cdp.mjs`)
+- `bin/` — runtime CLIs (`search.mjs`, `launch.mjs`, `launch-visible.mjs`, `visible.mjs`, `cdp.mjs`)
 - `extractors/` — engine-specific automation + stealth/consent handling
 - `src/` — search pipeline, chrome management, source fetching, formatting
 - `skills/` — Pi skill metadata

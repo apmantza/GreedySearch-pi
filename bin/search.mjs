@@ -234,11 +234,14 @@ async function main() {
 			// in headless mode, retry in visible Chrome to establish cookies,
 			// then continue headless with the profile now carrying valid session state.
 			const cfBlocked = [];
-			if (out.perplexity?.error && /ask-input/.test(out.perplexity.error))
+			if (
+				out.perplexity?.error &&
+				/ask-input|clipboard/i.test(out.perplexity.error)
+			)
 				cfBlocked.push("perplexity");
 			if (
 				out.bing?.error &&
-				/input not found|verification/i.test(out.bing.error)
+				/input not found|verification|clipboard/i.test(out.bing.error)
 			)
 				cfBlocked.push("bing");
 
@@ -246,6 +249,7 @@ async function main() {
 				process.stderr.write(
 					`[greedysearch] 🔓 Cloudflare/verification blocked ${cfBlocked.join(", ")} in headless — retrying visible to establish cookies...\n`,
 				);
+				process.stderr.write(`PROGRESS:bing:needs-human\n`);
 				// Close headless tabs, kill headless Chrome
 				await closeTabs(engineTabs);
 				await killHeadlessChrome();

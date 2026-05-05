@@ -36,8 +36,7 @@ let pass = 0,
 	warn = 0,
 	skip = 0;
 const failures = [],
-	warnings = [],
-	skipped = [];
+	warnings = [];
 const startTime = Date.now();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,14 +56,6 @@ function warnMsg(msg) {
 	warn++;
 	console.log(`  ${C.yellow}⚠${C.reset} ${msg}`);
 	warnings.push(msg);
-}
-function skipMsg(msg) {
-	skip++;
-	console.log(`  ${C.cyan}⊘${C.reset} ${msg}`);
-	skipped.push(msg);
-}
-function info(msg) {
-	console.log(`  ${C.cyan}ℹ${C.reset} ${msg}`);
 }
 function section(title) {
 	console.log(`\n${C.blue}${title}${C.reset}`);
@@ -153,6 +144,76 @@ if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 		if (got === expected) passMsg(`normalize: ${label}`);
 		else failMsg(`normalize: ${label} — expected "${expected}", got "${got}"`);
 	}
+
+	subsection(
+		"Bing error pattern matching — headless → visible auto-retry detection",
+	);
+	// The auto-retry in bin/search.mjs checks error patterns to decide
+	// whether to switch from headless to visible Chrome and retry.
+	const cfPattern = /input not found|verification|clipboard/i;
+	const cfTestCases = [
+		// [error message, expected match, label]
+		["input not found", true, 'legacy pattern: "input not found"'],
+		[
+			"Copilot input not found",
+			true,
+			'extended: "input not found" in sentence',
+		],
+		["VERIFICATION REQUIRED", true, 'legacy pattern: "VERIFICATION REQUIRED"'],
+		["verification failed", true, 'extended: "verification" in sentence'],
+		[
+			"Clipboard interceptor returned empty text",
+			true,
+			"new: clipboard error (headless Cloudflare block)",
+		],
+		[
+			"[bing] Clipboard empty, retrying in 2s...",
+			true,
+			"new: clipboard empty retry message",
+		],
+		[
+			"Cloudflare challenge detected — content blocked in headless",
+			false,
+			"NOT matched: Cloudflare detection text alone (no keyword trigger)",
+		],
+		[
+			"Network timeout after 30000ms",
+			false,
+			"NOT matched: unrelated network error",
+		],
+		["", false, "empty string"],
+	];
+	for (const [error, expected, label] of cfTestCases) {
+		const matched = cfPattern.test(error);
+		if (matched === expected) passMsg(`cfPattern: ${label}`);
+		else failMsg(`cfPattern: ${label} — expected ${expected}, got ${matched}`);
+	}
+
+	subsection("Perplexity error pattern matching — headless → visible");
+	const pplxPattern = /ask-input|clipboard/i;
+	const pplxTestCases = [
+		["ask-input selector not found", true, 'legacy: "ask-input"'],
+		[
+			"Clipboard interceptor returned empty text",
+			true,
+			"new: clipboard also triggers for perplexity",
+		],
+		["Perplexity timeout", false, "NOT matched: unrelated timeout"],
+	];
+	for (const [error, expected, label] of pplxTestCases) {
+		const matched = pplxPattern.test(error);
+		if (matched === expected) passMsg(`pplxPattern: ${label}`);
+		else
+			failMsg(`pplxPattern: ${label} — expected ${expected}, got ${matched}`);
+	}
+
+	subsection("mode marker file — isChromeHeadless detection");
+	const { isChromeHeadless: isHeadlessCheck } = await import(
+		"./src/search/chrome.mjs"
+	);
+	const headlessResult = typeof isHeadlessCheck === "function";
+	if (headlessResult) passMsg("isChromeHeadless: function exists");
+	else failMsg("isChromeHeadless: not a function");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -193,7 +254,7 @@ if (["", "all", "flags", "quick", "smoke"].includes(mode)) {
 
 	subsection("Testing --inline flag (stdout output)...");
 	const inlineFile = join(resultsDir, "flag_inline.json");
-	const { code: inlineCode, out: inlineOut } = await runNode(
+	const { out: inlineOut } = await runNode(
 		[join(__dir, "bin", "search.mjs"), "perplexity", "what is AI", "--inline"],
 		90,
 	);
@@ -215,7 +276,7 @@ if (["", "all", "flags", "quick", "smoke"].includes(mode)) {
 	subsection("Testing engine aliases...");
 	for (const alias of ["p", "g", "b"]) {
 		const aliasFile = join(resultsDir, `alias_${alias}.json`);
-		const { out: aliasOut } = await runNode(
+		const { out: _aliasOut } = await runNode(
 			[
 				join(__dir, "bin", "search.mjs"),
 				alias,

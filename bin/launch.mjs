@@ -34,6 +34,7 @@ const PORT = 9222;
 const PROFILE_DIR = join(tmpdir(), "greedysearch-chrome-profile");
 const ACTIVE_PORT = join(PROFILE_DIR, "DevToolsActivePort");
 const PID_FILE = join(tmpdir(), "greedysearch-chrome.pid");
+const MODE_FILE = join(tmpdir(), "greedysearch-chrome-mode");
 
 function findChrome() {
 	const os = platform();
@@ -87,6 +88,16 @@ function buildChromeFlags() {
 }
 
 const isVisible = () => process.env.GREEDY_SEARCH_VISIBLE === "1";
+
+/** Check if the running Chrome was launched headless from the mode marker file */
+function isModeFileHeadless() {
+	try {
+		if (!existsSync(MODE_FILE)) return true; // default: assume headless
+		return readFileSync(MODE_FILE, "utf8").trim() === "headless";
+	} catch {
+		return true;
+	}
+}
 
 // ---------------------------------------------------------------------------
 // CDP Window Minimization
@@ -222,7 +233,7 @@ function getPortPid(port) {
 function killProcess(pid) {
 	try {
 		if (platform() === "win32") {
-			execSync(`taskkill //F //PID ${pid}`, { stdio: "ignore" });
+			execSync(`taskkill //F //T //PID ${pid}`, { stdio: "ignore" });
 		} else {
 			process.kill(pid, "SIGTERM");
 		}
@@ -246,6 +257,9 @@ function cleanupGhostChrome() {
 	} catch {}
 	try {
 		unlinkSync(ACTIVE_PORT);
+	} catch {}
+	try {
+		unlinkSync(MODE_FILE);
 	} catch {}
 }
 
@@ -305,6 +319,10 @@ async function main() {
 		} else {
 			console.log("GreedySearch Chrome is not running.");
 		}
+		// Clean up mode marker
+		try {
+			unlinkSync(MODE_FILE);
+		} catch {}
 		return;
 	}
 
@@ -320,15 +338,33 @@ async function main() {
 
 	const existing = isRunning();
 	if (existing) {
-		const ready = await writePortFile(5000);
-		if (ready) {
-			console.log(`GreedySearch Chrome already running (pid ${existing}).`);
-			return;
+		// Mode check: if caller wants visible but Chrome is headless, kill and relaunch
+		const isWantingVisible =
+			process.env.GREEDY_SEARCH_VISIBLE === "1" &&
+			!process.argv.includes("--headless");
+		if (isWantingVisible && isModeFileHeadless()) {
+			console.log(
+				`Headless Chrome running (pid ${existing}) but visible requested — killing...`,
+			);
+			killProcess(existing);
+			try {
+				unlinkSync(PID_FILE);
+			} catch {}
+			try {
+				unlinkSync(MODE_FILE);
+			} catch {}
+			// Fall through to fresh launch below
+		} else {
+			const ready = await writePortFile(5000);
+			if (ready) {
+				console.log(`GreedySearch Chrome already running (pid ${existing}).`);
+				return;
+			}
+			console.log(`Stale PID ${existing} — launching fresh.`);
+			try {
+				unlinkSync(PID_FILE);
+			} catch {}
 		}
-		console.log(`Stale PID ${existing} — launching fresh.`);
-		try {
-			unlinkSync(PID_FILE);
-		} catch {}
 	}
 
 	const CHROME_EXE = process.env.CHROME_PATH || findChrome();
@@ -352,6 +388,8 @@ async function main() {
 	});
 	proc.unref();
 	writeFileSync(PID_FILE, String(proc.pid));
+	// Write mode marker so ensureChrome() can detect headless vs visible
+	writeFileSync(MODE_FILE, isHeadless() ? "headless" : "visible", "utf8");
 
 	const portFileReady = await writePortFile();
 	if (!portFileReady) {

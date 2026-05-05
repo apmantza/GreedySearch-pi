@@ -6,6 +6,7 @@ export const GREEDY_PORT = 9222;
 export const GREEDY_PROFILE_DIR = `${tmpdir().replaceAll("\\", "/")}/greedysearch-chrome-profile`;
 export const ACTIVE_PORT_FILE = `${GREEDY_PROFILE_DIR}/DevToolsActivePort`;
 export const PAGES_CACHE = `${tmpdir().replaceAll("\\", "/")}/cdp-pages.json`;
+export const CHROME_MODE_FILE = `${tmpdir().replaceAll("\\", "/")}/greedysearch-chrome-mode`;
 
 // ALL_ENGINES drives the "all" fan-out. Add engines here to include them in multi-engine searches.
 // Engines in ENGINES but not in ALL_ENGINES are available for explicit use only.

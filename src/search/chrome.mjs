@@ -23,7 +23,12 @@ import {
 	cdp as _cdp,
 	injectHeadlessStealth,
 } from "../../extractors/common.mjs";
-import { ACTIVE_PORT_FILE, GREEDY_PORT, PAGES_CACHE } from "./constants.mjs";
+import {
+	ACTIVE_PORT_FILE,
+	CHROME_MODE_FILE,
+	GREEDY_PORT,
+	PAGES_CACHE,
+} from "./constants.mjs";
 
 const __dir =
 	import.meta.dirname ||
@@ -37,6 +42,16 @@ const ACTIVITY_FILE = `${_tmp}/greedysearch-chrome-last-activity`;
 const IDLE_TIMEOUT_MINUTES =
 	Number.parseInt(process.env.GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES || "5", 10) ||
 	5;
+
+/** Check if the running Chrome was launched in headless mode by reading the mode marker file */
+export function isChromeHeadless() {
+	try {
+		if (!existsSync(CHROME_MODE_FILE)) return true; // default: headless
+		return readFileSync(CHROME_MODE_FILE, "utf8").trim() === "headless";
+	} catch {
+		return true;
+	}
+}
 
 /** Record that the headless Chrome was just used / is active right now */
 export function touchActivity() {
@@ -73,7 +88,7 @@ export async function killHeadlessChrome() {
 	try {
 		if (platform() === "win32") {
 			const { execSync } = await import("node:child_process");
-			execSync(`taskkill //F //PID ${pid}`, { stdio: "ignore" });
+			execSync(`taskkill //F //T //PID ${pid}`, { stdio: "ignore" });
 		} else {
 			process.kill(pid, "SIGTERM");
 		}
@@ -83,6 +98,9 @@ export async function killHeadlessChrome() {
 		} catch {}
 		try {
 			unlinkSync(ACTIVITY_FILE);
+		} catch {}
+		try {
+			unlinkSync(CHROME_MODE_FILE);
 		} catch {}
 		process.stderr.write(
 			`[greedysearch] Killed idle headless Chrome (pid ${pid}) after ${IDLE_TIMEOUT_MINUTES}min inactivity.\n`,
@@ -316,8 +334,26 @@ export async function ensureChrome() {
 	const wasKilled = await checkAndKillIdle();
 
 	const ready = wasKilled ? false : await probeGreedyChrome();
-	if (ready) {
-		// Chrome already running — refresh the port file
+	// If Chrome is running but in wrong mode (visible requested, headless running),
+	// kill it so we relaunch in the correct mode.
+	let forceRelaunch = false;
+	if (
+		ready &&
+		process.env.GREEDY_SEARCH_VISIBLE === "1" &&
+		isChromeHeadless()
+	) {
+		process.stderr.write(
+			"[greedysearch] Headless Chrome detected — switching to visible mode...\n",
+		);
+		await killHeadlessChrome();
+		// Wait a moment for the port to free up
+		await new Promise((r) => setTimeout(r, 1000));
+		forceRelaunch = true; // always relaunch when switching modes
+	}
+
+	const readyAfterModeCheck = forceRelaunch ? false : await probeGreedyChrome();
+	if (readyAfterModeCheck) {
+		// Chrome already running in correct mode — refresh the port file
 		await refreshPortFile();
 	} else {
 		process.stderr.write(

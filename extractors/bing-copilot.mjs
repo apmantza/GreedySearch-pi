@@ -46,11 +46,106 @@ async function extractAnswer(tab) {
 	]);
 	await new Promise((r) => setTimeout(r, 400));
 
-	const answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+
+	// Retry once if clipboard is empty (Copilot might be slow to write)
+	if (!answer) {
+		console.error("[bing] Clipboard empty, retrying in 2s...");
+		await cdp([
+			"eval",
+			tab,
+			`(() => {
+				const buttons = document.querySelectorAll('${S.copyButton}');
+				buttons[buttons.length - 1]?.click();
+			})()`,
+		]);
+		await new Promise((r) => setTimeout(r, 2000));
+		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	}
+
+	// DOM fallback: if clipboard still empty, extract text directly from response DOM.
+	// This handles headless mode where Copilot renders the AI reply inside nested
+	// iframes (copilot.microsoft.com → copilot.fun → blob:…) and hides the copy button.
+	if (!answer) {
+		answer = await extractFromIframes(tab);
+	}
+
 	if (!answer) throw new Error("Clipboard interceptor returned empty text");
 
 	const sources = parseSourcesFromMarkdown(answer);
 	return { answer: answer.trim(), sources };
+}
+
+/**
+ * DOM fallback: check if Copilot is blocked by Cloudflare in headless mode.
+ * When blocked, the copilot.fun iframe shows a challenge instead of the chat UI.
+ * Returns the extracted text or empty string on failure (caller falls through to error
+ * which triggers the visible Chrome auto-retry in search.mjs).
+ */
+async function extractFromIframes(mainTab) {
+	try {
+		// Check if the AI copy button exists — if it does, we're in visible mode
+		// and clipboard should have worked. This is a different issue.
+		const hasCopyBtn = await cdp([
+			"eval",
+			mainTab,
+			`!!document.querySelector('${S.copyButton}')`,
+		]).catch(() => "false");
+		if (hasCopyBtn === "true") return ""; // not a headless/iframe issue
+
+		// Check for Cloudflare challenge in the accessibility tree.
+		// If present, Copilot content is blocked entirely — no DOM extraction possible.
+		const snap = await cdp(["snap", mainTab]).catch(() => "");
+		if (/cloudflare|challenge|security|verification/i.test(snap)) {
+			console.error(
+				"[bing] Cloudflare challenge detected — content blocked in headless",
+			);
+			return ""; // Let caller throw → triggers visible auto-retry
+		}
+
+		console.error(
+			"[bing] Copy button hidden, no Cloudflare — trying DOM extraction...",
+		);
+
+		// Get CDP targets to find the copilot.fun iframe
+		const targetsRaw = await cdp([
+			"evalraw",
+			mainTab,
+			"Target.getTargets",
+			"{}",
+		]);
+		const targets = JSON.parse(targetsRaw);
+		const targetInfos = targets.targetInfos || [];
+		const funFrame = targetInfos.find(
+			(t) => t.type === "iframe" && t.url.includes("copilot.fun"),
+		);
+		if (!funFrame) {
+			console.error("[bing] No copilot.fun iframe target found");
+			return "";
+		}
+
+		// Try to extract from the nested blob iframe (rarely succeeds due to Cloudflare)
+		const funTabId = funFrame.targetId.slice(0, 8);
+		const innerText = await cdp([
+			"eval",
+			funTabId,
+			`(()=>{const iframe=document.querySelector('iframe'); if(!iframe) return''; try{const doc=iframe.contentDocument||iframe.contentWindow.document; return doc?.body?.innerText?.trim()||''}catch(e){return''}})()`,
+		]).catch(() => "");
+
+		if (innerText) {
+			console.error(
+				`[bing] DOM extraction succeeded (${innerText.length} chars)`,
+			);
+			return innerText;
+		}
+
+		console.error(
+			"[bing] DOM extraction returned empty — falling through to visible retry",
+		);
+	} catch (e) {
+		console.error(`[bing] DOM extraction failed: ${e.message}`);
+	}
+	return "";
 }
 
 // ============================================================================

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Bing Copilot: Headless Cloudflare Recovery
+
+- **Auto-retry triggers on all Bing failures** — Error pattern expanded from `input not found|verification` to include `clipboard` failures, so any extraction failure triggers the visible Chrome recovery.
+- **Clipboard retry** — `bing-copilot.mjs` now retries clipboard extraction once with a 2s delay, matching the Perplexity extractor pattern.
+- **Cloudflare detection** — If the clipboard is empty and the AI copy button is hidden, the extractor checks the accessibility tree for Cloudflare challenge text and logs it explicitly for faster diagnosis.
+- **DOM extraction fallback** — If clipboard fails and the copy button is missing (headless anti-bot behavior), attempts direct text extraction from the `copilot.fun` → blob: iframe chain via CDP targets. Falls through to the visible auto-retry if Cloudflare blocks the iframe.
+- **Investigation confirmed** — In headless mode, Copilot renders the AI response inside a `copilot.fun` → blob: iframe sandbox with a Cloudflare Turnstile challenge. The `copy-ai-message-button` (`data-testid`) is hidden. Content is unreachable from both the main frame JS (cross-origin) and CDP iframe traversal (Cloudflare blocks load). The only viable path is visible Chrome recovery — once cookies are cached in the profile, subsequent headless searches pass transparently.
+
+### Visible Chrome Recovery
+
+- **Mode-aware `ensureChrome()`** — `src/search/chrome.mjs` now reads a mode marker file (`greedysearch-chrome-mode`) written by `launch.mjs`. When `GREEDY_SEARCH_VISIBLE=1` and Chrome is running headless, it kills and relaunches in visible mode with a forced relaunch guard (always relaunches after kill, even if port wasn't freed).
+- **`launch.mjs` mode check on reuse** — When Chrome is already running and visible is requested (`GREEDY_SEARCH_VISIBLE=1`), checks the mode file. If headless, kills the running instance and launches visible instead of reusing.
+- **Mode file cleanup** — Mode marker file cleaned on `--kill`, ghost cleanup, and idle timeout kill.
+- **`bin/launch-visible.mjs`** — Standalone visible Chrome launcher. Nukes any process on port 9222 (by PID file + port scan), launches Chrome without `--headless`, and writes `"visible"` to the mode file. No ghost cleanup complexity, no mode switching — fire-and-forget visible Chrome.
+- **`bin/visible.mjs`** — Convenience wrapper: kills headless, then launches visible (delegates to `launch-visible.mjs`).
+- **Progress notification** — When the auto-retry launches visible Chrome for manual Cloudflare verification, a `PROGRESS:bing:needs-human` line is emitted to stderr. The progress tracker renders `🔓 bing needs manual verification` in the Pi UI.
+- **Idle cleanup preserves mode** — Headless idle timeout cleanup now also removes the mode marker file.
+
+### Security & Robustness
+
+- **Chrome process cleanup hardening** — `launch-visible.mjs` uses `taskkill /F /PID X /T` (process tree kill) on Windows to prevent orphan renderer processes. Repeated up to 5s until port 9222 is confirmed free.
+- **Zombie Chrome prevention** — `launch.mjs` and `chrome.mjs` now clean up the mode marker and PID file consistently across all kill paths (--kill, ghost cleanup, idle timeout).
+
 ### Added
 
 - **`google-search` engine** — plain Google search extractor (locale-agnostic, `textarea[name="q"]`). Returns title/URL/snippet for traditional 10-blue-link results. Aliases: `gs`, `googlesearch`.
