@@ -164,6 +164,59 @@ export async function injectHeadlessStealth(tab) {
   } catch(_) {}
   Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
   Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+
+  // ── Canvas fingerprint noise ─────────────────────────
+  // Headless rendering engines produce slightly different canvas output
+  // than headed Chrome. Subtle noise breaks hash-based fingerprinting.
+  try {
+    var origFill = CanvasRenderingContext2D.prototype.fillText;
+    CanvasRenderingContext2D.prototype.fillText = function() {
+      this.globalAlpha = 1 - (Math.random() * 0.001);
+      return origFill.apply(this, arguments);
+    };
+  } catch(_) {}
+  try {
+    var origStroke = CanvasRenderingContext2D.prototype.strokeText;
+    CanvasRenderingContext2D.prototype.strokeText = function() {
+      this.globalAlpha = 1 - (Math.random() * 0.001);
+      return origStroke.apply(this, arguments);
+    };
+  } catch(_) {}
+  try {
+    var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function() {
+      var ctx = this.getContext('2d');
+      if (ctx) {
+        // Add 1px noise pixel in corner (invisible but changes hash)
+        var imgData = ctx.getImageData(0, 0, 1, 1);
+        if (imgData) imgData.data[0] ^= (Math.random() < 0.5 ? 1 : 0);
+        ctx.putImageData(imgData, 0, 0);
+      }
+      return origToDataURL.apply(this, arguments);
+    };
+  } catch(_) {}
+
+  // ── CDP Runtime serialization guard ──────────────────
+  // Sites detect CDP by putting a getter on Error.prototype.stack
+  // and checking if console.log triggers it (only happens when
+  // Runtime domain is enabled). We monkey-patch console methods to
+  // strip custom getters from arguments before they reach CDP.
+  try {
+    var _origLog = console.log, _origError = console.error,
+        _origWarn = console.warn, _origDebug = console.debug,
+        _origInfo = console.info;
+    var _safeArg = function(a) {
+      if (a instanceof Error) {
+        try { return new Error(a.message); } catch(_) { return a; }
+      }
+      return a;
+    };
+    console.log = function() { return _origLog.apply(console, Array.prototype.map.call(arguments, _safeArg)); };
+    console.error = function() { return _origError.apply(console, Array.prototype.map.call(arguments, _safeArg)); };
+    console.warn = function() { return _origWarn.apply(console, Array.prototype.map.call(arguments, _safeArg)); };
+    console.debug = function() { return _origDebug.apply(console, Array.prototype.map.call(arguments, _safeArg)); };
+    console.info = function() { return _origInfo.apply(console, Array.prototype.map.call(arguments, _safeArg)); };
+  } catch(_) {}
 })();
 `;
 	await cdp([
@@ -222,7 +275,7 @@ export async function waitForCopyButton(tab, selector, options = {}) {
 	const deadline = Date.now() + timeout;
 	let tick = 0;
 	while (Date.now() < deadline) {
-		await new Promise((r) => setTimeout(r, TIMING.copyPoll));
+		await new Promise((r) => setTimeout(r, jitter(TIMING.copyPoll)));
 		if (onPoll) await onPoll(++tick).catch(() => null);
 		const found = await cdp([
 			"eval",
@@ -237,15 +290,35 @@ export async function waitForCopyButton(tab, selector, options = {}) {
 }
 
 // ============================================================================
+// Timing jitter
+// ============================================================================
+
+/**
+ * Add ±20% random jitter to a timing value to avoid bot-like regularity.
+ * Also floors at 50ms minimum to prevent micro-polling.
+ * @param {number} ms - Base interval in milliseconds
+ * @returns {number} Jittered interval
+ */
+export function jitter(ms) {
+	return Math.max(50, ms + (Math.random() * ms * 0.4 - ms * 0.2));
+}
+
+// ============================================================================
 // Stream completion detection
 // ============================================================================
 
 /**
- * Wait for generation/streaming to complete by monitoring text length stability
+ * Wait for generation/streaming to complete by monitoring text length stability.
+ *
+ * Uses a SINGLE Runtime.evaluate call with awaitPromise: true — the stability
+ * polling runs entirely inside the browser context, emitting no CDP traffic
+ * during the wait. This avoids the CDP Runtime serialization detection vector
+ * that would otherwise fire on every poll tick (~50 evals → 1 eval).
+ *
  * @param {string} tab - Tab identifier
  * @param {object} options - Options
  * @param {number} [options.timeout=30000] - Maximum wait time in ms
- * @param {number} [options.interval=600] - Polling interval in ms
+ * @param {number} [options.interval=600] - Polling interval in ms (jittered ±20%)
  * @param {number} [options.stableRounds=3] - Required stable rounds to consider complete
  * @param {string} [options.selector='document.body'] - Element to monitor (default: body)
  * @returns {Promise<number>} Final text length
@@ -259,31 +332,54 @@ export async function waitForStreamComplete(tab, options = {}) {
 		minLength = 0,
 	} = options;
 
-	const deadline = Date.now() + timeout;
-	let lastLen = -1;
-	let stableCount = 0;
+	// Single self-contained eval — polling runs in the browser, no CDP chatter.
+	// The promise resolves when stability is reached or timeout expires.
+	const code = String.raw`
+	new Promise((resolve, reject) => {
+		const _deadline = Date.now() + ${timeout};
+		const _baseInterval = ${interval};
+		const _stableRounds = ${stableRounds};
+		const _minLength = ${minLength};
+		const _sel = ${selector};
+		let _lastLen = -1;
+		let _stableCount = 0;
 
-	while (Date.now() < deadline) {
-		await new Promise((r) => setTimeout(r, interval));
-		const lenStr = await cdp([
-			"eval",
-			tab,
-			`${selector}?.innerText?.length ?? 0`,
-		]).catch(() => "0");
-		const currentLen = parseInt(lenStr, 10) || 0;
-
-		if (currentLen >= minLength) {
-			if (currentLen === lastLen) {
-				stableCount++;
-				if (stableCount >= stableRounds) return currentLen;
-			} else {
-				lastLen = currentLen;
-				stableCount = 0;
-			}
+		function _jitter(ms) {
+			return Math.max(50, ms + (Math.random() * ms * 0.4 - ms * 0.2));
 		}
-	}
 
-	if (lastLen >= minLength) return lastLen;
+		function _poll() {
+			try {
+				const el = _sel;
+				const cur = el?.innerText?.length ?? 0;
+				if (cur >= _minLength) {
+					if (cur === _lastLen) {
+						_stableCount++;
+						if (_stableCount >= _stableRounds) { resolve(cur); return; }
+					} else {
+						_lastLen = cur;
+						_stableCount = 0;
+					}
+				}
+				if (Date.now() < _deadline) {
+					setTimeout(_poll, _jitter(_baseInterval));
+				} else {
+					if (_lastLen >= _minLength) { resolve(_lastLen); }
+					else { reject(new Error('Generation did not stabilise within ${timeout}ms')); }
+				}
+			} catch(e) { reject(e); }
+		}
+
+		_poll();
+	})
+	`;
+
+	// Use eval (which has awaitPromise:true in cdp.mjs) with generous timeout.
+	// This is ONE Runtime.evaluate call — the polling loop runs in the browser.
+	const lenStr = await cdp(["eval", tab, code], timeout + 10000);
+	const currentLen = parseInt(lenStr, 10) || 0;
+
+	if (currentLen >= minLength) return currentLen;
 	throw new Error(`Generation did not stabilise within ${timeout}ms`);
 }
 

@@ -17,6 +17,7 @@ import {
 	getOrOpenTab,
 	handleError,
 	injectClipboardInterceptor,
+	jitter,
 	outputJson,
 	parseArgs,
 	parseSourcesFromMarkdown,
@@ -100,15 +101,15 @@ async function main() {
 				`!!document.querySelector('${S.input}')`,
 			]).catch(() => "false");
 			if (found === "true") break;
-			await new Promise((r) => setTimeout(r, 400));
+			await new Promise((r) => setTimeout(r, jitter(400)));
 		}
-		await new Promise((r) => setTimeout(r, 300));
+		await new Promise((r) => setTimeout(r, jitter(300)));
 
 		await injectClipboardInterceptor(tab, GLOBAL_VAR);
 		await cdp(["click", tab, S.input]);
-		await new Promise((r) => setTimeout(r, 400));
+		await new Promise((r) => setTimeout(r, jitter(400)));
 		await cdp(["type", tab, query]);
-		await new Promise((r) => setTimeout(r, 400));
+		await new Promise((r) => setTimeout(r, jitter(400)));
 
 		// Submit with Enter (most reliable across Chrome instances)
 		await cdp([

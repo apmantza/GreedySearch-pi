@@ -15,6 +15,7 @@ import {
 	getOrOpenTab,
 	handleError,
 	injectClipboardInterceptor,
+	jitter,
 	outputJson,
 	parseArgs,
 	parseSourcesFromMarkdown,
@@ -211,9 +212,9 @@ async function main() {
 				`!!document.querySelector('${S.input}')`,
 			]).catch(() => "false");
 			if (found === "true") break;
-			await new Promise((r) => setTimeout(r, 500));
+			await new Promise((r) => setTimeout(r, jitter(500)));
 		}
-		await new Promise((r) => setTimeout(r, 300));
+		await new Promise((r) => setTimeout(r, jitter(300)));
 
 		// Verify input is actually there before proceeding
 		const inputReady = await cdp([

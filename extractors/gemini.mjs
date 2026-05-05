@@ -15,6 +15,7 @@ import {
 	getOrOpenTab,
 	handleError,
 	injectClipboardInterceptor,
+	jitter,
 	outputJson,
 	parseArgs,
 	parseSourcesFromMarkdown,
@@ -111,13 +112,13 @@ async function main() {
 				`!!document.querySelector('${S.input}')`,
 			]).catch(() => "false");
 			if (ready === "true") break;
-			await new Promise((r) => setTimeout(r, TIMING.inputPoll));
+			await new Promise((r) => setTimeout(r, jitter(TIMING.inputPoll)));
 		}
-		await new Promise((r) => setTimeout(r, TIMING.postClick));
+		await new Promise((r) => setTimeout(r, jitter(TIMING.postClick)));
 
 		await injectClipboardInterceptor(tab, GLOBAL_VAR);
 		await typeIntoGemini(tab, query);
-		await new Promise((r) => setTimeout(r, TIMING.postType));
+		await new Promise((r) => setTimeout(r, jitter(TIMING.postType)));
 
 		await cdp([
 			"eval",

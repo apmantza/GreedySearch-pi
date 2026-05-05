@@ -14,6 +14,7 @@ import {
 	formatAnswer,
 	getOrOpenTab,
 	handleError,
+	jitter,
 	outputJson,
 	parseArgs,
 	prepareArgs,
@@ -73,7 +74,7 @@ async function main() {
 		// Build URL with language parameter (default to English)
 		const langParam = locale ? `&hl=${encodeURIComponent(locale)}` : "&hl=en";
 		const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&udm=50${langParam}`;
-		await new Promise((r) => setTimeout(r, TIMING.postNav));
+		await new Promise((r) => setTimeout(r, jitter(TIMING.postNav)));
 		await dismissConsent(tab, cdp);
 
 		// If consent redirected us away, navigate back
@@ -82,7 +83,7 @@ async function main() {
 		);
 		if (!currentUrl.includes("google.com/search")) {
 			await cdp(["nav", tab, url], 35000);
-			await new Promise((r) => setTimeout(r, TIMING.postNav));
+			await new Promise((r) => setTimeout(r, jitter(TIMING.postNav)));
 		}
 
 		// Handle "verify you're human" — auto-click simple buttons, wait for user on hard CAPTCHA
@@ -94,7 +95,7 @@ async function main() {
 		if (verifyResult === "clicked" || verifyResult === "cleared-by-user") {
 			// Re-navigate to the search URL after verification
 			await cdp(["nav", tab, url], 35000);
-			await new Promise((r) => setTimeout(r, TIMING.postNav));
+			await new Promise((r) => setTimeout(r, jitter(TIMING.postNav)));
 		}
 
 		await waitForStreamComplete(tab, {
