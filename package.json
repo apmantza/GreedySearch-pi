@@ -1,7 +1,7 @@
 {
 	"name": "@apmantza/greedysearch-pi",
-	"version": "1.8.5",
-	"description": "Pi extension: multi-engine AI search (Perplexity, Bing Copilot, Google AI) via browser automation -- NO API KEYS needed. Extracts answers with sources, optional Gemini synthesis. Grounded AI answers from real browser interactions.",
+	"version": "1.8.6",
+	"description": "Headless multi-engine AI search (Perplexity, Bing Copilot, Google AI) via browser automation -- NO API KEYS needed. Extracts answers with sources, optional synthesis. Grounded AI answers from real browser interactions.",
 	"type": "module",
 	"keywords": [
 		"pi-package"

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.8.6] — 2026-05-04
 
 ### Bing Copilot: Headless Cloudflare Recovery
 
