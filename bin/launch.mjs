@@ -67,8 +67,12 @@ const BASE_CHROME_FLAGS = [
 	"--no-first-run",
 	"--no-default-browser-check",
 	"--disable-default-apps",
+	// Anti-detection: suppress the AutomationControlled flag that exposes CDP usage.
+	// Must be set for BOTH headless and visible — Cloudflare / DataDome detect it.
+	"--disable-blink-features=AutomationControlled",
 	`--user-data-dir=${PROFILE_DIR}`,
 	"--profile-directory=Default",
+	"--window-size=1920,1080",
 ];
 
 function buildChromeFlags() {
@@ -76,8 +80,6 @@ function buildChromeFlags() {
 	if (isHeadless()) {
 		flags.push("--headless=new");
 		flags.push("--disable-gpu");
-		flags.push("--disable-blink-features=AutomationControlled");
-		flags.push("--window-size=1920,1080");
 		flags.push(
 			"--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 		);

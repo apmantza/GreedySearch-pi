@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Anti-Bot Detection Hardening (Anti-CDP Evasion)
+
+- **Runtime.enable evasion** (`bin/cdp.mjs`) — The primary CDP detection vector (Cloudflare/DataDome watch for `Runtime.consoleAPICalled` timing) has been eliminated. All `Runtime.evaluate` calls now use an explicit `contextId` captured via brief `Runtime.enable` → `Runtime.disable` at daemon startup (~100ms window). No persistent Runtime domain enable for the session. See: rebrowser.net / DataDome research.
+- **Stale PID / ghost Chrome cleanup** (`src/search/chrome.mjs`) — `killChrome()` now uses port-based process detection via `netstat`/`lsof` instead of relying solely on the PID file. Handles ghost processes that hold port 9222 after the tracked PID dies. Old `killHeadlessChrome` kept as backward-compat alias.
+- **Idle cleanup for both modes** (`src/search/chrome.mjs`) — `checkAndKillIdle()` no longer gates on `GREEDY_SEARCH_HEADLESS=1`. Both headless and visible Chrome auto-kill after idle timeout. Disable with `GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES=0`.
+- **`--disable-blink-features=AutomationControlled` for visible mode** (`bin/launch.mjs`, `bin/gschrome.mjs`) — Previously headless-only. The flag and `--window-size` now apply to both modes, suppressing `navigator.webdriver` in visible Chrome too.
+- **Stealth injection for visible mode** (`src/search/chrome.mjs`, `extractors/common.mjs`) — Canvas noise, plugin spoofing, `window.chrome.runtime`, and console safening now inject on both headless and visible tabs.
+- **Client Hints consistency** (`src/fetcher.mjs`) — Added `Sec-CH-UA`, `Sec-CH-UA-Mobile`, `Sec-CH-UA-Platform` headers to `DEFAULT_HEADERS`, matching the Chrome 122 user-agent. Inconsistency between UA and Client Hints is a strong bot signal.
+- **Perplexity Cloudflare verification** (`extractors/perplexity.mjs`) — Added `handleVerification` call after navigation. Perplexity was the only engine missing Cloudflare challenge handling (Bing, Gemini, Google AI already had it).
+- **Chrome TLS fetch fallback** (`src/search/fetch-source.mjs`) — New `fetchSourceViaChrome()` uses `Network.loadNetworkResource` (Chrome 124+) to fetch with authentic Chrome TLS/JA3+HTTP/2 fingerprints when Node.js HTTP fails. Zero navigation overhead.
+
+### Added
+
+- **`bin/gschrome.mjs`** — Standalone Chrome lifecycle manager: `launch-headless`, `launch-visible`, `kill`, `status`. Port-based PID detection, forces mode switches, writes `DevToolsActivePort` for CDP.
+
 ## [1.8.6] — 2026-05-04
 
 ### Bing Copilot: Headless Cloudflare Recovery

@@ -323,27 +323,112 @@ async function snapshotStr(cdp, sid, compact = false) {
 	return lines.join("\n");
 }
 
-async function evalStr(cdp, sid, expression) {
+/**
+ * Per-session main execution context cache.
+ * Key = sessionId, value = main-world executionContextId.
+ *
+ * Why: Runtime.enable is the primary CDP detection vector — Cloudflare
+ * and DataDome watch for Runtime.consoleAPICalled timing gaps that
+ * only appear when the Runtime domain is enabled.  Chrome 146 also
+ * exposes CDP activity through the navigator.modelContext API.
+ *
+ * Our fix: enable Runtime BRIEFLY at daemon startup (50-100ms) to
+ * capture the main executionContextId, then immediately disable.
+ * After that, ALL evals pass the explicit contextId so Runtime.enable
+ * is never called again — the detection window is a one-shot ~100ms
+ * blip at session open, not a persistent leak for the entire session.
+ *
+ * See: rebrowser.net — "Runtime.Enable CDP Detection"
+ *      securityboulevard.com — V8 May 2025 patches
+ */
+const _mainCtx = new Map();
+
+/**
+ * Enable Runtime briefly, capture ALL execution contexts, then disable.
+ * Returns the main-world contextId (the one with isDefault + type:default).
+ */
+async function captureMainContext(cdp, sid) {
+	// Register listener BEFORE Runtime.enable — events may fire synchronously
+	// in the same WebSocket frame batch as the enable response.
+	const contexts = [];
+	const off = cdp.onEvent("Runtime.executionContextCreated", (params) => {
+		if (params?.context) contexts.push(params.context);
+	});
+
 	await cdp.send("Runtime.enable", {}, sid);
-	const result = await cdp.send(
-		"Runtime.evaluate",
-		{
-			expression,
-			returnByValue: true,
-			awaitPromise: true,
-		},
-		sid,
+
+	// Short settle — events fire synchronously after Runtime.enable, 100ms
+	// covers WebSocket latency for event delivery.
+	await sleep(100);
+	off();
+
+	// Always disable Runtime after capturing
+	await cdp.send("Runtime.disable", {}, sid).catch(() => {});
+
+	// Find the main world context
+	const main = contexts.find(
+		(ctx) => ctx.auxData?.isDefault && ctx.auxData?.type === "default",
 	);
-	if (result.exceptionDetails) {
-		throw new Error(
-			result.exceptionDetails.text ||
-				result.exceptionDetails.exception?.description,
-		);
+	return main?.id ?? null;
+}
+
+/**
+ * Evaluate a JS expression in the main execution context WITHOUT
+ * persistent Runtime.enable.  Uses the contextId captured at daemon
+ * startup via brief Runtime.enable → Runtime.disable.
+ */
+async function evalStr(cdp, sid, expression) {
+	// Lazy capture: first eval after daemon start grabs the main context
+	let contextId = _mainCtx.get(sid);
+	if (contextId == null) {
+		contextId = await captureMainContext(cdp, sid);
+		if (contextId == null) {
+			throw new Error(
+				"Failed to capture main execution context — is the page loaded?",
+			);
+		}
+		_mainCtx.set(sid, contextId);
 	}
-	const val = result.result.value;
-	return typeof val === "object"
-		? JSON.stringify(val, null, 2)
-		: String(val ?? "");
+
+	async function _evalWith(cid) {
+		const result = await cdp.send(
+			"Runtime.evaluate",
+			{
+				expression,
+				contextId: cid,
+				returnByValue: true,
+				awaitPromise: true,
+			},
+			sid,
+		);
+		if (result.exceptionDetails) {
+			throw new Error(
+				result.exceptionDetails.text ||
+					result.exceptionDetails.exception?.description,
+			);
+		}
+		const val = result.result.value;
+		return typeof val === "object"
+			? JSON.stringify(val, null, 2)
+			: String(val ?? "");
+	}
+
+	// Fast path: cached context is still valid (the common case)
+	try {
+		return await _evalWith(contextId);
+	} catch (_e) {
+		// Context was invalidated (e.g. page navigated to a new origin).
+		// Clear stale cache, re-capture, retry once.
+		_mainCtx.delete(sid);
+		contextId = await captureMainContext(cdp, sid);
+		if (contextId == null) {
+			throw new Error(
+				"Failed to re-capture execution context after navigation",
+			);
+		}
+		_mainCtx.set(sid, contextId);
+		return _evalWith(contextId);
+	}
 }
 
 async function shotStr(cdp, sid, filePath) {

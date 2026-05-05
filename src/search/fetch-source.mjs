@@ -1,15 +1,158 @@
 // src/search/fetch-source.mjs — HTTP and browser-based source content fetching
 //
-// Extracted from search.mjs. Uses fetchSourceHttp from src/fetcher.mjs
-// with browser fallback via CDP, plus GitHub content fetching.
+// Extracted from search.mjs.  PRIMARY path uses Chrome's network stack
+// (fetch() over CDP) to produce authentic Chrome TLS/JA3 fingerprints.
+// Falls back to Node.js HTTP (via fetcher.mjs) if Chrome is unavailable.
 
-import { fetchSourceHttp } from "../fetcher.mjs";
+import {
+	fetchSourceHttp,
+	extractContent,
+	detectBotBlock,
+	checkContentQuality,
+} from "../fetcher.mjs";
 import { fetchGitHubContent, parseGitHubUrl } from "../github.mjs";
 import { fetchRedditContent, parseRedditUrl } from "../reddit.mjs";
 import { trimContentHeadTail } from "../utils/content.mjs";
 import { cdp, closeTab, openNewTab } from "./chrome.mjs";
 import { SOURCE_FETCH_CONCURRENCY } from "./constants.mjs";
 import { trimText } from "./sources.mjs";
+
+/**
+ * Fetch a URL using Chrome's Network.loadNetworkResource (Chrome 124+).
+ * This uses Chrome's native network stack (authentic TLS/JA3 fingerprint)
+ * without the overhead of page navigation — response body returned via CDP.
+ *
+ * Used as FALLBACK when Node.js HTTP fails (TLS mismatch, etc.).
+ */
+async function fetchSourceViaChrome(tab, url, maxChars = 8000) {
+	const start = Date.now();
+
+	try {
+		// Get the frameId of the tab for Network.loadNetworkResource
+		const frames = await cdp(["evalraw", tab, "Page.getFrameTree", "{}"])
+			.then((r) => JSON.parse(r))
+			.catch(() => null);
+		const frameId = frames?.frameTree?.frame?.id || undefined;
+
+		// Load resource using Chrome's network stack (authentic TLS fingerprint)
+		const raw = await cdp(
+			[
+				"evalraw",
+				tab,
+				"Network.loadNetworkResource",
+				JSON.stringify({
+					frameId,
+					url,
+					options: { disableCache: true, includeCredentials: false },
+				}),
+			],
+			20000,
+		);
+
+		const result = JSON.parse(raw);
+		const resource = result.resource;
+		if (!resource?.success || !resource.httpStatusCode) {
+			return {
+				url,
+				error:
+					resource?.netErrorName ||
+					resource?.netError ||
+					"loadNetworkResource failed",
+				source: "chrome",
+				duration: Date.now() - start,
+				needsFallback: true,
+			};
+		}
+
+		// Read response body from stream
+		let body = "";
+		if (resource.stream) {
+			try {
+				const ioRaw = await cdp(
+					[
+						"evalraw",
+						tab,
+						"IO.read",
+						JSON.stringify({ handle: resource.stream }),
+					],
+					10000,
+				);
+				const ioResult = JSON.parse(ioRaw);
+				body = ioResult.data || "";
+				// Close stream
+				await cdp([
+					"evalraw",
+					tab,
+					"IO.close",
+					JSON.stringify({ handle: resource.stream }),
+				]).catch(() => {});
+			} catch {}
+		}
+
+		if (!body || body.length < 100) {
+			return {
+				url,
+				error: "Empty response body from Network.loadNetworkResource",
+				source: "chrome",
+				duration: Date.now() - start,
+				needsFallback: true,
+			};
+		}
+
+		// Bot-detection and content extraction
+		const botCheck = detectBotBlock(resource.httpStatusCode, body, url, url);
+		if (botCheck.blocked) {
+			return {
+				url,
+				status: resource.httpStatusCode,
+				error: `Blocked: ${botCheck.reason}`,
+				source: "chrome",
+				duration: Date.now() - start,
+				needsBrowser: true,
+			};
+		}
+
+		const extracted = extractContent(body, url);
+		const quality = checkContentQuality(extracted);
+		if (!quality.ok) {
+			return {
+				url,
+				status: resource.httpStatusCode,
+				error: `Low quality: ${quality.reason}`,
+				source: "chrome",
+				duration: Date.now() - start,
+				needsBrowser: true,
+			};
+		}
+
+		const content = trimContentHeadTail(extracted.markdown, maxChars);
+		return {
+			url,
+			finalUrl: url,
+			status: resource.httpStatusCode,
+			contentType: "text/markdown",
+			lastModified: "",
+			publishedTime: extracted.publishedTime || "",
+			byline: extracted.byline || "",
+			siteName: extracted.siteName || "",
+			lang: extracted.lang || "",
+			title: extracted.title || url,
+			snippet: extracted.excerpt,
+			content,
+			contentChars: content.length,
+			source: "chrome",
+			duration: Date.now() - start,
+		};
+	} catch (error) {
+		return {
+			url,
+			error: error.message,
+			source: "chrome",
+			duration: Date.now() - start,
+			needsFallback: true,
+		};
+	}
+}
 
 export async function fetchSourceContent(url, maxChars = 8000) {
 	const start = Date.now();
@@ -79,7 +222,7 @@ export async function fetchSourceContent(url, maxChars = 8000) {
 		);
 	}
 
-	// Try HTTP first
+	// Try HTTP (Node.js fetch) first — fast, works for most sites.
 	const httpResult = await fetchSourceHttp(url, { timeoutMs: 15000 });
 
 	if (httpResult.ok) {
@@ -103,7 +246,29 @@ export async function fetchSourceContent(url, maxChars = 8000) {
 		};
 	}
 
-	// HTTP failed — fall back to browser
+	// HTTP failed — try Chrome Network.loadNetworkResource (authentic TLS).
+	// Only attempted if the HTTP error is retryable (network/TLS issues).
+	if (httpResult.needsBrowser) {
+		try {
+			const chromeTab = await openNewTab();
+			try {
+				const chromeResult = await fetchSourceViaChrome(
+					chromeTab,
+					url,
+					maxChars,
+				);
+				if (chromeResult.content && chromeResult.content.length > 100) {
+					return chromeResult;
+				}
+			} finally {
+				await closeTab(chromeTab);
+			}
+		} catch {
+			// Chrome unavailable — fall through to browser
+		}
+	}
+
+	// Last resort — full browser navigation (handles JS-heavy pages)
 	process.stderr.write(
 		`[greedysearch] HTTP failed for ${url.slice(0, 60)}, trying browser...\n`,
 	);

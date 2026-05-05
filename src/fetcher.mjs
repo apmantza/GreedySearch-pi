@@ -28,6 +28,12 @@ const DEFAULT_HEADERS = {
 	"accept-encoding": "gzip, deflate, br",
 	"cache-control": "no-cache",
 	pragma: "no-cache",
+	// Sec-CH-UA client hints must match the User-Agent (Chrome 122 on Windows).
+	// Inconsistency between UA and Client Hints is a strong bot signal.
+	"sec-ch-ua":
+		'"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+	"sec-ch-ua-mobile": "?0",
+	"sec-ch-ua-platform": '"Windows"',
 	"sec-fetch-dest": "document",
 	"sec-fetch-mode": "navigate",
 	"sec-fetch-site": "none",
@@ -294,7 +300,7 @@ export async function fetchSourceHttp(url, options = {}) {
  * Detect if HTTP response indicates bot blocking
  * Checks first 30KB of HTML for performance
  */
-function detectBotBlock(status, html, finalUrl, originalUrl) {
+export function detectBotBlock(status, html, finalUrl, originalUrl) {
 	const title =
 		html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.toLowerCase() || "";
 	const sample = html.slice(0, 30000).toLowerCase();
@@ -482,7 +488,7 @@ function extractMetaDate(document) {
 /**
  * Extract readable content using Mozilla Readability + Turndown
  */
-function extractContent(html, url) {
+export function extractContent(html, url) {
 	const dom = new JSDOM(html, { url });
 	const document = dom.window.document;
 
@@ -546,7 +552,7 @@ function extractContent(html, url) {
  * Check if extracted content quality is sufficient
  * Returns { ok: true } or { ok: false, reason: string }
  */
-function checkContentQuality(extracted) {
+export function checkContentQuality(extracted) {
 	const markdown = extracted.markdown.trim().toLowerCase();
 	const title = (extracted.title || "").toLowerCase();
 

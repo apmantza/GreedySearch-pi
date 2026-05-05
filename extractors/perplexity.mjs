@@ -26,7 +26,7 @@ import {
 	waitForSelector,
 	waitForStreamComplete,
 } from "./common.mjs";
-import { dismissConsent } from "./consent.mjs";
+import { dismissConsent, handleVerification } from "./consent.mjs";
 import { SELECTORS } from "./selectors.mjs";
 
 const S = SELECTORS.perplexity;
@@ -91,6 +91,7 @@ async function main() {
 
 		// Navigate to homepage and use the search box (direct ?q= URLs trigger bot redirect)
 		await cdp(["nav", tab, "https://www.perplexity.ai/"], 35000);
+		await handleVerification(tab, cdp, 30000);
 		await dismissConsent(tab, cdp);
 
 		// Wait for React app to mount input (up to 5s)
