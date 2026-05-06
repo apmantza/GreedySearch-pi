@@ -197,18 +197,36 @@ async function main() {
 	if (engine === "all") {
 		await cdp(["list"]); // refresh pages cache
 
-		// Create fresh tabs for each engine to avoid race conditions
-		const engineTabs = [];
-		for (let i = 0; i < ALL_ENGINES.length; i++) {
-			if (i > 0) await new Promise((r) => setTimeout(r, 300));
-			const tab = await openNewTab();
-			engineTabs.push(tab);
-		}
+		// Create fresh tabs for each engine in parallel, seeded directly to the
+		// engine homepage so extractors can skip the initial navigation.
+		const ENGINE_START_URLS = {
+			perplexity: "https://www.perplexity.ai/",
+			bing: "https://copilot.microsoft.com/",
+			google: "https://www.google.com/",
+		};
+		const engineTabs = await Promise.all(
+			ALL_ENGINES.map((e) => openNewTab(ENGINE_START_URLS[e])),
+		);
+		// Refresh cache so the new tabs are discoverable by cdp.mjs
+		await cdp(["list"]);
+
+		// Time-bounded per-engine extraction so slow engines don't stall the batch.
+		// Fast mode: 22s per engine (total budget ~25s incl overhead).
+		// Standard/deep: 35s per engine (total budget ~40s incl overhead).
+		const engineTimeoutMs = depth === "fast" ? 22000 : 35000;
+		const isFast = depth === "fast";
 
 		try {
 			const results = await Promise.allSettled(
 				ALL_ENGINES.map((e, i) =>
-					runExtractor(ENGINES[e], query, engineTabs[i], short, null, locale)
+					runExtractor(
+						ENGINES[e],
+						query,
+						engineTabs[i],
+						short,
+						engineTimeoutMs,
+						locale,
+					)
 						.then((r) => {
 							process.stderr.write(`PROGRESS:${e}:done\n`);
 							return { engine: e, ...r };
@@ -233,6 +251,7 @@ async function main() {
 			// Cloudflare/verification recovery: if Perplexity or Bing were blocked
 			// in headless mode, retry in visible Chrome to establish cookies,
 			// then continue headless with the profile now carrying valid session state.
+			// Skip recovery in fast mode to keep latency under the tight budget.
 			const cfBlocked = [];
 			if (
 				out.perplexity?.error &&
@@ -245,11 +264,15 @@ async function main() {
 			)
 				cfBlocked.push("bing");
 
-			if (cfBlocked.length > 0 && process.env.GREEDY_SEARCH_VISIBLE !== "1") {
+			if (
+				!isFast &&
+				cfBlocked.length > 0 &&
+				process.env.GREEDY_SEARCH_VISIBLE !== "1"
+			) {
 				process.stderr.write(
 					`[greedysearch] 🔓 Cloudflare/verification blocked ${cfBlocked.join(", ")} in headless — retrying visible to establish cookies...\n`,
 				);
-				process.stderr.write(`PROGRESS:bing:needs-human\n`);
+				process.stderr.write(`PROGRESS:${cfBlocked[0]}:needs-human\n`);
 				// Close headless tabs, kill headless Chrome
 				await closeTabs(engineTabs);
 				await killHeadlessChrome();
@@ -301,12 +324,8 @@ async function main() {
 					await cdp(["list"]);
 				}
 
-				// Reopen engineTabs so finally{} doesn't crash on closeTabs
+				// Clear engineTabs — finally{} closeTabs handles empty arrays gracefully
 				engineTabs.length = 0;
-				for (let i = 0; i < ALL_ENGINES.length; i++) {
-					const tab = await openNewTab();
-					engineTabs.push(tab);
-				}
 			}
 
 			// Build a canonical source registry across all engines
@@ -494,8 +513,6 @@ async function minimizeChrome() {
 main().finally(async () => {
 	// Touch activity timestamp for headless idle timeout
 	touchActivity();
-	// Ensure window is minimized after search completes
-	await minimizeChrome();
-	// Give minimize time to complete before exit
-	await new Promise((r) => setTimeout(r, 1500));
+	// Ensure window is minimized after search completes (best-effort, non-blocking)
+	minimizeChrome().catch(() => {});
 });

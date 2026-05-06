@@ -223,7 +223,7 @@ export async function fetchSourceContent(url, maxChars = 8000) {
 	}
 
 	// Try HTTP (Node.js fetch) first — fast, works for most sites.
-	const httpResult = await fetchSourceHttp(url, { timeoutMs: 15000 });
+	const httpResult = await fetchSourceHttp(url, { timeoutMs: 10000 });
 
 	if (httpResult.ok) {
 		const content = trimContentHeadTail(httpResult.markdown, maxChars);
@@ -281,7 +281,7 @@ async function fetchSourceContentBrowser(url, maxChars = 8000) {
 
 	try {
 		await cdp(["nav", tab, url], 30000);
-		await new Promise((r) => setTimeout(r, 1500));
+		await new Promise((r) => setTimeout(r, 800));
 
 		const content = await cdp([
 			"eval",
@@ -406,7 +406,7 @@ export async function fetchTopSource(url) {
 	await cdp(["list"]); // refresh cache
 	try {
 		await cdp(["nav", tab, url], 30000);
-		await new Promise((r) => setTimeout(r, 1500));
+		await new Promise((r) => setTimeout(r, 800));
 		const content = await cdp([
 			"eval",
 			tab,

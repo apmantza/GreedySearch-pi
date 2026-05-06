@@ -68,7 +68,8 @@ async function main() {
 	const { query, tabPrefix, short, locale } = parseArgs(args);
 
 	try {
-		await cdp(["list"]);
+		// Only refresh page list when creating a fresh tab (no prefix provided)
+		if (!tabPrefix) await cdp(["list"]);
 		const tab = await getOrOpenTab(tabPrefix);
 
 		// Build URL with language parameter (default to English)

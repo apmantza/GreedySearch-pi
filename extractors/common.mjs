@@ -246,13 +246,13 @@ export function parseSourcesFromMarkdown(text) {
 // ============================================================================
 
 export const TIMING = {
-	postNav: 1500, // settle after navigation
-	postNavSlow: 2000, // settle after slower navigations (Bing, Gemini)
-	postClick: 400, // settle after a UI click
-	postType: 400, // settle after typing
+	postNav: 800, // settle after navigation
+	postNavSlow: 1200, // settle after slower navigations (Bing, Gemini)
+	postClick: 300, // settle after a UI click
+	postType: 300, // settle after typing
 	inputPoll: 400, // polling interval when waiting for input to appear
 	copyPoll: 600, // polling interval when waiting for copy button
-	afterVerify: 3000, // settle after a verification challenge completes
+	afterVerify: 1500, // settle after a verification challenge completes
 };
 
 // ============================================================================

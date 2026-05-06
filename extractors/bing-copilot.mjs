@@ -164,12 +164,26 @@ async function main() {
 	const { query, tabPrefix, short } = parseArgs(args);
 
 	try {
-		await cdp(["list"]);
+		// Only refresh page list when creating a fresh tab (no prefix provided)
+		if (!tabPrefix) await cdp(["list"]);
 		const tab = await getOrOpenTab(tabPrefix);
 
-		// Navigate to Copilot homepage and use the chat input
-		await cdp(["nav", tab, "https://copilot.microsoft.com/"], 35000);
-		await new Promise((r) => setTimeout(r, TIMING.postNavSlow));
+		// Skip navigation if already on Copilot domain (tab was seeded by search.mjs)
+		const currentUrl = await cdp(["eval", tab, "document.location.href"]).catch(
+			() => "",
+		);
+		let onCopilot = false;
+		try {
+			const host = new URL(currentUrl).hostname.toLowerCase();
+			onCopilot =
+				host === "copilot.microsoft.com" ||
+				host.endsWith(".copilot.microsoft.com");
+		} catch {}
+
+		if (!onCopilot) {
+			await cdp(["nav", tab, "https://copilot.microsoft.com/"], 35000);
+			await new Promise((r) => setTimeout(r, TIMING.postNavSlow));
+		}
 		await dismissConsent(tab, cdp);
 
 		// Handle verification challenges (Cloudflare Turnstile, Microsoft auth, etc.)

@@ -148,7 +148,7 @@ export async function killChrome() {
 
 	if (killed) {
 		process.stderr.write(
-			`[greedysearch] Killed idle Chrome on port ${GREEDY_PORT} after ${IDLE_TIMEOUT_MINUTES}min inactivity.\n`,
+			`[greedysearch] Killed Chrome on port ${GREEDY_PORT}.\n`,
 		);
 	}
 	return killed;
@@ -199,13 +199,13 @@ export async function getAnyTab() {
 	return first.slice(0, 8);
 }
 
-export async function openNewTab() {
+export async function openNewTab(url = "about:blank") {
 	const anchor = await getAnyTab();
 	const raw = await cdp([
 		"evalraw",
 		anchor,
 		"Target.createTarget",
-		'{"url":"about:blank"}',
+		JSON.stringify({ url }),
 	]);
 	const { targetId } = JSON.parse(raw);
 	// Inject stealth patches when headless (visible Chrome doesn't need them —
@@ -213,6 +213,8 @@ export async function openNewTab() {
 	// is naturally undefined in headed mode).  Still inject for extra coverage.
 	const tid = targetId.slice(0, 8);
 	injectHeadlessStealth(tid).catch(() => {});
+	// Refresh the pages cache so cdp.mjs can discover the new tab immediately
+	await cdp(["list"]).catch(() => null);
 	return targetId;
 }
 
@@ -245,12 +247,10 @@ export async function closeTab(targetId) {
 }
 
 export async function closeTabs(targetIds = []) {
-	for (const tid of targetIds) {
-		if (!tid) continue;
-		await closeTab(tid);
-	}
+	await Promise.all(
+		targetIds.filter(Boolean).map((tid) => closeTab(tid).catch(() => {})),
+	);
 	if (targetIds.length > 0) {
-		await new Promise((r) => setTimeout(r, 300));
 		await cdp(["list"]).catch(() => null);
 	}
 }

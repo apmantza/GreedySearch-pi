@@ -84,13 +84,26 @@ async function main() {
 	const { query, tabPrefix, short } = parseArgs(args);
 
 	try {
-		// Refresh page list so cache is current
-		await cdp(["list"]);
+		// Only refresh page list when creating a fresh tab (no prefix provided)
+		if (!tabPrefix) await cdp(["list"]);
 
 		const tab = await getOrOpenTab(tabPrefix);
 
-		// Navigate to homepage and use the search box (direct ?q= URLs trigger bot redirect)
-		await cdp(["nav", tab, "https://www.perplexity.ai/"], 35000);
+		// Skip navigation if already on Perplexity domain (tab was seeded by search.mjs)
+		const currentUrl = await cdp(["eval", tab, "document.location.href"]).catch(
+			() => "",
+		);
+		let onPerplexity = false;
+		try {
+			const host = new URL(currentUrl).hostname.toLowerCase();
+			onPerplexity =
+				host === "perplexity.ai" || host.endsWith(".perplexity.ai");
+		} catch {}
+
+		if (!onPerplexity) {
+			await cdp(["nav", tab, "https://www.perplexity.ai/"], 35000);
+			await new Promise((r) => setTimeout(r, 800));
+		}
 		await handleVerification(tab, cdp, 30000);
 		await dismissConsent(tab, cdp);
 
