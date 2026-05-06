@@ -253,15 +253,12 @@ async function main() {
 			// then continue headless with the profile now carrying valid session state.
 			// Skip recovery in fast mode to keep latency under the tight budget.
 			const cfBlocked = [];
-			if (
-				out.perplexity?.error &&
-				/ask-input|clipboard/i.test(out.perplexity.error)
-			)
+			// Unified pattern: any timeout, verification, missing input, or clipboard
+			// failure from either engine means "probably blocked in headless".
+			const blockedPattern = /timed out|verification|input not found|ask-input|clipboard/i;
+			if (out.perplexity?.error && blockedPattern.test(out.perplexity.error))
 				cfBlocked.push("perplexity");
-			if (
-				out.bing?.error &&
-				/input not found|verification|clipboard/i.test(out.bing.error)
-			)
+			if (out.bing?.error && blockedPattern.test(out.bing.error))
 				cfBlocked.push("bing");
 
 			if (

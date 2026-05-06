@@ -22,6 +22,7 @@ import {
 	parseArgs,
 	parseSourcesFromMarkdown,
 	prepareArgs,
+	TIMING,
 	validateQuery,
 	waitForSelector,
 	waitForStreamComplete,
@@ -104,8 +105,20 @@ async function main() {
 			await cdp(["nav", tab, "https://www.perplexity.ai/"], 35000);
 			await new Promise((r) => setTimeout(r, 800));
 		}
-		await handleVerification(tab, cdp, 30000);
+		// Handle verification challenges (Cloudflare Turnstile, etc.)
+		const verifyResult = await handleVerification(tab, cdp, 30000);
+		if (verifyResult === "needs-human") {
+			throw new Error(
+				"Perplexity verification required — please solve it manually in the browser window",
+			);
+		}
 		await dismissConsent(tab, cdp);
+
+		// After verification, page may have redirected or reloaded — wait for it to settle
+		if (verifyResult === "clicked") {
+			await new Promise((r) => setTimeout(r, TIMING.afterVerify));
+			await dismissConsent(tab, cdp);
+		}
 
 		// Wait for React app to mount input (up to 5s)
 		await waitForSelector(tab, S.input, 5000, 400);
