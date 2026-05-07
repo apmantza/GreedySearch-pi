@@ -51,6 +51,20 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 					default: true,
 				}),
 			),
+			visible: Type.Optional(
+				Type.Boolean({
+					description:
+						"Set to true to always use visible Chrome for this search. Alias for headless: false.",
+					default: false,
+				}),
+			),
+			alwaysVisible: Type.Optional(
+				Type.Boolean({
+					description:
+						"Set to true to keep GreedySearch in visible Chrome mode for this search. Alias for visible: true.",
+					default: false,
+				}),
+			),
 		}),
 		execute: async (_toolCallId, params, signal, onUpdate) => {
 			const { query, fullAnswer: fullAnswerParam } = params as {
@@ -59,13 +73,19 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				depth?: "fast" | "standard" | "deep";
 				fullAnswer?: boolean;
 				headless?: boolean;
+				visible?: boolean;
+				alwaysVisible?: boolean;
 			};
 			const engine = stripQuotes((params as any).engine ?? "all") || "all";
 			const depth = (stripQuotes((params as any).depth ?? "standard") ||
 				"standard") as "fast" | "standard" | "deep";
-			const headless =
-				(params as any).headless !== false &&
-				process.env.GREEDY_SEARCH_VISIBLE !== "1";
+			const visible =
+				(params as any).visible === true ||
+				(params as any).alwaysVisible === true ||
+				(params as any).headless === false ||
+				process.env.GREEDY_SEARCH_VISIBLE === "1" ||
+				process.env.GREEDY_SEARCH_ALWAYS_VISIBLE === "1";
+			const headless = !visible;
 
 			if (!cdpAvailable(baseDir)) return cdpMissingResult();
 

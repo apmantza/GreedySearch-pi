@@ -42,6 +42,11 @@ import {
 } from "../src/search/fetch-source.mjs";
 import { writeOutput } from "../src/search/output.mjs";
 import {
+	findHeadlessBlockedEngines,
+	isHeadlessBlockedError,
+	isManualVerificationError,
+} from "../src/search/recovery.mjs";
+import {
 	buildSourceRegistry,
 	mergeFetchDataIntoSources,
 } from "../src/search/sources.mjs";
@@ -91,11 +96,14 @@ async function main() {
 				"  --fetch-top-source  Fetch content from top source",
 				"  --inline            Output JSON to stdout (for piping)",
 				"  --locale <lang>     Force results language (en, de, fr, etc.)",
+				"  --visible           Always use visible Chrome for this search",
+				"  --always-visible    Alias for --visible",
 				"  --stdin              Read query from stdin (avoids command-line leakage)",
 				"",
 				"Environment:",
-				"  GREEDY_SEARCH_VISIBLE   Set to 1 to show Chrome window (disables headless)",
-				"  GREEDY_SEARCH_LOCALE    Default locale (default: en)",
+				"  GREEDY_SEARCH_VISIBLE         Set to 1 to show Chrome window (disables headless)",
+				"  GREEDY_SEARCH_ALWAYS_VISIBLE  Set to 1 to force visible mode for all runs",
+				"  GREEDY_SEARCH_LOCALE          Default locale (default: en)",
 				"",
 				"Examples:",
 				'  node search.mjs all "Node.js streams"           # Default: sources + synthesis',
@@ -104,6 +112,16 @@ async function main() {
 			].join("\n")}\n`,
 		);
 		process.exit(1);
+	}
+
+	const alwaysVisible =
+		args.includes("--visible") ||
+		args.includes("--always-visible") ||
+		process.env.GREEDY_SEARCH_ALWAYS_VISIBLE === "1";
+	if (alwaysVisible) {
+		process.env.GREEDY_SEARCH_VISIBLE = "1";
+		process.env.GREEDY_SEARCH_ALWAYS_VISIBLE = "1";
+		delete process.env.GREEDY_SEARCH_HEADLESS;
 	}
 
 	await ensureChrome();
@@ -178,6 +196,8 @@ async function main() {
 			a !== "--inline" &&
 			a !== "--stdin" &&
 			a !== "--headless" &&
+			a !== "--visible" &&
+			a !== "--always-visible" &&
 			a !== "--depth" &&
 			a !== "--out" &&
 			a !== "--help" &&
@@ -214,7 +234,6 @@ async function main() {
 		// Fast mode: 22s per engine (total budget ~25s incl overhead).
 		// Standard/deep: 35s per engine (total budget ~40s incl overhead).
 		const engineTimeoutMs = depth === "fast" ? 22000 : 35000;
-		const isFast = depth === "fast";
 
 		try {
 			const results = await Promise.allSettled(
@@ -251,25 +270,17 @@ async function main() {
 			// Cloudflare/verification recovery: if Perplexity or Bing were blocked
 			// in headless mode, retry in visible Chrome to establish cookies,
 			// then continue headless with the profile now carrying valid session state.
-			// Skip recovery in fast mode to keep latency under the tight budget.
-			const cfBlocked = [];
-			// Unified pattern: any timeout, verification, missing input, or clipboard
-			// failure from either engine means "probably blocked in headless".
-			const blockedPattern = /timed out|verification|input not found|ask-input|clipboard/i;
-			if (out.perplexity?.error && blockedPattern.test(out.perplexity.error))
-				cfBlocked.push("perplexity");
-			if (out.bing?.error && blockedPattern.test(out.bing.error))
-				cfBlocked.push("bing");
+			// Recovery is allowed even in fast mode because verification failure would
+			// otherwise produce no usable result.
+			const cfBlocked = findHeadlessBlockedEngines(out);
 
-			if (
-				!isFast &&
-				cfBlocked.length > 0 &&
-				process.env.GREEDY_SEARCH_VISIBLE !== "1"
-			) {
+			if (cfBlocked.length > 0 && process.env.GREEDY_SEARCH_VISIBLE !== "1") {
 				process.stderr.write(
 					`[greedysearch] 🔓 Cloudflare/verification blocked ${cfBlocked.join(", ")} in headless — retrying visible to establish cookies...\n`,
 				);
-				process.stderr.write(`PROGRESS:${cfBlocked[0]}:needs-human\n`);
+				for (const blockedEngine of cfBlocked) {
+					process.stderr.write(`PROGRESS:${blockedEngine}:needs-human\n`);
+				}
 				// Close headless tabs, kill headless Chrome
 				await closeTabs(engineTabs);
 				await killHeadlessChrome();
@@ -280,6 +291,7 @@ async function main() {
 
 				// Retry blocked engines in visible Chrome
 				const retryTabs = [];
+				let keepVisibleForHuman = false;
 				for (let i = 0; i < cfBlocked.length; i++) {
 					const tab = await openNewTab();
 					retryTabs.push(tab);
@@ -293,10 +305,18 @@ async function main() {
 						),
 					);
 					let recovered = 0;
+					const stillBlocked = [];
+					const manualVerification = [];
 					for (const r of retries) {
 						if (r.status === "fulfilled" && !r.value.error) {
 							out[r.value.engine] = r.value;
 							recovered++;
+						} else if (r.status === "fulfilled") {
+							out[r.value.engine] = r.value;
+							stillBlocked.push(r.value.engine);
+							if (isManualVerificationError(r.value.error)) {
+								manualVerification.push(r.value.engine);
+							}
 						}
 					}
 					if (recovered > 0) {
@@ -308,17 +328,43 @@ async function main() {
 							`[greedysearch] ⚠️ Recovery attempt failed — ${cfBlocked.join(", ")} still blocked in visible mode.\n`,
 						);
 					}
+
+					if (manualVerification.length > 0) {
+						keepVisibleForHuman = true;
+						out._needsHumanVerification = {
+							engines: manualVerification,
+							message:
+								"Visible Chrome is open. Solve the verification challenge, then rerun the same search.",
+						};
+						process.stderr.write(
+							`[greedysearch] 🔓 Visible Chrome left open for manual verification: ${manualVerification.join(", ")}. Rerun after solving.\n`,
+						);
+						writeOutput(out, outFile, {
+							inline,
+							synthesize: false,
+							query,
+						});
+						return;
+					}
+
+					if (stillBlocked.length > 0) {
+						process.stderr.write(
+							`[greedysearch] ${stillBlocked.join(", ")} still failed after visible retry.\n`,
+						);
+					}
 				} finally {
-					// Kill visible Chrome, relaunch headless for remaining pipeline
-					await closeTabs(retryTabs);
-					process.stderr.write(
-						"[greedysearch] Switching back to headless Chrome...\n",
-					);
-					await killHeadlessChrome();
-					delete process.env.GREEDY_SEARCH_VISIBLE;
-					process.env.GREEDY_SEARCH_HEADLESS = "1";
-					await ensureChrome();
-					await cdp(["list"]);
+					if (!keepVisibleForHuman) {
+						// Kill visible Chrome, relaunch headless for remaining pipeline
+						await closeTabs(retryTabs);
+						process.stderr.write(
+							"[greedysearch] Switching back to headless Chrome...\n",
+						);
+						await killHeadlessChrome();
+						delete process.env.GREEDY_SEARCH_VISIBLE;
+						process.env.GREEDY_SEARCH_HEADLESS = "1";
+						await ensureChrome();
+						await cdp(["list"]);
+					}
 				}
 
 				// Clear engineTabs — finally{} closeTabs handles empty arrays gracefully
@@ -405,6 +451,72 @@ async function main() {
 		}
 		writeOutput(result, outFile, { inline, synthesize: false, query });
 	} catch (e) {
+		const recoveryEngine = script.includes("bing")
+			? "bing"
+			: script.includes("perplexity")
+				? "perplexity"
+				: null;
+		const canRetryVisible =
+			recoveryEngine &&
+			process.env.GREEDY_SEARCH_VISIBLE !== "1" &&
+			isHeadlessBlockedError(e.message);
+
+		if (canRetryVisible) {
+			process.stderr.write(
+				`[greedysearch] 🔓 ${recoveryEngine} blocked in headless — retrying visible to establish cookies...\n`,
+			);
+			await killHeadlessChrome();
+			process.env.GREEDY_SEARCH_VISIBLE = "1";
+			delete process.env.GREEDY_SEARCH_HEADLESS;
+			await ensureChrome();
+			await cdp(["list"]);
+
+			const retryTab = await openNewTab();
+			let keepVisibleForHuman = false;
+			try {
+				const result = await runExtractor(
+					script,
+					query,
+					retryTab,
+					short,
+					null,
+					locale,
+				);
+				if (fetchSource && result.sources?.length > 0) {
+					result.topSource = await fetchTopSource(result.sources[0].url);
+				}
+				writeOutput(result, outFile, { inline, synthesize: false, query });
+				return;
+			} catch (retryErr) {
+				if (isManualVerificationError(retryErr.message)) {
+					keepVisibleForHuman = true;
+					writeOutput(
+						{
+							query,
+							error: retryErr.message,
+							_needsHumanVerification: {
+								engines: [recoveryEngine],
+								message:
+									"Visible Chrome is open. Solve the verification challenge, then rerun the same search.",
+							},
+						},
+						outFile,
+						{ inline, synthesize: false, query },
+					);
+					return;
+				}
+				process.stderr.write(`Error: ${retryErr.message}\n`);
+				process.exit(1);
+			} finally {
+				if (!keepVisibleForHuman) {
+					await closeTab(retryTab);
+					await killHeadlessChrome();
+					delete process.env.GREEDY_SEARCH_VISIBLE;
+					process.env.GREEDY_SEARCH_HEADLESS = "1";
+				}
+			}
+		}
+
 		process.stderr.write(`Error: ${e.message}\n`);
 		process.exit(1);
 	}

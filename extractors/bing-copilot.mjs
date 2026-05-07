@@ -22,6 +22,7 @@ import {
 	prepareArgs,
 	TIMING,
 	validateQuery,
+	waitForCopyButton,
 	waitForSelector,
 	waitForStreamComplete,
 } from "./common.mjs";
@@ -36,33 +37,26 @@ const GLOBAL_VAR = "__bingClipboard";
 // ============================================================================
 
 async function extractAnswer(tab) {
-	// Click the LAST copy button (assistant's response at the bottom),
-	// not the first (which could be the user's echoed query).
-	await cdp([
-		"eval",
-		tab,
-		`(() => {
-			const buttons = document.querySelectorAll('${S.copyButton}');
-			buttons[buttons.length - 1]?.click();
-		})()`,
-	]);
-	await new Promise((r) => setTimeout(r, 400));
+	// Wait for the assistant copy button to exist. On fresh visible Copilot
+	// sessions the answer text can render before the button handler is fully
+	// hydrated, so fixed sleeps are less reliable than readiness + polling.
+	await waitForCopyButton(tab, S.copyButton, { timeout: 5000 }).catch(
+		() => null,
+	);
 
-	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	let answer = await clickCopyAndPollClipboard(tab, 5000);
 
-	// Retry once if clipboard is empty (Copilot might be slow to write)
+	// Retry once if clipboard is empty (Copilot might be slow to wire the handler)
 	if (!answer) {
-		console.error("[bing] Clipboard empty, retrying in 2s...");
-		await cdp([
-			"eval",
-			tab,
-			`(() => {
-				const buttons = document.querySelectorAll('${S.copyButton}');
-				buttons[buttons.length - 1]?.click();
-			})()`,
-		]);
-		await new Promise((r) => setTimeout(r, 2000));
-		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+		console.error("[bing] Clipboard empty, retrying copy/poll...");
+		answer = await clickCopyAndPollClipboard(tab, 8000);
+	}
+
+	// DOM fallback: visible Copilot can render a valid response while the copy
+	// action/clipboard interceptor remains empty. Extract the last assistant
+	// answer from page text before treating this as a headless/iframe block.
+	if (!answer) {
+		answer = await extractFromVisibleDom(tab);
 	}
 
 	// DOM fallback: if clipboard still empty, extract text directly from response DOM.
@@ -76,6 +70,62 @@ async function extractAnswer(tab) {
 
 	const sources = parseSourcesFromMarkdown(answer);
 	return { answer: answer.trim(), sources };
+}
+
+async function clickCopyAndPollClipboard(tab, timeoutMs) {
+	await cdp([
+		"eval",
+		tab,
+		`(() => {
+			window.${GLOBAL_VAR} = '';
+			const buttons = document.querySelectorAll('${S.copyButton}');
+			buttons[buttons.length - 1]?.click();
+		})()`,
+	]);
+
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]).catch(
+			() => "",
+		);
+		if (answer) return answer;
+		await new Promise((r) => setTimeout(r, 300));
+	}
+	return "";
+}
+
+/**
+ * Visible-page DOM fallback. Copilot often exposes the completed assistant
+ * message in document.body.innerText even when the copy button/clipboard path
+ * fails. Keep this conservative: require a "Copilot said" marker and strip
+ * known composer/action text after the answer.
+ */
+async function extractFromVisibleDom(tab) {
+	try {
+		const bodyText = await cdp([
+			"eval",
+			tab,
+			"document.body?.innerText || ''",
+		]).catch(() => "");
+		if (!bodyText || !bodyText.includes("Copilot said")) return "";
+
+		const answer = bodyText
+			.split(/Copilot said\s*/i)
+			.pop()
+			.split(
+				/\n\s*(?:Good response|Bad response|Share message|Copy message|Read aloud|Regenerate|Edit in a page|Message Copilot|Smart)\b/i,
+			)[0]
+			.trim();
+
+		if (answer.length < 20) return "";
+		console.error(
+			`[bing] Visible DOM extraction succeeded (${answer.length} chars)`,
+		);
+		return answer;
+	} catch (e) {
+		console.error(`[bing] Visible DOM extraction failed: ${e.message}`);
+		return "";
+	}
 }
 
 /**

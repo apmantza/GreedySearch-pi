@@ -54,7 +54,7 @@ export function errorResult(prefix: string, e: unknown): ToolResult {
 
 /**
  * Spawn search.mjs and collect JSON results, with progress streaming via stderr.
- * Shared by greedy_search and deep_research tool handlers.
+ * Shared by GreedySearch tool handlers.
  */
 export function runSearch(
 	engine: string,
@@ -73,12 +73,16 @@ export function runSearch(
 		// Headless is default — only skip if explicitly false or GREEDY_SEARCH_VISIBLE=1
 		if (headless !== false && process.env.GREEDY_SEARCH_VISIBLE !== "1")
 			allFlags.push("--headless");
+		if (headless === false) allFlags.push("--always-visible");
 		// Propagate visibility preference via env (--headless flag is informational;
 		// the actual headless control in search.mjs / launch.mjs reads the env var).
 		const procEnv = { ...process.env };
-		if (headless === false) procEnv.GREEDY_SEARCH_VISIBLE = "1";
+		if (headless === false) {
+			procEnv.GREEDY_SEARCH_VISIBLE = "1";
+			procEnv.GREEDY_SEARCH_ALWAYS_VISIBLE = "1";
+		}
 		const proc = spawn(
-			"node",
+			process.execPath,
 			[searchBin, engine, "--inline", "--stdin", ...allFlags],
 			{ stdio: ["pipe", "pipe", "pipe"], env: procEnv },
 		);

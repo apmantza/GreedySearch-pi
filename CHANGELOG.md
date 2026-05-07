@@ -11,7 +11,7 @@
 - **Faster HTTP timeouts** (`src/search/fetch-source.mjs`) — HTTP fetch timeout 15s → 10s, browser fallback settle 1500ms → 800ms.
 - **Non-blocking cleanup** (`bin/search.mjs`) — Removed the 1500ms hard sleep at process exit; `minimizeChrome` now fire-and-forget.
 - **Domain-aware navigation skip** (`extractors/bing-copilot.mjs`, `extractors/perplexity.mjs`, `extractors/google-ai.mjs`) — When a tab is already on the engine's domain (pre-seeded by orchestrator), skip the redundant `cdp nav` call and settle delay.
-- **Skip Cloudflare recovery in fast mode** (`bin/search.mjs`) — The visible-Chrome retry loop (killing headless, launching visible, re-running blocked engines, switching back) is bypassed in `--fast` mode. This alone saves 15–25s when engines are blocked.
+- **Fast mode keeps short engine budgets** (`bin/search.mjs`) — Fast mode still uses 22s per-engine extraction timeouts and skips source fetch/synthesis work. Verification recovery can now run in fast mode when Bing/Perplexity are blocked, because returning no result is worse than the retry cost.
 
 ### Anti-Bot Detection Hardening (Anti-CDP Evasion)
 
@@ -26,7 +26,19 @@
 
 ### Added
 
+- **`visible` / `alwaysVisible` search options** (`src/tools/greedy-search-handler.ts`, `src/tools/shared.ts`, `bin/search.mjs`) — Agents can now force visible Chrome per call with `visible: true`, `alwaysVisible: true`, or `headless: false`. CLI aliases: `--visible`, `--always-visible`. Global env: `GREEDY_SEARCH_ALWAYS_VISIBLE=1`.
+- **GreedySearch Chrome commands for Pi** (`index.ts`) — Added `/greedy-visible`, `/greedy-status`, and `/greedy-kill` so users do not need to know package install paths to manage the dedicated Chrome instance.
+- **Safe CDP wrappers** (`bin/cdp-greedy.mjs`, `bin/cdp-visible.mjs`, `bin/cdp-headless.mjs`) — Agents can inspect only the dedicated GreedySearch Chrome profile. The wrappers always set `CDP_PROFILE_DIR` and mode-specific wrappers refuse to attach to the wrong mode, preventing accidental main-Chrome pollution.
+- **`bin/kill-visible.mjs`** — Strong visible/port cleanup helper backed by `launch-visible.mjs`'s PID + port nuke path.
 - **`bin/gschrome.mjs`** — Standalone Chrome lifecycle manager: `launch-headless`, `launch-visible`, `kill`, `status`. Port-based PID detection, forces mode switches, writes `DevToolsActivePort` for CDP.
+
+### Fixed
+
+- **Single-engine visible recovery** (`bin/search.mjs`) — `engine: "bing"` and `engine: "perplexity"` now perform the same headless → visible retry as `engine: "all"` when blocked by Cloudflare, captcha, timeout, missing input, or clipboard failures.
+- **Bing visible clipboard race** (`extractors/bing-copilot.mjs`) — Waits for the assistant copy button, polls clipboard interception after click, retries copy/poll, then falls back to visible DOM text. Fixes cases where Copilot visibly answered but the extractor returned `Clipboard interceptor returned empty text`.
+- **Manual verification flow** (`bin/search.mjs`, `src/formatters/results.ts`) — If visible retry reaches a human verification challenge, GreedySearch leaves visible Chrome open and returns a clear “solve verification, then rerun” result instead of killing the browser and returning no results.
+- **Visible/headless process cleanup** (`bin/launch.mjs`, `bin/visible.mjs`) — Fixed Windows `taskkill` arguments, added port fallback cleanup for `--kill`, and made `visible.mjs --kill` delegate to the stronger `launch-visible.mjs` cleanup path.
+- **README install paths and skill guidance** (`README.md`, `skills/greedy-search/skill.md`) — Corrected Pi git/npm package paths, documented visible mode and safe CDP wrappers, and removed stale `coding_task` guidance from the agent skill.
 
 ## [1.8.6] — 2026-05-04
 

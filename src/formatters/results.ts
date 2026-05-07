@@ -3,9 +3,8 @@
  * Extracted from index.ts
  */
 
-import { formatEngineName, humanizeSourceType } from "../utils/helpers.js";
+import { formatEngineName } from "../utils/helpers.js";
 import { renderSynthesis } from "./synthesis.js";
-import { formatSourceLine, renderSourceEvidence } from "./sources.js";
 
 /**
  * Format search results based on engine type
@@ -34,6 +33,24 @@ function formatAllEnginesResult(
 	const dedupedSources = data._sources as
 		| Array<Record<string, unknown>>
 		| undefined;
+	const needsHuman = data._needsHumanVerification as
+		| Record<string, unknown>
+		| undefined;
+
+	if (needsHuman) {
+		const engines = Array.isArray(needsHuman.engines)
+			? needsHuman.engines.join(", ")
+			: "one or more engines";
+		lines.push("## Manual verification required");
+		lines.push(
+			String(
+				needsHuman.message ||
+					"Visible Chrome is open. Solve the verification challenge, then rerun the same search.",
+			),
+		);
+		lines.push(`Engines: ${engines}`);
+		lines.push("");
+	}
 
 	// If we have a synthesis answer, render it
 	if (synthesis?.answer) {
@@ -59,6 +76,23 @@ function formatSingleEngineResult(
 	data: Record<string, unknown>,
 	lines: string[],
 ): string {
+	const needsHuman = data._needsHumanVerification as
+		| Record<string, unknown>
+		| undefined;
+	if (needsHuman) {
+		const engines = Array.isArray(needsHuman.engines)
+			? needsHuman.engines.join(", ")
+			: "this engine";
+		lines.push("## Manual verification required");
+		lines.push(
+			String(
+				needsHuman.message ||
+					"Visible Chrome is open. Solve the verification challenge, then rerun the same search.",
+			),
+		);
+		lines.push(`Engines: ${engines}`);
+		lines.push("");
+	}
 	formatEngineResult(data, lines, 5);
 	return lines.join("\n").trim();
 }

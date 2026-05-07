@@ -235,7 +235,7 @@ function getPortPid(port) {
 function killProcess(pid) {
 	try {
 		if (platform() === "win32") {
-			execSync(`taskkill //F //T //PID ${pid}`, { stdio: "ignore" });
+			execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore" });
 		} else {
 			process.kill(pid, "SIGTERM");
 		}
@@ -312,7 +312,7 @@ async function main() {
 	cleanupGhostChrome();
 
 	if (arg === "--kill") {
-		const pid = isRunning();
+		const pid = isRunning() || getPortPid(PORT);
 		if (pid) {
 			const ok = killProcess(pid);
 			console.log(
@@ -321,7 +321,12 @@ async function main() {
 		} else {
 			console.log("GreedySearch Chrome is not running.");
 		}
-		// Clean up mode marker
+		try {
+			unlinkSync(PID_FILE);
+		} catch {}
+		try {
+			unlinkSync(ACTIVE_PORT);
+		} catch {}
 		try {
 			unlinkSync(MODE_FILE);
 		} catch {}

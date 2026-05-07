@@ -146,11 +146,15 @@ if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 	}
 
 	subsection(
-		"Bing error pattern matching — headless → visible auto-retry detection",
+		"Bing/Perplexity error matching — headless → visible auto-retry detection",
 	);
-	// The auto-retry in bin/search.mjs checks error patterns to decide
+	// The auto-retry in bin/search.mjs uses this shared helper to decide
 	// whether to switch from headless to visible Chrome and retry.
-	const cfPattern = /input not found|verification|clipboard/i;
+	const {
+		findHeadlessBlockedEngines,
+		isHeadlessBlockedError,
+		isManualVerificationError,
+	} = await import("./src/search/recovery.mjs");
 	const cfTestCases = [
 		// [error message, expected match, label]
 		["input not found", true, 'legacy pattern: "input not found"'],
@@ -173,24 +177,58 @@ if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 		],
 		[
 			"Cloudflare challenge detected — content blocked in headless",
-			false,
-			"NOT matched: Cloudflare detection text alone (no keyword trigger)",
+			true,
+			"new: Cloudflare detection triggers visible retry",
 		],
 		[
 			"Network timeout after 30000ms",
-			false,
-			"NOT matched: unrelated network error",
+			true,
+			"new: timeout triggers visible retry",
 		],
 		["", false, "empty string"],
 	];
 	for (const [error, expected, label] of cfTestCases) {
-		const matched = cfPattern.test(error);
+		const matched = isHeadlessBlockedError(error);
 		if (matched === expected) passMsg(`cfPattern: ${label}`);
 		else failMsg(`cfPattern: ${label} — expected ${expected}, got ${matched}`);
 	}
 
-	subsection("Perplexity error pattern matching — headless → visible");
-	const pplxPattern = /ask-input|clipboard/i;
+	subsection("Manual verification detection keeps visible Chrome open");
+	const manualCases = [
+		[
+			"Perplexity verification required — please solve it manually in the browser window",
+			true,
+			"perplexity manual verification",
+		],
+		[
+			"Copilot verification required — please solve it manually in the browser window",
+			true,
+			"bing manual verification",
+		],
+		["selector changed", false, "non-verification extractor failure"],
+	];
+	for (const [error, expected, label] of manualCases) {
+		const matched = isManualVerificationError(error);
+		if (matched === expected) passMsg(`manualVerification: ${label}`);
+		else
+			failMsg(
+				`manualVerification: ${label} — expected ${expected}, got ${matched}`,
+			);
+	}
+
+	const retryEngines = findHeadlessBlockedEngines({
+		perplexity: { error: "Clipboard interceptor returned empty text" },
+		bing: { error: "Copilot verification required" },
+		google: { error: "Google verification required" },
+	});
+	if (retryEngines.join(",") === "perplexity,bing") {
+		passMsg("visible retry engines: perplexity and bing only");
+	} else {
+		failMsg(
+			`visible retry engines: expected perplexity,bing, got ${retryEngines.join(",")}`,
+		);
+	}
+
 	const pplxTestCases = [
 		["ask-input selector not found", true, 'legacy: "ask-input"'],
 		[
@@ -198,10 +236,10 @@ if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 			true,
 			"new: clipboard also triggers for perplexity",
 		],
-		["Perplexity timeout", false, "NOT matched: unrelated timeout"],
+		["Perplexity timeout", true, "timeout triggers visible retry"],
 	];
 	for (const [error, expected, label] of pplxTestCases) {
-		const matched = pplxPattern.test(error);
+		const matched = isHeadlessBlockedError(error);
 		if (matched === expected) passMsg(`pplxPattern: ${label}`);
 		else
 			failMsg(`pplxPattern: ${label} — expected ${expected}, got ${matched}`);

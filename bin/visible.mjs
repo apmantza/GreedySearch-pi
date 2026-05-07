@@ -11,38 +11,27 @@
 
 import { spawn } from "node:child_process";
 
-const launchBin = new URL("./launch.mjs", import.meta.url).pathname.replace(
-	/^\/([A-Z]:)/,
-	"$1",
-);
+const launchVisibleBin = new URL(
+	"./launch-visible.mjs",
+	import.meta.url,
+).pathname.replace(/^\/([A-Z]:)/, "$1");
 
 const flag = process.argv[2] || "";
 
 if (flag === "--kill") {
-	const proc = spawn(process.execPath, [launchBin, "--kill"], {
+	const proc = spawn(process.execPath, [launchVisibleBin, "--kill"], {
 		stdio: "inherit",
 	});
-	proc.on("close", (code) => {
-		if (code === 0) console.log("✅ Chrome killed.");
-		process.exit(code ?? 0);
-	});
+	proc.on("close", (code) => process.exit(code ?? 0));
 } else if (flag === "--status") {
-	const proc = spawn(process.execPath, [launchBin, "--status"], {
+	const proc = spawn(process.execPath, [launchVisibleBin, "--status"], {
 		stdio: "inherit",
 	});
 	proc.on("close", (code) => process.exit(code ?? 0));
 } else {
-	// Kill any existing headless Chrome, then launch visible
-	console.log("🔄 Killing headless Chrome (if running)...");
-	await new Promise((resolve) => {
-		const killProc = spawn(process.execPath, [launchBin, "--kill"], {
-			stdio: "inherit",
-		});
-		killProc.on("close", resolve);
-	});
-
-	console.log("🚀 Launching visible Chrome...");
-	const proc = spawn(process.execPath, [launchBin], {
+	// launch-visible.mjs nukes anything on the GreedySearch port, then launches visible.
+	console.log("🚀 Launching visible GreedySearch Chrome...");
+	const proc = spawn(process.execPath, [launchVisibleBin], {
 		stdio: "inherit",
 		env: { ...process.env, GREEDY_SEARCH_VISIBLE: "1" },
 	});
