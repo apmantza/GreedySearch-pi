@@ -201,7 +201,7 @@ export async function getAnyTab() {
 
 export async function openNewTab(url = "about:blank") {
 	const anchor = await getAnyTab();
-	const needsStealth = url.includes("copilot.microsoft.com");
+	const needsStealth = new URL(url).hostname === "copilot.microsoft.com";
 
 	if (needsStealth) {
 		// Bing Copilot: create blank tab, await stealth, return.
