@@ -2,6 +2,13 @@
 
 GreedySearch-pi is a Pi package/extension that registers the `greedy_search` tool. It automates a dedicated Chrome instance on port `9222` and queries AI/search engines through browser automation (Perplexity, Bing Copilot, Google AI, Gemini).
 
+## Design goals
+
+- **Headless-first with visible fallback** — Headless is the default for speed and resource efficiency. When Cloudflare/Turnstile blocks an engine in headless, automatic visible recovery establishes cookies in the shared Chrome profile, then switches back to headless. Subsequent searches benefit from the cached session. Recovery only applies to Bing and Perplexity (Google intentionally excluded).
+- **Speed optimizations** — All extractors use tight timeouts: 20s navigation, 10s verification retry (Turnstile never clears in headless, so longer retries are waste), 600ms post-nav settle. Engine budgets are 30s (fast) / 55s (standard) to account for CDP contention from parallel extractors. Solo times: Google 9s, Perplexity 13s, Gemini 14s, Bing 16s.
+- **Resilient synthesis** — When one engine fails (even with manual verification), synthesis continues with the engines that succeeded. Source-fetch workers catch individual errors — a single bad URL won't crash the batch.
+- **Stealth where it matters** — `Page.addScriptToEvaluateOnNewDocument` patches are awaited for Bing tabs (Copilot's Cloudflare blocks headless without them), but fire-and-forget for Perplexity/Google (Perplexity's anti-bot detects the aggressive canvas/console patches). Tabs are created blank → stealth injected → extractor navigates, ensuring stealth is active before page load.
+
 ## Read the skill first
 
 Before changing behavior or using the tool, read:
@@ -98,14 +105,16 @@ Important behavior:
 
 ### Bing Copilot
 
-Bing is the most fragile engine.
+Bing is the most fragile engine — Copilot's Cloudflare/Turnstile aggressively blocks headless Chrome.
 
 Known behaviors:
 
 - Headless may be Cloudflare/Turnstile blocked or sandboxed in nested iframes.
+- The copy button exists in the DOM before React hydrates its click handler — a race that causes empty clipboard interception. Fixed with an 800ms hydration delay after `waitForCopyButton`.
+- `Page.addScriptToEvaluateOnNewDocument` stealth must be **awaited** before the extractor navigates to Copilot. Fire-and-forget means Cloudflare sees headless fingerprints during the initial page load.
 - Visible mode can render an answer even when clipboard interception is empty.
 - `extractors/bing-copilot.mjs` therefore uses:
-  1. copy button readiness wait,
+  1. copy button readiness wait + 800ms hydration delay,
   2. copy + clipboard polling,
   3. retry copy + polling,
   4. visible DOM text fallback,
@@ -116,6 +125,8 @@ Do not “fix” Bing by only adding a larger fixed sleep; prefer readiness/poll
 ### Perplexity
 
 Perplexity uses clipboard interception and a language-agnostic copy-button finder. It also participates in headless → visible recovery.
+
+Important: Perplexity's anti-bot system **detects** the aggressive stealth patches (canvas noise, console monkey-patching, CDP Runtime guard). Use fire-and-forget stealth for Perplexity — the basic flags (`--disable-blink-features=AutomationControlled`, `navigator.webdriver` suppression) are sufficient. Tabs are pre-seeded via `Target.createTarget` rather than CDP `Page.navigate`, which is less detectable.
 
 ### Google
 
@@ -181,3 +192,18 @@ node bin/launch.mjs --kill
 - Do not assume normal `node import('./index.ts')` represents Pi runtime; Pi uses jiti.
 - Do not add Google to visible recovery unless explicitly requested.
 - Do not reintroduce stale `coding_task` / `deep_research` tool docs; those were folded into `greedy_search`.
+
+## Extractor timeout budgets
+
+All extractors share these timeouts (kept tight — solo runs complete in 9-16s):
+
+| Step | Timeout | Notes |
+|------|---------|-------|
+| Navigation | 20s | CDP `Page.navigate` → `loadEventFired` → `readyState:complete` |
+| Post-nav settle | 600ms | React hydration buffer |
+| Verification retry | 10s | Turnstile never clears in headless; longer = waste |
+| Input selector wait | 8-15s | In-browser polling, no CDP traffic |
+| Stream completion | 60s (Bing), 20s (Perplexity), 90s (Gemini) | Single `Runtime.evaluate` with in-browser poll loop |
+| Engine hard kill | 30s fast / 55s standard | `runExtractor` spawn timeout; accounts for CDP contention |
+
+CDP daemon internal `TIMEOUT`: **90s** (must exceed longest `Runtime.evaluate` call).
