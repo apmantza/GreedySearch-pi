@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- **Headless→visible mode switching** (`src/search/chrome.mjs`) — `ensureChrome()` only handled the case where visible was requested but headless Chrome was running. When headless was requested (the default) but visible Chrome was running, it silently kept visible mode — causing env var mismatches that broke extractors like Perplexity. Now properly detects both directions and kills/relaunches in the correct mode.
+
 - **SonarCloud security hotspots** — Replaced `spawn("node", ...)` with `spawn(process.execPath, ...)` in cdp wrapper, `runExtractor`, `synthesizeWithGemini`, and test helper to prevent PATH-based binary substitution. Replaced `Math.random()` with `crypto.randomInt()` in `jitter()` for non-security-sensitive timing variance. Remaining 19 hotspots are verified false positives (hardcoded `execSync` commands, simple regex patterns).
 - **Bing stealth not active on page load** (`src/search/chrome.mjs`) — `injectHeadlessStealth` was fire-and-forget (`.catch(() => {})`). The CDP `Page.addScriptToEvaluateOnNewDocument` command is async — extractors often navigated to Copilot before stealth registered. Cloudflare saw headless fingerprints and blocked the page. Fixed by awaiting stealth for Bing tabs. Perplexity/Google kept fire-and-forget since Perplexity's anti-bot detects the awaited patches.
 - **Bing copy button handler not hydrated** (`extractors/bing-copilot.mjs`) — Copilot's React copy button exists in the DOM before its click handler is bound. `clickCopyAndPollClipboard` clicked too early → clipboard interceptor empty → 13s wasted polling + DOM fallback. Added 800ms hydration delay after `waitForCopyButton`. Solo Bing went from 37-73s → 16s.

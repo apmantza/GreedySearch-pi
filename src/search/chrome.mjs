@@ -398,21 +398,29 @@ export async function ensureChrome() {
 	const wasKilled = await checkAndKillIdle();
 
 	const ready = wasKilled ? false : await probeGreedyChrome();
-	// If Chrome is running but in wrong mode (visible requested, headless running),
-	// kill it so we relaunch in the correct mode.
+	// If Chrome is running but in wrong mode, kill it so we relaunch in the correct mode.
 	let forceRelaunch = false;
-	if (
-		ready &&
-		process.env.GREEDY_SEARCH_VISIBLE === "1" &&
-		isChromeHeadless()
-	) {
-		process.stderr.write(
-			"[greedysearch] Headless Chrome detected — switching to visible mode...\n",
-		);
-		await killHeadlessChrome();
-		// Wait a moment for the port to free up
-		await new Promise((r) => setTimeout(r, 1000));
-		forceRelaunch = true; // always relaunch when switching modes
+	if (ready) {
+		const headless = isChromeHeadless();
+		const wantsVisible = process.env.GREEDY_SEARCH_VISIBLE === "1";
+
+		if (!wantsVisible && !headless) {
+			// Headless requested (default) but visible Chrome is running — switch back
+			process.stderr.write(
+				"[greedysearch] Visible Chrome detected — switching to headless mode...\n",
+			);
+			await killHeadlessChrome();
+			await new Promise((r) => setTimeout(r, 1000));
+			forceRelaunch = true;
+		} else if (wantsVisible && headless) {
+			// Visible requested but headless Chrome is running — switch
+			process.stderr.write(
+				"[greedysearch] Headless Chrome detected — switching to visible mode...\n",
+			);
+			await killHeadlessChrome();
+			await new Promise((r) => setTimeout(r, 1000));
+			forceRelaunch = true;
+		}
 	}
 
 	const readyAfterModeCheck = forceRelaunch ? false : await probeGreedyChrome();
