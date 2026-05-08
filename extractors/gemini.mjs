@@ -99,10 +99,10 @@ async function main() {
 		const tab = await getOrOpenTab(tabPrefix);
 
 		// Each search = fresh conversation
-		await cdp(["nav", tab, "https://gemini.google.com/app"], 35000);
-		await new Promise((r) => setTimeout(r, TIMING.postNavSlow));
+		await cdp(["nav", tab, "https://gemini.google.com/app"], 20000);
+		await new Promise((r) => setTimeout(r, 600));
 		await dismissConsent(tab, cdp);
-		await handleVerification(tab, cdp, 60000);
+		await handleVerification(tab, cdp, 10000);
 
 		// Wait for input to be ready
 		await waitForSelector(tab, S.input, 8000, TIMING.inputPoll);

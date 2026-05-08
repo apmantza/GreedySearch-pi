@@ -102,11 +102,11 @@ async function main() {
 		} catch {}
 
 		if (!onPerplexity) {
-			await cdp(["nav", tab, "https://www.perplexity.ai/"], 35000);
+			await cdp(["nav", tab, "https://www.perplexity.ai/"], 20000);
 			await new Promise((r) => setTimeout(r, 800));
 		}
 		// Handle verification challenges (Cloudflare Turnstile, etc.)
-		const verifyResult = await handleVerification(tab, cdp, 30000);
+		const verifyResult = await handleVerification(tab, cdp, 10000);
 		if (verifyResult === "needs-human") {
 			throw new Error(
 				"Perplexity verification required — please solve it manually in the browser window",

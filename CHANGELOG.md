@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Bing stealth not active on page load** (`src/search/chrome.mjs`) — `injectHeadlessStealth` was fire-and-forget (`.catch(() => {})`). The CDP `Page.addScriptToEvaluateOnNewDocument` command is async — extractors often navigated to Copilot before stealth registered. Cloudflare saw headless fingerprints and blocked the page. Fixed by awaiting stealth for Bing tabs. Perplexity/Google kept fire-and-forget since Perplexity's anti-bot detects the awaited patches.
+- **Bing copy button handler not hydrated** (`extractors/bing-copilot.mjs`) — Copilot's React copy button exists in the DOM before its click handler is bound. `clickCopyAndPollClipboard` clicked too early → clipboard interceptor empty → 13s wasted polling + DOM fallback. Added 800ms hydration delay after `waitForCopyButton`. Solo Bing went from 37-73s → 16s.
+- **Manual verification blocked synthesis** (`bin/search.mjs`) — When Bing/Perplexity needed manual verification after visible recovery, `search.mjs` returned early with `synthesize: false`, discarding all engine results. Now synthesis continues with whichever engines succeeded. Visible Chrome stays open for the user.
+- **Source-fetch crash after visible→headless recovery** (`src/search/fetch-source.mjs`) — After recovery killed/restarted Chrome, stale CDP tab references in parallel source-fetch workers caused "No target matching prefix" crashes. Workers now catch `fetchSourceContent` errors; `fetchSourceContentBrowser` returns error objects instead of throwing.
+- **Progress tracker "🔄 synthesizing" hang** (`src/tools/shared.ts`) — When synthesis was skipped (manual verification), the progress tracker showed "🔄 synthesizing" forever because no `PROGRESS:synthesis:done` was ever emitted. Now handles `done`/`error`/`skipped` synthesis states.
+- **Gemini synthesis eval timeout** (`bin/cdp.mjs`) — CDP daemon `TIMEOUT` was 30s, but `waitForStreamComplete` uses a single `Runtime.evaluate` call that can run 60-90s for long synthesis prompts. Increased to 90s.
+
+### Performance
+
+- **Reduced timeouts across all extractors** — Navigation: 35s→20s, verification retry: 30s→10s (Bing/Perplexity), 60s→10s (Gemini/Google), post-nav settle: 1200ms→600ms (Bing), 1200ms→600ms (Gemini). Turnstile never clears in headless, so 30s of retry loops were pure waste.
+- **Hard per-engine timeouts raised** (`bin/search.mjs`) — Fast: 22s→30s, Standard/Deep: 35s→55s. CDP contention from 3 parallel extractors adds overhead that the old budgets didn't account for.
+- **Tab creation split: Bing gets blank+stealth, others pre-seeded** (`src/search/chrome.mjs`) — `Target.createTarget` navigation is less detectable than CDP `Page.navigate` for Perplexity/Google. Bing needs blank tab + awaited stealth to hide headless fingerprints from Copilot's Cloudflare.
+
 ### Performance
 
 - **Hard per-engine timeouts** (`bin/search.mjs`) — Fast mode: 22s per engine. Standard/deep: 35s per engine. Slow engines are skipped instead of stalling the whole batch. Previously a single slow engine could push `all` searches to 60–90s.

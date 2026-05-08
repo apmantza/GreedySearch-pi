@@ -233,7 +233,7 @@ async function main() {
 		// Time-bounded per-engine extraction so slow engines don't stall the batch.
 		// Fast mode: 22s per engine (total budget ~25s incl overhead).
 		// Standard/deep: 35s per engine (total budget ~40s incl overhead).
-		const engineTimeoutMs = depth === "fast" ? 22000 : 35000;
+		const engineTimeoutMs = depth === "fast" ? 30000 : 55000;
 
 		try {
 			const results = await Promise.allSettled(
@@ -339,12 +339,8 @@ async function main() {
 						process.stderr.write(
 							`[greedysearch] 🔓 Visible Chrome left open for manual verification: ${manualVerification.join(", ")}. Rerun after solving.\n`,
 						);
-						writeOutput(out, outFile, {
-							inline,
-							synthesize: false,
-							query,
-						});
-						return;
+						// Continue to synthesis with engines that DID succeed.
+						// Visible Chrome stays open for the user.
 					}
 
 					if (stillBlocked.length > 0) {

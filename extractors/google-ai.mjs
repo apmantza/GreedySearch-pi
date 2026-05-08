@@ -83,19 +83,19 @@ async function main() {
 			() => "",
 		);
 		if (!currentUrl.includes("google.com/search")) {
-			await cdp(["nav", tab, url], 35000);
+			await cdp(["nav", tab, url], 20000);
 			await new Promise((r) => setTimeout(r, jitter(TIMING.postNav)));
 		}
 
 		// Handle "verify you're human" — auto-click simple buttons, wait for user on hard CAPTCHA
-		const verifyResult = await handleVerification(tab, cdp, 60000);
+		const verifyResult = await handleVerification(tab, cdp, 10000);
 		if (verifyResult === "needs-human")
 			throw new Error(
 				"Google verification required — could not be completed automatically",
 			);
 		if (verifyResult === "clicked" || verifyResult === "cleared-by-user") {
 			// Re-navigate to the search URL after verification
-			await cdp(["nav", tab, url], 35000);
+			await cdp(["nav", tab, url], 20000);
 			await new Promise((r) => setTimeout(r, jitter(TIMING.postNav)));
 		}
 

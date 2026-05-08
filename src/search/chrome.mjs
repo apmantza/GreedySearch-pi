@@ -201,6 +201,30 @@ export async function getAnyTab() {
 
 export async function openNewTab(url = "about:blank") {
 	const anchor = await getAnyTab();
+	const needsStealth = url.includes("copilot.microsoft.com");
+
+	if (needsStealth) {
+		// Bing Copilot: create blank tab, await stealth, return.
+		// Page.addScriptToEvaluateOnNewDocument must be registered BEFORE
+		// the extractor navigates to Copilot, or Cloudflare blocks headless
+		// Chrome.  The extractor handles its own navigation.
+		const raw = await cdp([
+			"evalraw",
+			anchor,
+			"Target.createTarget",
+			JSON.stringify({ url: "about:blank" }),
+		]);
+		const { targetId } = JSON.parse(raw);
+		const tid = targetId.slice(0, 8);
+		await cdp(["list"]).catch(() => null);
+		await injectHeadlessStealth(tid).catch(() => {});
+		await cdp(["list"]).catch(() => null);
+		return targetId;
+	}
+
+	// Perplexity / Google: pre-seed with URL directly.  Target.createTarget
+	// navigation is less detectable than CDP Page.navigate for these engines,
+	// and they don't need stealth (Perplexity's anti-bot detects our patches).
 	const raw = await cdp([
 		"evalraw",
 		anchor,
@@ -208,12 +232,6 @@ export async function openNewTab(url = "about:blank") {
 		JSON.stringify({ url }),
 	]);
 	const { targetId } = JSON.parse(raw);
-	// Inject stealth patches when headless (visible Chrome doesn't need them —
-	// the AutomationControlled flag is disabled at launch and navigator.webdriver
-	// is naturally undefined in headed mode).  Still inject for extra coverage.
-	const tid = targetId.slice(0, 8);
-	injectHeadlessStealth(tid).catch(() => {});
-	// Refresh the pages cache so cdp.mjs can discover the new tab immediately
 	await cdp(["list"]).catch(() => null);
 	return targetId;
 }

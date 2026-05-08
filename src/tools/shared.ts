@@ -101,9 +101,25 @@ export function runSearch(
 		proc.stderr.on("data", (d: Buffer) => {
 			err += d;
 			for (const line of d.toString().split("\n")) {
-				const match = line.match(/^PROGRESS:(\w+):(done|error|needs-human)$/);
-				if (match && onProgress) {
-					onProgress(match[1], match[2] as "done" | "error" | "needs-human");
+				// Engine progress: perplexity/bing/google
+				const engineMatch = line.match(
+					/^PROGRESS:(perplexity|bing|google):(done|error|needs-human)$/,
+				);
+				if (engineMatch && onProgress) {
+					onProgress(
+						engineMatch[1],
+						engineMatch[2] as "done" | "error" | "needs-human",
+					);
+				}
+				// Synthesis progress: skipped (manual verification) or done/error
+				const synthMatch = line.match(
+					/^PROGRESS:synthesis:(done|error|skipped)$/,
+				);
+				if (synthMatch && onProgress) {
+					onProgress(
+						"synthesis",
+						synthMatch[1] as "done" | "error" | "needs-human",
+					);
 				}
 			}
 		});
@@ -149,7 +165,16 @@ export function makeProgressTracker(
 				parts.push(`🔓 ${e} needs manual verification`);
 			else parts.push(`⏳ ${e}`);
 		}
-		if (depth !== "fast" && completed.size >= 3) parts.push("🔄 synthesizing");
+		// Synthesis status: when all engines complete in non-fast mode,
+		// show synthesis progress.  Handle "skipped" status (emitted when
+		// manual verification is needed and synthesis is bypassed).
+		if (depth !== "fast" && completed.size >= 3) {
+			const synStatus = completed.get("synthesis");
+			if (synStatus === "done") parts.push("✅ synthesized");
+			else if (synStatus === "error") parts.push("❌ synthesis failed");
+			else if (synStatus === "needs-human") parts.push("⏭️ synthesis skipped");
+			else parts.push("🔄 synthesizing");
+		}
 
 		onUpdate?.({
 			content: [

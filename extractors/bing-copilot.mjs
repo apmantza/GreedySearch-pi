@@ -37,12 +37,14 @@ const GLOBAL_VAR = "__bingClipboard";
 // ============================================================================
 
 async function extractAnswer(tab) {
-	// Wait for the assistant copy button to exist. On fresh visible Copilot
-	// sessions the answer text can render before the button handler is fully
-	// hydrated, so fixed sleeps are less reliable than readiness + polling.
+	// Wait for the assistant copy button to exist. On fresh Copilot
+	// sessions the answer text can render before the button handler is
+	// fully hydrated.  Wait for the button + a small hydration delay.
 	await waitForCopyButton(tab, S.copyButton, { timeout: 5000 }).catch(
 		() => null,
 	);
+	// Give React time to hydrate the click handler on the button
+	await new Promise((r) => setTimeout(r, 800));
 
 	let answer = await clickCopyAndPollClipboard(tab, 5000);
 
@@ -231,13 +233,13 @@ async function main() {
 		} catch {}
 
 		if (!onCopilot) {
-			await cdp(["nav", tab, "https://copilot.microsoft.com/"], 35000);
-			await new Promise((r) => setTimeout(r, TIMING.postNavSlow));
+			await cdp(["nav", tab, "https://copilot.microsoft.com/"], 20000);
+			await new Promise((r) => setTimeout(r, 600));
 		}
 		await dismissConsent(tab, cdp);
 
 		// Handle verification challenges (Cloudflare Turnstile, Microsoft auth, etc.)
-		const verifyResult = await handleVerification(tab, cdp, 30000);
+		const verifyResult = await handleVerification(tab, cdp, 10000);
 		if (verifyResult === "needs-human") {
 			throw new Error(
 				"Copilot verification required — please solve it manually in the browser window",
@@ -262,8 +264,8 @@ async function main() {
 					host.endsWith(".copilot.microsoft.com");
 			} catch {}
 			if (!onCopilot) {
-				await cdp(["nav", tab, "https://copilot.microsoft.com/"], 35000);
-				await new Promise((r) => setTimeout(r, TIMING.postNavSlow));
+				await cdp(["nav", tab, "https://copilot.microsoft.com/"], 20000);
+				await new Promise((r) => setTimeout(r, 600));
 				await dismissConsent(tab, cdp);
 			}
 		}

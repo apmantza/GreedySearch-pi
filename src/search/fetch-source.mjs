@@ -277,7 +277,22 @@ export async function fetchSourceContent(url, maxChars = 8000) {
 
 async function fetchSourceContentBrowser(url, maxChars = 8000) {
 	const start = Date.now();
-	const tab = await openNewTab();
+	let tab;
+
+	try {
+		tab = await openNewTab();
+	} catch (e) {
+		return {
+			url,
+			title: "",
+			content: null,
+			snippet: "",
+			contentChars: 0,
+			error: `openNewTab failed: ${e.message}`,
+			source: "browser",
+			duration: Date.now() - start,
+		};
+	}
 
 	try {
 		await cdp(["nav", tab, url], 30000);
@@ -367,7 +382,16 @@ export async function fetchMultipleSources(
 				`[greedysearch] [${index + 1}/${toFetch.length}] Fetching: ${url.slice(0, 60)}...\n`,
 			);
 
-			const result = await fetchSourceContent(url, maxChars);
+			const result = await fetchSourceContent(url, maxChars).catch((e) => ({
+				url,
+				title: "",
+				content: null,
+				snippet: "",
+				contentChars: 0,
+				error: e.message,
+				source: "error",
+				duration: 0,
+			}));
 			fetched[index] = {
 				id: s.id,
 				...result,
