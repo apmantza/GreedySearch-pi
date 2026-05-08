@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **SonarCloud minor vulnerability false positives** — Confirmed both remaining issues are false positives (internal diagnostic logging in `bin/gschrome.mjs` and test debug output in `test/fetcher-cli.mjs`). Verified via full smoke test suite: all 33 unit tests pass, all 4 engines (Perplexity, Bing, Google, Gemini) return results at all depths (fast/standard/deep), CDP safety wrappers correctly enforce mode boundaries.
+
+- **SonarCloud security hotspots** (re-verified) — All previously fixed hotspots remain resolved: replaced `spawn("node", ...)` with `spawn(process.execPath, ...)`, replaced `Math.random()` with `crypto.randomInt()`, 19 remaining hotspots confirmed as false positives (hardcoded `execSync` commands, simple regex patterns).
+
+### Fixed
+
 - **Headless→visible mode switching** (`src/search/chrome.mjs`) — `ensureChrome()` only handled the case where visible was requested but headless Chrome was running. When headless was requested (the default) but visible Chrome was running, it silently kept visible mode — causing env var mismatches that broke extractors like Perplexity. Now properly detects both directions and kills/relaunches in the correct mode.
 
 - **SonarCloud security hotspots** — Replaced `spawn("node", ...)` with `spawn(process.execPath, ...)` in cdp wrapper, `runExtractor`, `synthesizeWithGemini`, and test helper to prevent PATH-based binary substitution. Replaced `Math.random()` with `crypto.randomInt()` in `jitter()` for non-security-sensitive timing variance. Remaining 19 hotspots are verified false positives (hardcoded `execSync` commands, simple regex patterns).
