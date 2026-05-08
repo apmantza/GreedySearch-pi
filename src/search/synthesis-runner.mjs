@@ -28,7 +28,7 @@ export async function synthesizeWithGemini(
 	return new Promise((resolve, reject) => {
 		const extraArgs = tabPrefix ? ["--tab", String(tabPrefix)] : [];
 		const proc = spawn(
-			"node",
+			process.execPath,
 			[
 				join(__dir, "..", "..", "extractors", "gemini.mjs"),
 				"--stdin",

@@ -32,7 +32,7 @@ export function runExtractor(
 	];
 	return new Promise((resolve, reject) => {
 		const proc = spawn(
-			"node",
+			process.execPath,
 			[join(__dir, "..", "..", "extractors", script), "--stdin", ...extraArgs],
 			{
 				stdio: ["pipe", "pipe", "pipe"],

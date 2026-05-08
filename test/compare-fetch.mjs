@@ -19,7 +19,7 @@ const CDP = join(__dir, "..", "bin", "cdp.mjs");
 
 function cdp(args, timeoutMs = 30000) {
 	return new Promise((resolve, reject) => {
-		const proc = spawn("node", [CDP, ...args], {
+		const proc = spawn(process.execPath, [CDP, ...args], {
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let out = "",

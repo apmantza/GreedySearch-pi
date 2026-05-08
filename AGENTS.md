@@ -197,13 +197,13 @@ node bin/launch.mjs --kill
 
 All extractors share these timeouts (kept tight — solo runs complete in 9-16s):
 
-| Step | Timeout | Notes |
-|------|---------|-------|
-| Navigation | 20s | CDP `Page.navigate` → `loadEventFired` → `readyState:complete` |
-| Post-nav settle | 600ms | React hydration buffer |
-| Verification retry | 10s | Turnstile never clears in headless; longer = waste |
-| Input selector wait | 8-15s | In-browser polling, no CDP traffic |
-| Stream completion | 60s (Bing), 20s (Perplexity), 90s (Gemini) | Single `Runtime.evaluate` with in-browser poll loop |
-| Engine hard kill | 30s fast / 55s standard | `runExtractor` spawn timeout; accounts for CDP contention |
+| Step                | Timeout                                    | Notes                                                          |
+| ------------------- | ------------------------------------------ | -------------------------------------------------------------- |
+| Navigation          | 20s                                        | CDP `Page.navigate` → `loadEventFired` → `readyState:complete` |
+| Post-nav settle     | 600ms                                      | React hydration buffer                                         |
+| Verification retry  | 10s                                        | Turnstile never clears in headless; longer = waste             |
+| Input selector wait | 8-15s                                      | In-browser polling, no CDP traffic                             |
+| Stream completion   | 60s (Bing), 20s (Perplexity), 90s (Gemini) | Single `Runtime.evaluate` with in-browser poll loop            |
+| Engine hard kill    | 30s fast / 55s standard                    | `runExtractor` spawn timeout; accounts for CDP contention      |
 
 CDP daemon internal `TIMEOUT`: **90s** (must exceed longest `Runtime.evaluate` call).
