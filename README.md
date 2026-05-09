@@ -71,9 +71,10 @@ greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 Inside Pi, prefer the extension commands (no package path needed):
 
 ```text
-/greedy-visible  # launch visible Chrome for captcha/login/cookie setup
-/greedy-status   # show GreedySearch Chrome status
-/greedy-kill     # stop GreedySearch Chrome
+/greedy-visible      # launch visible Chrome for captcha/login/cookie setup
+/greedy-status       # show GreedySearch Chrome status
+/greedy-kill         # stop GreedySearch Chrome
+/set-greedy-locale   # set default result language (de, fr, es, ja, etc.)
 ```
 
 Git install path:

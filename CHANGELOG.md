@@ -1,9 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [1.8.8] — 2026-05-09
 
 ### Added
 
+- **`/set-greedy-locale` Pi command** (`index.ts`) — Set default locale for search results (e.g., `/set-greedy-locale de`, `/set-greedy-locale --clear`, `/set-greedy-locale --show`). Saves to `~/.config/greedysearch/config.json`.
 - **Browser lifecycle defense patterns** (`src/search/browser-lifecycle.mjs`, new) — Centralized lifecycle management adopted from open-websearch's robust cross-process browser patterns:
   - **Structured JSON metadata** (`greedysearch-chrome-metadata.json`) replaces three scattered text files (PID, mode, activity) with a single file tracking `browserPid`, `debugPort`, `tempDir`, `clientPids[]`, `sessionMode`, `lastActivity`, `launchedAt`. Backward-compatible — legacy files still written.
   - **Process command-line verification** — `verifyBrowserProcess()` checks not just PID alive but that the process command line contains the profile dir and debug port. Prevents PID collision false-positives where a different process reuses the same PID.
