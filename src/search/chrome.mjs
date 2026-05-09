@@ -234,13 +234,21 @@ export async function getAnyTab() {
 
 export async function openNewTab(url = "about:blank") {
 	const anchor = await getAnyTab();
-	const needsStealth = new URL(url).hostname === "copilot.microsoft.com";
+	const hostname = new URL(url).hostname;
+	const needsStealth =
+		hostname === "copilot.microsoft.com" ||
+		hostname === "www.perplexity.ai" ||
+		hostname === "perplexity.ai" ||
+		hostname.endsWith(".perplexity.ai");
 
 	if (needsStealth) {
-		// Bing Copilot: create blank tab, await stealth, return.
-		// Page.addScriptToEvaluateOnNewDocument must be registered BEFORE
-		// the extractor navigates to Copilot, or Cloudflare blocks headless
-		// Chrome.  The extractor handles its own navigation.
+		// Bing Copilot / Perplexity: create blank tab, inject stealth, return.
+		// The extractor handles its own navigation, and Page.addScriptToEvaluateOnNewDocument
+		// runs the stealth script before any page scripts.
+		//
+		// For Bing: stealth is awaited (Cloudflare blocks headless without it).
+		// For Perplexity: stealth is fire-and-forget (Perplexity's anti-bot detects
+		// the aggressive canvas/console patches, so we don't block on the CDP response).
 		const raw = await cdp([
 			"evalraw",
 			anchor,
@@ -250,14 +258,20 @@ export async function openNewTab(url = "about:blank") {
 		const { targetId } = JSON.parse(raw);
 		const tid = targetId.slice(0, 8);
 		await cdp(["list"]).catch(() => null);
-		await injectHeadlessStealth(tid).catch(() => {});
+
+		if (hostname === "copilot.microsoft.com") {
+			await injectHeadlessStealth(tid);
+		} else {
+			// Perplexity: fire-and-forget (Perplexity's anti-bot detects awaited patches)
+			injectHeadlessStealth(tid).catch(() => {});
+		}
+
 		await cdp(["list"]).catch(() => null);
 		return targetId;
 	}
 
-	// Perplexity / Google: pre-seed with URL directly.  Target.createTarget
-	// navigation is less detectable than CDP Page.navigate for these engines,
-	// and they don't need stealth (Perplexity's anti-bot detects our patches).
+	// Google / other engines: pre-seed with URL directly.  Target.createTarget
+	// navigation is less detectable than CDP Page.navigate.
 	const raw = await cdp([
 		"evalraw",
 		anchor,
