@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Browser lifecycle defense patterns** (`src/search/browser-lifecycle.mjs`, new) — Centralized lifecycle management adopted from open-websearch's robust cross-process browser patterns:
+  - **Structured JSON metadata** (`greedysearch-chrome-metadata.json`) replaces three scattered text files (PID, mode, activity) with a single file tracking `browserPid`, `debugPort`, `tempDir`, `clientPids[]`, `sessionMode`, `lastActivity`, `launchedAt`. Backward-compatible — legacy files still written.
+  - **Process command-line verification** — `verifyBrowserProcess()` checks not just PID alive but that the process command line contains the profile dir and debug port. Prevents PID collision false-positives where a different process reuses the same PID.
+  - **Cross-process launch lock** — `acquireLaunchLock()` uses exclusive-create (`wx` flag) to prevent concurrent `ensureChrome()` calls from racing to launch Chrome. Stale lock recovery after 15s.
+  - **Stale session cleanup** — `cleanupStaleSessions()` runs once per process on first `ensureChrome()`. Scans metadata for dead PIDs, verifies survivors via command line, force-kills orphans, reclaims ghost processes on port 9222.
+  - **Client PID tracking** — `registerClient`/`unregisterClient` track which processes share the Chrome instance.
+- **Mode-specific idle timeouts** (`src/search/chrome.mjs`) — Headless Chrome keeps the aggressive 5-minute idle timeout (`GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES`) since it's cheap to restart. Visible Chrome (explicitly launched for captcha/cookie setup) gets a 60-minute grace period (`GREEDY_SEARCH_VISIBLE_IDLE_TIMEOUT_MINUTES`) to avoid wasting the user's captcha investment. Set either to 0 to disable for that mode.
+
 ### Fixed
 
 - **SonarCloud minor vulnerability false positives** — Confirmed both remaining issues are false positives (internal diagnostic logging in `bin/gschrome.mjs` and test debug output in `test/fetcher-cli.mjs`). Verified via full smoke test suite: all 33 unit tests pass, all 4 engines (Perplexity, Bing, Google, Gemini) return results at all depths (fast/standard/deep), CDP safety wrappers correctly enforce mode boundaries.

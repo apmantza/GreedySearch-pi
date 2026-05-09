@@ -4,9 +4,11 @@
 //
 // cdp() is re-exported from extractors/common.mjs to avoid duplication.
 //
-// Headless cleanup: when GREEDY_SEARCH_HEADLESS=1, idle Chrome is auto-killed
-// after GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES (default 5). Only the tracked
-// headless instance (PID file + port 9222) is killed — never the main session.
+// Idle timeout: mode-specific — headless Chrome is auto-killed after
+// GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES (default 5). Visible Chrome (explicitly
+// launched for captcha/cookie setup) uses GREEDY_SEARCH_VISIBLE_IDLE_TIMEOUT_MINUTES
+// (default 60) because restarting it wastes the user's investment in solving captchas.
+// Set either to 0 to disable idle cleanup for that mode.
 
 import { spawn, execSync } from "node:child_process";
 import {
@@ -29,23 +31,39 @@ import {
 	GREEDY_PORT,
 	PAGES_CACHE,
 } from "./constants.mjs";
+import {
+	readMetadata,
+	touchActivity as touchActivityBL,
+	acquireLaunchLock,
+	cleanupStaleSessions,
+	registerClient,
+} from "./browser-lifecycle.mjs";
 
 const __dir =
 	import.meta.dirname ||
 	new URL(".", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
 
-// ─── Chrome idle cleanup & lifecycle ──────────────────────────────────
-// Applies to BOTH headless and visible Chrome.  Idle timeout (default 5 min)
-// configurable via GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES.  Set to 0 to disable.
+// ─── Mode-specific idle timeouts ─────────────────────────────────────
+// Headless: cheap to restart, aggressive cleanup after short idle.
+// Visible: user invested time in captcha/cookies — long grace period.
 
 const _tmp = tmpdir().replaceAll("\\", "/");
 const PID_FILE = `${_tmp}/greedysearch-chrome.pid`;
 const ACTIVITY_FILE = `${_tmp}/greedysearch-chrome-last-activity`;
-const IDLE_TIMEOUT_MINUTES =
+
+/** Headless idle timeout (default 5 min). Set to 0 to disable. */
+const HEADLESS_IDLE_TIMEOUT_MINUTES =
 	Number.parseInt(process.env.GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES || "5", 10) ||
 	5;
 
-/** Check if the running Chrome was launched in headless mode by reading the mode marker file */
+/** Visible idle timeout (default 60 min). Much longer — captcha/cookie investment. */
+const VISIBLE_IDLE_TIMEOUT_MINUTES =
+	Number.parseInt(
+		process.env.GREEDY_SEARCH_VISIBLE_IDLE_TIMEOUT_MINUTES || "60",
+		10,
+	) || 60;
+
+/** Check if the running Chrome was launched in headless mode */
 export function isChromeHeadless() {
 	try {
 		if (!existsSync(CHROME_MODE_FILE)) return true; // default: headless
@@ -55,10 +73,15 @@ export function isChromeHeadless() {
 	}
 }
 
-/** Record that the Chrome was just used / is active right now */
+/** Record that Chrome was just used / is active right now */
 export function touchActivity() {
 	try {
 		writeFileSync(ACTIVITY_FILE, String(Date.now()), "utf8");
+	} catch {}
+	// Also update structured metadata if it exists
+	try {
+		const md = readMetadata();
+		if (md) touchActivityBL(md);
 	} catch {}
 }
 
@@ -159,12 +182,19 @@ export const killHeadlessChrome = killChrome;
 
 /**
  * Check if Chrome has been idle too long and kill if so.
- * Applies to BOTH headless and visible Chrome.
+ * Uses mode-specific timeouts: headless → 5 min, visible → 60 min (defaults).
+ * Visible Chrome has a much longer grace period because the user explicitly
+ * launched it and invested time in captcha/cookie setup.
  * Returns true if Chrome was killed (caller should re-launch).
  */
 export async function checkAndKillIdle() {
-	// Disable idle cleanup via GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES=0
-	if (IDLE_TIMEOUT_MINUTES <= 0) return false;
+	const headless = isChromeHeadless();
+	const timeoutMinutes = headless
+		? HEADLESS_IDLE_TIMEOUT_MINUTES
+		: VISIBLE_IDLE_TIMEOUT_MINUTES;
+
+	// Disable idle cleanup for this mode
+	if (timeoutMinutes <= 0) return false;
 
 	if (!existsSync(ACTIVITY_FILE)) {
 		touchActivity();
@@ -181,7 +211,7 @@ export async function checkAndKillIdle() {
 		const idleMs = Date.now() - lastActivity;
 		const idleMinutes = idleMs / 60000;
 
-		if (idleMinutes >= IDLE_TIMEOUT_MINUTES) {
+		if (idleMinutes >= timeoutMinutes) {
 			return killChrome();
 		}
 	} catch {}
@@ -394,7 +424,8 @@ export async function refreshPortFile() {
 }
 
 export async function ensureChrome() {
-	// ── Headless idle cleanup: kill if timed out ──
+	// ── Stale session cleanup (once per process) + mode-specific idle check ──
+	cleanupStaleSessions();
 	const wasKilled = await checkAndKillIdle();
 
 	const ready = wasKilled ? false : await probeGreedyChrome();
@@ -425,9 +456,39 @@ export async function ensureChrome() {
 
 	const readyAfterModeCheck = forceRelaunch ? false : await probeGreedyChrome();
 	if (readyAfterModeCheck) {
-		// Chrome already running in correct mode — refresh the port file
+		// Chrome already running in correct mode — refresh port file, touch activity, register client
 		await refreshPortFile();
-	} else {
+		try {
+			const md = readMetadata();
+			if (md) {
+				touchActivityBL(md);
+				registerClient(md);
+			}
+		} catch {}
+		return;
+	}
+
+	// ── Cross-process launch lock: prevent race between concurrent ensureChrome calls ──
+	const lock = acquireLaunchLock();
+	if (!lock.acquired) {
+		// Another process is launching Chrome — wait and re-probe
+		await new Promise((r) => setTimeout(r, 3000));
+		const reReady = await probeGreedyChrome(5000);
+		if (reReady) {
+			await refreshPortFile();
+			return;
+		}
+		// Still not ready — launch ourselves (the other launcher may have crashed)
+	}
+
+	try {
+		// Double-check after acquiring lock (other process may have finished)
+		const reCheck = await probeGreedyChrome(1000);
+		if (reCheck) {
+			await refreshPortFile();
+			return;
+		}
+
 		process.stderr.write(
 			`GreedySearch Chrome not running on port ${GREEDY_PORT} — auto-launching...\n`,
 		);
@@ -445,5 +506,7 @@ export async function ensureChrome() {
 				code === 0 ? resolve() : reject(new Error("launch.mjs failed")),
 			);
 		});
+	} finally {
+		lock.release();
 	}
 }
