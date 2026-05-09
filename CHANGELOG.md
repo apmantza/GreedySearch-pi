@@ -12,7 +12,15 @@
   - **Client PID tracking** — `registerClient`/`unregisterClient` track which processes share the Chrome instance.
 - **Mode-specific idle timeouts** (`src/search/chrome.mjs`) — Headless Chrome keeps the aggressive 5-minute idle timeout (`GREEDY_SEARCH_IDLE_TIMEOUT_MINUTES`) since it's cheap to restart. Visible Chrome (explicitly launched for captcha/cookie setup) gets a 60-minute grace period (`GREEDY_SEARCH_VISIBLE_IDLE_TIMEOUT_MINUTES`) to avoid wasting the user's captcha investment. Set either to 0 to disable for that mode.
 
+### Added
+
+- **System command path resolution** (`src/utils/system-cmds.mjs`, new) — `resolveSystemCmd()` resolves `powershell`, `netstat`, `taskkill`, `ps`, `lsof`, `ss`, `grep` to absolute paths for secure execution. `isPathSafe()` validates PATH environment variable composition. Satisfies SonarCloud security hotspot requirements for `execFileSync`/`execSync` PATH safety.
+
 ### Fixed
+
+- **SonarCloud security hotspots — 15 resolved** — Addressed all flagged items:
+  - **11 ReDoS-prone regex patterns**: Replaced greedy `.{0,50}` in fetcher's content quality check with lazy quantifier `.{0,50}?`; replaced alternation-heavy split regex in bing-copilot with `[^\S\n]*` horizontal whitespace; replaced `[\s\S]*` JSON extraction patterns in synthesis.mjs with `indexOf`/`lastIndexOf` brace matching; replaced `.+?\.` in selectors with `[^.]+`; replaced `\s+\S*$` trim patterns in sources.mjs, common.mjs, and content.mjs with `lastIndexOf` word-boundary detection; replaced markdown link regex in common.mjs with O(n) indexOf-based parser.
+  - **4 PATH-injection hotspots in browser-lifecycle.mjs and chrome.mjs**: Created `resolveSystemCmd()` utility returning absolute paths for `powershell.exe`, `netstat.exe`, `taskkill.exe` (Windows) and `/usr/bin/ps`, `/usr/bin/lsof`, `/usr/sbin/ss`, `/usr/bin/grep` (Unix). Replaced all bare command names in `execFileSync`/`execSync` calls.
 
 - **SonarCloud minor vulnerability false positives** — Confirmed both remaining issues are false positives (internal diagnostic logging in `bin/gschrome.mjs` and test debug output in `test/fetcher-cli.mjs`). Verified via full smoke test suite: all 33 unit tests pass, all 4 engines (Perplexity, Bing, Google, Gemini) return results at all depths (fast/standard/deep), CDP safety wrappers correctly enforce mode boundaries.
 

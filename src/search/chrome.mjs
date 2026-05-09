@@ -25,6 +25,7 @@ import {
 	cdp as _cdp,
 	injectHeadlessStealth,
 } from "../../extractors/common.mjs";
+import { resolveSystemCmd } from "../utils/system-cmds.mjs";
 import {
 	ACTIVE_PORT_FILE,
 	CHROME_MODE_FILE,
@@ -92,7 +93,7 @@ export function touchActivity() {
 function getPortPid() {
 	try {
 		if (platform() === "win32") {
-			const out = execSync("netstat -ano -p TCP 2>nul", {
+			const out = execSync(`${resolveSystemCmd("netstat")} -ano -p TCP 2>nul`, {
 				encoding: "utf8",
 			});
 			const re = new RegExp(
@@ -103,7 +104,7 @@ function getPortPid() {
 			return m ? Number.parseInt(m[1], 10) : null;
 		}
 		const out = execSync(
-			`lsof -i :${GREEDY_PORT} -t 2>/dev/null || ss -tlnp 2>/dev/null | grep :${GREEDY_PORT} | grep -oP 'pid=\\K\\d+'`,
+			`${resolveSystemCmd("lsof")} -i :${GREEDY_PORT} -t 2>/dev/null || ${resolveSystemCmd("ss")} -tlnp 2>/dev/null | ${resolveSystemCmd("grep")} :${GREEDY_PORT} | ${resolveSystemCmd("grep")} -oP 'pid=\\K\\d+'`,
 			{ encoding: "utf8" },
 		).trim();
 		return out ? Number.parseInt(out.split("\n")[0], 10) : null;
@@ -126,7 +127,9 @@ function killProcessOnPort() {
 		if (!pid) return false;
 
 		if (platform() === "win32") {
-			execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
+			execSync(`${resolveSystemCmd("taskkill")} /F /PID ${pid}`, {
+				stdio: "ignore",
+			});
 		} else {
 			process.kill(pid, "SIGKILL");
 		}

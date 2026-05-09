@@ -52,5 +52,9 @@ export function truncateContent(content, maxChars = 8000) {
 	if (!content || content.length <= maxChars) {
 		return content;
 	}
-	return content.slice(0, maxChars).replace(/\s+\S*$/, "") + "...";
+	const truncated = content.slice(0, maxChars);
+	const lastSpace = truncated.lastIndexOf(" ");
+	return lastSpace > 0
+		? `${truncated.slice(0, lastSpace)}...`
+		: `${truncated}...`;
 }

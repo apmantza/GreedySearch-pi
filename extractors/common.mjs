@@ -236,10 +236,40 @@ export async function injectHeadlessStealth(tab) {
  * @returns {Array<{title: string, url: string}>} Extracted sources
  */
 export function parseSourcesFromMarkdown(text) {
-	return Array.from(text.matchAll(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g))
-		.map((m) => ({ title: m[1], url: m[2] }))
-		.filter((v, i, arr) => arr.findIndex((x) => x.url === v.url) === i)
-		.slice(0, 10);
+	if (!text) return [];
+	const results = [];
+	let idx = 0;
+	while (idx < text.length && results.length < 10) {
+		const openBracket = text.indexOf("[", idx);
+		if (openBracket === -1) break;
+		const closeBracket = text.indexOf("](", openBracket);
+		if (closeBracket === -1) break;
+		const openParen = closeBracket + 2;
+		// Validate URL prefix and find closing paren
+		let closeParen = -1;
+		for (let p = openParen; p < text.length; p++) {
+			const ch = text[p];
+			if (ch === ")") {
+				closeParen = p;
+				break;
+			}
+			if (/\s/.test(ch)) break; // whitespace in URL = invalid markdown link
+		}
+		if (closeParen !== -1) {
+			const title = text.slice(openBracket + 1, closeBracket);
+			const url = text.slice(openParen, closeParen);
+			if (/^https?:\/\//i.test(url) && title) {
+				// Deduplicate by URL
+				if (!results.some((r) => r.url === url)) {
+					results.push({ title, url });
+				}
+			}
+			idx = closeParen + 1;
+		} else {
+			idx = openBracket + 1;
+		}
+	}
+	return results;
 }
 
 // ============================================================================
@@ -508,7 +538,9 @@ export function validateQuery(args, usage) {
  */
 export function formatAnswer(answer, short, maxLen = 300) {
 	if (!short || answer.length <= maxLen) return answer;
-	return `${answer.slice(0, maxLen).replace(/\s+\S*$/, "")}…`;
+	const truncated = answer.slice(0, maxLen);
+	const lastSpace = truncated.lastIndexOf(" ");
+	return lastSpace > 0 ? `${truncated.slice(0, lastSpace)}…` : `${truncated}…`;
 }
 
 /**

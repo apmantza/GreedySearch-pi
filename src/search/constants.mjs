@@ -24,6 +24,7 @@ export const ENGINES = {
 	pplx: "perplexity.mjs",
 	p: "perplexity.mjs",
 	bing: "bing-copilot.mjs",
+	bing2: "bing-aria.mjs",
 	copilot: "bing-copilot.mjs",
 	b: "bing-copilot.mjs",
 	google: "google-ai.mjs",

@@ -32,8 +32,12 @@ export function parseStructuredJson(text) {
 			.trim(),
 	];
 
-	const objectMatch = trimmed.match(/\{[\s\S]*\}$/);
-	if (objectMatch) candidates.push(objectMatch[0]);
+	// Find the outermost JSON object via brace matching (avoids ReDoS-prone .* patterns)
+	const firstBrace = trimmed.indexOf("{");
+	const lastBrace = trimmed.lastIndexOf("}");
+	if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
+		candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+	}
 
 	for (const candidate of candidates) {
 		try {
@@ -80,9 +84,17 @@ export function normalizeSynthesisPayload(
 		: [];
 
 	// Clean up fallback answer if it contains preamble text
-	const cleanFallback = fallbackAnswer
-		? fallbackAnswer.replace(/^[\s\S]*?\{/m, "{").replace(/}\s*[\s\S]*$/m, "}")
-		: "";
+	// Use indexOf/lastIndexOf instead of [\s\S]* patterns to avoid ReDoS
+	let cleanFallback = "";
+	if (fallbackAnswer) {
+		const firstBrace = fallbackAnswer.indexOf("{");
+		const lastBrace = fallbackAnswer.lastIndexOf("}");
+		if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
+			cleanFallback = fallbackAnswer.slice(firstBrace, lastBrace + 1);
+		} else {
+			cleanFallback = fallbackAnswer;
+		}
+	}
 
 	return {
 		answer: trimText(payload?.answer || cleanFallback || fallbackAnswer, 4000),

@@ -115,7 +115,7 @@ async function extractFromVisibleDom(tab) {
 			.split(/Copilot said\s*/i)
 			.pop()
 			.split(
-				/\n\s*(?:Good response|Bad response|Share message|Copy message|Read aloud|Regenerate|Edit in a page|Message Copilot|Smart)\b/i,
+				/\n[^\S\n]*(?:Good response|Bad response|Share message|Copy message|Read aloud|Regenerate|Edit in a page|Message Copilot|Smart)(?![\w])/i,
 			)[0]
 			.trim();
 

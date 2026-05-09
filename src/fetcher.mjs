@@ -563,7 +563,7 @@ export function checkContentQuality(extracted) {
 
 	// Suspicious content patterns that indicate bot block or incomplete extraction
 	const suspiciousPatterns = [
-		{ pattern: /\bloading\b.{0,50}\bplease wait\b/i, desc: "loading page" },
+		{ pattern: /\bloading\b.{0,50}?\bplease wait\b/is, desc: "loading page" },
 		{
 			pattern: /please\s+ensure\s+javascript\s+is\s+enabled/i,
 			desc: "requires javascript",

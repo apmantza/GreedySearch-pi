@@ -21,6 +21,7 @@ import {
 } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { GREEDY_PORT, GREEDY_PROFILE_DIR } from "./constants.mjs";
+import { resolveSystemCmd } from "../utils/system-cmds.mjs";
 
 const _tmp = tmpdir().replaceAll("\\", "/");
 
@@ -81,7 +82,7 @@ function getProcessCommandLine(pid) {
 	try {
 		if (platform() === "win32") {
 			const output = execFileSync(
-				"powershell.exe",
+				resolveSystemCmd("powershell"),
 				[
 					"-NoProfile",
 					"-NonInteractive",
@@ -92,10 +93,14 @@ function getProcessCommandLine(pid) {
 			);
 			return output.trim() || null;
 		}
-		const output = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
-			encoding: "utf8",
-			timeout: 5000,
-		});
+		const output = execFileSync(
+			resolveSystemCmd("ps"),
+			["-p", String(pid), "-o", "command="],
+			{
+				encoding: "utf8",
+				timeout: 5000,
+			},
+		);
 		return output.trim() || null;
 	} catch {
 		return null;
@@ -131,7 +136,9 @@ export function verifyBrowserProcess(pid, tempDir, debugPort = GREEDY_PORT) {
 function getPortPid(port = GREEDY_PORT) {
 	try {
 		if (platform() === "win32") {
-			const out = execSync("netstat -ano -p TCP 2>nul", { encoding: "utf8" });
+			const out = execSync(`${resolveSystemCmd("netstat")} -ano -p TCP 2>nul`, {
+				encoding: "utf8",
+			});
 			const re = new RegExp(
 				String.raw`TCP\s+\S+:${port}\s+\S+:0\s+LISTENING\s+(\d+)`,
 				"i",
@@ -140,7 +147,7 @@ function getPortPid(port = GREEDY_PORT) {
 			return m ? Number.parseInt(m[1], 10) : null;
 		}
 		const out = execSync(
-			`lsof -i :${port} -t 2>/dev/null || ss -tlnp 2>/dev/null | grep :${port} | grep -oP 'pid=\\K\\d+'`,
+			`${resolveSystemCmd("lsof")} -i :${port} -t 2>/dev/null || ${resolveSystemCmd("ss")} -tlnp 2>/dev/null | ${resolveSystemCmd("grep")} :${port} | ${resolveSystemCmd("grep")} -oP 'pid=\\K\\d+'`,
 			{ encoding: "utf8" },
 		).trim();
 		return out ? Number.parseInt(out.split("\n")[0], 10) : null;
@@ -159,7 +166,9 @@ function getPortPid(port = GREEDY_PORT) {
 function forceKillProcess(pid) {
 	try {
 		if (platform() === "win32") {
-			execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore" });
+			execSync(`${resolveSystemCmd("taskkill")} /F /T /PID ${pid}`, {
+				stdio: "ignore",
+			});
 		} else {
 			try {
 				process.kill(-pid, "SIGKILL"); // process group

@@ -40,7 +40,11 @@ export const NEWS_HOSTS = [
 export function trimText(text = "", maxChars = 240) {
 	const clean = String(text).replaceAll(/\s+/g, " ").trim();
 	if (clean.length <= maxChars) return clean;
-	return `${clean.slice(0, maxChars).replace(/\s+\S*$/, "")}...`;
+	const truncated = clean.slice(0, maxChars);
+	const lastSpace = truncated.lastIndexOf(" ");
+	return lastSpace > 0
+		? `${truncated.slice(0, lastSpace)}...`
+		: `${truncated}...`;
 }
 
 export function normalizeSourceTitle(title = "") {
