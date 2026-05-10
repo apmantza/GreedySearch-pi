@@ -125,7 +125,7 @@ async function main() {
 			if (++pollTick % 10 === 0) scrollToBottom(tab).catch(() => null);
 		}, 6000);
 		try {
-			await waitForStreamComplete(tab, { timeout: 90000, minLength: 50 });
+			await waitForStreamComplete(tab, { timeout: 45000, minLength: 50 });
 		} finally {
 			clearInterval(scrollInterval);
 		}

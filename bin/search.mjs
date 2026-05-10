@@ -292,11 +292,16 @@ async function main() {
 				// Retry blocked engines in visible Chrome
 				const retryTabs = [];
 				let keepVisibleForHuman = false;
+				let recovered = 0;
 				for (let i = 0; i < cfBlocked.length; i++) {
 					const tab = await openNewTab();
 					retryTabs.push(tab);
 				}
 				try {
+					// First visible retry: navigate to the engine page.
+					// Cloudflare/Turnstile may resolve and redirect, disrupting the CDP session
+					// ("Inspected target navigated or closed"). If so, the cookies are now cached
+					// and a second retry on the same tab should succeed.
 					const retries = await Promise.allSettled(
 						cfBlocked.map((e, i) =>
 							runExtractor(ENGINES[e], query, retryTabs[i], short, null, locale)
@@ -304,7 +309,6 @@ async function main() {
 								.catch((err) => ({ engine: e, error: err.message })),
 						),
 					);
-					let recovered = 0;
 					const stillBlocked = [];
 					const manualVerification = [];
 					for (const r of retries) {
@@ -329,27 +333,63 @@ async function main() {
 						);
 					}
 
-					if (manualVerification.length > 0) {
-						keepVisibleForHuman = true;
-						out._needsHumanVerification = {
-							engines: manualVerification,
-							message:
-								"Visible Chrome is open. Solve the verification challenge, then rerun the same search.",
-						};
+					// Second retry for still-blocked engines: the first retry may have resolved
+					// Cloudflare/Turnstile (navigating through the challenge), so cookies are now
+					// cached and the page should load without the blocking challenge.
+					if (stillBlocked.length > 0) {
 						process.stderr.write(
-							`[greedysearch] 🔓 Visible Chrome left open for manual verification: ${manualVerification.join(", ")}. Rerun after solving.\n`,
+							`[greedysearch] Second visible retry for ${stillBlocked.join(", ")} — Turnstile may have resolved on first attempt...\n`,
 						);
-						// Continue to synthesis with engines that DID succeed.
-						// Visible Chrome stays open for the user.
+						const secondRetries = await Promise.allSettled(
+							stillBlocked.map((e) => {
+								const idx = cfBlocked.indexOf(e);
+								return runExtractor(
+									ENGINES[e],
+									query,
+									retryTabs[idx],
+									short,
+									null,
+									locale,
+								)
+									.then((r) => ({ engine: e, ...r }))
+									.catch((err) => ({ engine: e, error: err.message }));
+							}),
+						);
+						const secondStillBlocked = [];
+						for (const r of secondRetries) {
+							if (r.status === "fulfilled" && !r.value.error) {
+								out[r.value.engine] = r.value;
+								recovered++;
+								process.stderr.write(
+									`[greedysearch] ✅ ${r.value.engine} recovered on second visible retry.\n`,
+								);
+							} else {
+								secondStillBlocked.push(r.value?.engine || "unknown");
+							}
+						}
+						stillBlocked.length = 0;
+						stillBlocked.push(...secondStillBlocked);
 					}
 
 					if (stillBlocked.length > 0) {
+						keepVisibleForHuman = true;
+						out._needsHumanVerification = {
+							engines: stillBlocked,
+							message:
+								"Visible Chrome is open with the engine page loaded. Solve the Turnstile checkbox or other challenge in the visible window to store cookies. Cookies persist for future runs.",
+						};
 						process.stderr.write(
-							`[greedysearch] ${stillBlocked.join(", ")} still failed after visible retry.\n`,
+							`[greedysearch] 🔓 ${stillBlocked.join(", ")} still blocked — keeping visible Chrome open. Solve the challenge in the window to store cookies, then rerun.\n`,
 						);
+						// Visible Chrome stays open so the user can interact with any
+						// Turnstile/Cloudflare challenge. Once solved, cookies are stored
+						// in the shared profile and future headless runs will reuse them.
 					}
 				} finally {
-					if (!keepVisibleForHuman) {
+					// Keep visible Chrome alive if engines were recovered (cookies now cached)
+					// or if the user needs to solve verification manually.
+					// Killing Chrome with taskkill /F would lose the cookie database writes.
+					if (!keepVisibleForHuman && recovered === 0) {
 						// Kill visible Chrome, relaunch headless for remaining pipeline
 						await closeTabs(retryTabs);
 						process.stderr.write(
@@ -361,6 +401,11 @@ async function main() {
 						await ensureChrome();
 						await cdp(["list"]);
 					}
+				}
+
+				// Minimize visible Chrome if it was kept alive (recovery succeeded or needs-human)
+				if (keepVisibleForHuman || recovered > 0) {
+					minimizeChrome().catch(() => {});
 				}
 
 				// Clear engineTabs — finally{} closeTabs handles empty arrays gracefully
@@ -484,31 +529,32 @@ async function main() {
 				writeOutput(result, outFile, { inline, synthesize: false, query });
 				return;
 			} catch (retryErr) {
-				if (isManualVerificationError(retryErr.message)) {
-					keepVisibleForHuman = true;
-					writeOutput(
-						{
-							query,
-							error: retryErr.message,
-							_needsHumanVerification: {
-								engines: [recoveryEngine],
-								message:
-									"Visible Chrome is open. Solve the verification challenge, then rerun the same search.",
-							},
+				// Any visible retry failure: keep Chrome open so user can solve Turnstile.
+				// Once solved, cookies are stored in the shared profile for future headless runs.
+				keepVisibleForHuman = true;
+				writeOutput(
+					{
+						query,
+						error: retryErr.message,
+						_needsHumanVerification: {
+							engines: [recoveryEngine],
+							message:
+								"Visible Chrome is open with the engine page loaded. Solve the Turnstile checkbox or other challenge to store cookies. Cookies persist for future runs.",
 						},
-						outFile,
-						{ inline, synthesize: false, query },
-					);
-					return;
-				}
-				process.stderr.write(`Error: ${retryErr.message}\n`);
-				process.exit(1);
+					},
+					outFile,
+					{ inline, synthesize: false, query },
+				);
+				return;
 			} finally {
 				if (!keepVisibleForHuman) {
 					await closeTab(retryTab);
 					await killHeadlessChrome();
 					delete process.env.GREEDY_SEARCH_VISIBLE;
 					process.env.GREEDY_SEARCH_HEADLESS = "1";
+				} else {
+					// Minimize the visible window so it's out of the way
+					minimizeChrome().catch(() => {});
 				}
 			}
 		}
@@ -534,7 +580,6 @@ function pickTopSource(out) {
  * Skipped in headless mode (no window to minimize).
  */
 async function minimizeChrome() {
-	if (process.env.GREEDY_SEARCH_VISIBLE === "1") return;
 	// In headless mode (default), there's no window to minimize
 	if (process.env.GREEDY_SEARCH_HEADLESS === "1") return;
 

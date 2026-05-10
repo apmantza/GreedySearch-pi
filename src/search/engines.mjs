@@ -21,9 +21,10 @@ export function runExtractor(
 	timeoutMs = null,
 	locale = null,
 ) {
-	// Gemini is slower - use longer timeout
+	// Gemini synthesis: 70s budget (45s stream + ~25s nav/settle overhead)
+	// Other engines: 60s budget
 	if (timeoutMs === null) {
-		timeoutMs = script.includes("gemini") ? 120000 : 60000;
+		timeoutMs = script.includes("gemini") ? 70000 : 60000;
 	}
 	const extraArgs = [
 		...(tabPrefix ? ["--tab", tabPrefix] : []),

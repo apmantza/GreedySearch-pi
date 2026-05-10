@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Halved Gemini synthesis timeout** (`extractors/gemini.mjs`) — `waitForStreamComplete` timeout reduced from 90s to 45s. Gemini synthesis prompts are ~8-10k chars and typically respond in 15-30s. The extra 45s was pure dead time.
+- **Aligned Gemini extractor hard timeout** (`src/search/engines.mjs`) — reduced from 120s to 70s, matching the new 45s stream wait + ~25s nav/settle overhead.
+
+### Fixed
+
+- **Perplexity/Bing visible recovery now actually stores cookies** (`bin/search.mjs`) — Two issues fixed:
+  1. **Second visible retry**: The first visible retry resolves Cloudflare/Turnstile (navigating through the challenge which breaks the CDP session with "Inspected target navigated or closed"), but the search never ran. A second retry on the same tab now reuses the freshly-cached Turnstile cookies and executes the actual search.
+  2. **Keep Chrome alive on recovery success**: Previously Chrome was killed with `taskkill /F` after recovery, losing any pending cookie database writes. Now visible Chrome stays running when recovery succeeds (or needs human intervention), keeping the cookie session alive.
+- **Visible Chrome window minimized after recovery** (`bin/search.mjs`) — When visible Chrome is left open after recovery (for cookie persistence or user verification), the window is automatically minimized so it doesn't clutter the desktop.
+
 ## [1.8.8] — 2026-05-09
 
 ### Added
