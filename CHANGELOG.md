@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.8.9] — 2026-05-11
+
 ### Changed
 
 - **Halved Gemini synthesis timeout** (`extractors/gemini.mjs`) — `waitForStreamComplete` timeout reduced from 90s to 45s. Gemini synthesis prompts are ~8-10k chars and typically respond in 15-30s. The extra 45s was pure dead time.

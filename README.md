@@ -110,7 +110,7 @@ Chrome is auto-cleaned after 5 min idle. Override with `GREEDY_SEARCH_IDLE_TIMEO
 ## Requirements
 
 - Chrome
-- Node.js 22+
+- Node.js 20.11.0+
 
 ## Known engine quirks
 

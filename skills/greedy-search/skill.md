@@ -3,51 +3,24 @@ name: greedy-search
 description: Live web search via Perplexity, Bing, Google AI, and Gemini. Use for current docs, recent errors/framework changes, dependency choices, or stale-knowledge questions. NOT for codebase search.
 ---
 
-# GreedySearch
-
 Use `greedy_search` for live web answers.
 
 ```js
 greedy_search({ query: "React 19 changes", depth: "standard" });
 ```
 
-Params:
+**Params:** `query` (required), `engine`: `all`|`perplexity`|`bing`|`google`|`gemini`, `depth`: `fast`|`standard`|`deep`, `fullAnswer`, `visible`/`alwaysVisible`/`headless: false`
 
-- `query` required
-- `engine`: `all` default, `perplexity`, `bing`, `google`, `gemini`
-- `depth`: `fast`, `standard` default, `deep`
-- `fullAnswer`: true for untruncated output
-- `visible` / `alwaysVisible`: true to force visible Chrome
-- `headless`: false is equivalent to visible mode
+**Depths:**
 
-Depths:
+- `fast`: ~15-30s, single engine, no synthesis
+- `standard`: ~30-90s, all engines + Gemini synthesis + sources
+- `deep`: ~60-180s, stronger grounding + confidence metadata
 
-- `fast`: quick, no synthesis/source fetch
-- `standard`: all engines + Gemini synthesis + top sources
-- `deep`: stronger grounded synthesis/confidence
+**Captcha/blocks:** Headless by default. Bing/Perplexity auto-retry in visible mode when blocked. If human verification is needed, visible Chrome stays open — tell the user to solve it and rerun. Use `visible: true` proactively for repeated issues.
 
-Captcha/verification:
+**Pi commands:** `/greedy-visible`, `/greedy-status`, `/greedy-kill`, `/set-greedy-locale`
 
-- Headless is default.
-- Bing and Perplexity auto-retry in visible Chrome when blocked, including fast mode.
-- If human verification is needed, visible Chrome stays open; tell the user to solve it and rerun.
-- Use visible mode proactively for repeated captcha/login/cookie issues:
+**CDP safety:** Never call raw `bin/cdp.mjs`. Use `bin/cdp-greedy.mjs`, `bin/cdp-visible.mjs`, or `bin/cdp-headless.mjs`.
 
-```js
-greedy_search({ query: "test Bing", engine: "bing", visible: true });
-```
-
-Pi commands:
-
-- `/greedy-visible`
-- `/greedy-status`
-- `/greedy-kill`
-- `/set-greedy-locale`
-
-CDP safety: never call raw `bin/cdp.mjs`; it can attach to main Chrome. Use:
-
-- `node bin/cdp-greedy.mjs list`
-- `node bin/cdp-visible.mjs list`
-- `node bin/cdp-headless.mjs list`
-
-Old `coding_task` / `deep_research` were folded into `greedy_search`. Use `engine: "gemini"` for one second opinion or `depth: "deep"` for grounded research.
+Old `coding_task`/`deep_research` folded into `greedy_search`. Use `engine: "gemini"` for one-off opinion, `depth: "deep"` for research.
