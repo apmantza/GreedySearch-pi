@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **Dead `bing-aria` extractor** (`extractors/bing-aria.mjs`) — Removed the unused ARIA-tree-based Bing Copilot extractor and its `bing2` engine alias. Nothing in the system referenced it (`bing2` was not in `ALL_ENGINES`, not documented in the tool schema, and had no callers).
+
 ### Fixed
 
 - **Perplexity sign-in mis-click** (`extractors/consent.mjs`) — `handleVerification` matched any button containing "continue", including "Continue with Google" OAuth buttons on Perplexity sign-in modals. This caused the automation to accidentally open Google/Microsoft login flows. Added explicit exclusions for `sign.in`, `log.in`, `google`, `microsoft`, `apple`, `facebook`, `github`, and `auth` text patterns in both `VERIFY_DETECT_JS` and `VERIFY_RETRY_JS`.
