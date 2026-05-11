@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.8.10] — 2026-05-11
+
 ### Removed
 
 - **Dead `bing-aria` extractor** (`extractors/bing-aria.mjs`) — Removed the unused ARIA-tree-based Bing Copilot extractor and its `bing2` engine alias. Nothing in the system referenced it (`bing2` was not in `ALL_ENGINES`, not documented in the tool schema, and had no callers).
