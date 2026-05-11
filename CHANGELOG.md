@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Perplexity sign-in mis-click** (`extractors/consent.mjs`) — `handleVerification` matched any button containing "continue", including "Continue with Google" OAuth buttons on Perplexity sign-in modals. This caused the automation to accidentally open Google/Microsoft login flows. Added explicit exclusions for `sign.in`, `log.in`, `google`, `microsoft`, `apple`, `facebook`, `github`, and `auth` text patterns in both `VERIFY_DETECT_JS` and `VERIFY_RETRY_JS`.
+
+- **Gemini synthesis typing failure** (`extractors/gemini.mjs`) — `document.execCommand('insertText')` silently failed for long synthesis prompts (~8-10k chars), causing the extractor to submit an empty input and wait forever (45s stream + 180s timeout). Replaced with CDP `Input.insertText` + explicit focus click + content-length verification. Now fails fast with a clear error if text doesn't land.
+
+- **Gemini answer extraction — query echo** (`extractors/gemini.mjs`) — When the assistant response copy button hadn't hydrated yet, clicking `buttons[buttons.length - 1]` hit the user's message copy button instead of Gemini's response, returning the query text as the "answer". Added wait for the assistant copy button to appear (2+ buttons on page), plus retry logic that detects exact query-text echo and re-clicks after a settle delay.
+
+- **Bing Copilot Cloudflare auto-bypass** (`extractors/consent.mjs`) — Copilot's Turnstile challenge lives inside a **closed shadow DOM**, invisible to `document.querySelector('iframe')`. Added detection for the queryable host container (`#cf-turnstile`) and hidden response input (`[id^="cf-chl-widget-"]`), returning center coordinates for `humanClickXY`. During visible recovery, the challenge now auto-clicks and resolves transparently.
+
 ## [1.8.9] — 2026-05-11
 
 ### Changed

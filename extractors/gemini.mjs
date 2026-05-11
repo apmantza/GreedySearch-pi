@@ -36,19 +36,30 @@ const GLOBAL_VAR = "__geminiClipboard";
 // ============================================================================
 
 async function typeIntoGemini(tab, text) {
-	await cdp([
+	// 1. Focus the input area via click (more reliable than eval focus for shadow-DOM editors)
+	await cdp(["click", tab, S.input]);
+	await new Promise((r) => setTimeout(r, jitter(200)));
+
+	// 2. Type using CDP Input.insertText (more reliable than document.execCommand)
+	await cdp(["type", tab, text]);
+	await new Promise((r) => setTimeout(r, jitter(300)));
+
+	// 3. Verify the text was actually inserted
+	const inserted = await cdp([
 		"eval",
 		tab,
-		`
-    (function(t) {
-      var el = document.querySelector('${S.input}');
-      if (!el) return false;
-      el.focus();
-      document.execCommand('insertText', false, t);
-      return true;
-    })(${JSON.stringify(text)})
-  `,
+		`(function() {
+			var el = document.querySelector('${S.input}');
+			if (!el) return false;
+			var content = el.innerText || el.textContent || '';
+			return content.trim().length >= ${Math.floor(text.length * 0.8)};
+		})()`,
 	]);
+	if (inserted !== "true") {
+		throw new Error(
+			"Gemini input field did not accept text — input verification failed",
+		);
+	}
 }
 
 async function scrollToBottom(tab) {
@@ -62,9 +73,32 @@ async function scrollToBottom(tab) {
 	]);
 }
 
-async function extractAnswer(tab) {
-	// Click the LAST copy button (assistant's response at the bottom),
-	// not the first (which could be the user's echoed query).
+async function extractAnswer(tab, query = "") {
+	const queryNorm = query.toLowerCase().trim();
+
+	// Wait for the assistant response copy button to appear.
+	// A fresh conversation has 1 copy button (user message); after the
+	// assistant responds there are 2+.  This prevents clicking the user's
+	// copy button before React hydrates the assistant's.
+	let copyReady = false;
+	const copyDeadline = Date.now() + 12000;
+	while (Date.now() < copyDeadline) {
+		const count = await cdp([
+			"eval",
+			tab,
+			`document.querySelectorAll('${S.copyButton}').length`,
+		]);
+		if (parseInt(count, 10) >= 2) {
+			copyReady = true;
+			break;
+		}
+		await new Promise((r) => setTimeout(r, 800));
+	}
+	if (!copyReady) {
+		console.error("[gemini] Warning: assistant copy button did not appear");
+	}
+
+	// Click the LAST copy button (assistant's response at the bottom)
 	await cdp([
 		"eval",
 		tab,
@@ -73,9 +107,32 @@ async function extractAnswer(tab) {
 			buttons[buttons.length - 1]?.click();
 		})()`,
 	]);
-	await new Promise((r) => setTimeout(r, 400));
+	await new Promise((r) => setTimeout(r, 600));
 
-	const answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+
+	// Retry once if clipboard contains the user's query instead of the response.
+	// This can happen when the assistant response hasn't rendered its copy button yet.
+	if (
+		answer &&
+		queryNorm &&
+		(answer.toLowerCase().trim() === queryNorm ||
+			answer.trim().length < queryNorm.length)
+	) {
+		console.error("[gemini] Clipboard echoed query, retrying in 2s...");
+		await new Promise((r) => setTimeout(r, 2000));
+		await cdp([
+			"eval",
+			tab,
+			`(() => {
+				const buttons = document.querySelectorAll('${S.copyButton}');
+				buttons[buttons.length - 1]?.click();
+			})()`,
+		]);
+		await new Promise((r) => setTimeout(r, 600));
+		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	}
+
 	if (!answer) throw new Error("Clipboard interceptor returned empty text");
 
 	const sources = parseSourcesFromMarkdown(answer);
@@ -130,7 +187,7 @@ async function main() {
 			clearInterval(scrollInterval);
 		}
 
-		const { answer, sources } = await extractAnswer(tab);
+		const { answer, sources } = await extractAnswer(tab, query);
 		if (!answer) throw new Error("No answer captured from Gemini clipboard");
 
 		const finalUrl = await cdp(["eval", tab, "document.location.href"]).catch(

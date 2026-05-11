@@ -53,6 +53,15 @@ const VERIFY_DETECT_JS = `
     return JSON.stringify({t:'xy',x:r.left+30,y:r.top+r.height/2});
   }
 
+  // --- Cloudflare Turnstile widget inside closed shadow DOM (Copilot, etc.) ---
+  // The iframe is not queryable from main document, but the host container
+  // (#cf-turnstile) and the hidden response input are.
+  var cfTurnstileHost = document.querySelector('#cf-turnstile, [id^="cf-chl-widget-"]');
+  if (cfTurnstileHost) {
+    var r2 = cfTurnstileHost.getBoundingClientRect();
+    return JSON.stringify({t:'xy',x:r2.left+r2.width/2,y:r2.top+r2.height/2});
+  }
+
   // --- Cloudflare challenge page ---
   var cfCheckbox = document.querySelector('#cf-stage input[type="checkbox"], .ctp-checkbox-container input');
   if (cfCheckbox) { cfCheckbox.setAttribute('data-gs-verify','1'); return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:'cloudflare-checkbox'}); }
@@ -66,11 +75,16 @@ const VERIFY_DETECT_JS = `
   }
 
   // --- Generic verify/continue/proceed buttons (catch-all) ---
+  // IMPORTANT: exclude sign-in / OAuth buttons (e.g. "Continue with Google")
   var btns = Array.from(document.querySelectorAll('button, input[type=submit], a[role=button]'));
   var verify = btns.find(b => {
     var t = (b.innerText?.trim() || b.value || '').toLowerCase();
-    return (t.includes('verify') || t.includes('human') || t.includes('robot') || t.includes('continue') || t.includes('proceed')) &&
+    var isVerifyLike = (t.includes('verify') || t.includes('human') || t.includes('robot') || t.includes('continue') || t.includes('proceed')) &&
            !t.includes('verified') && !document.querySelector('iframe[src*="recaptcha"]');
+    if (!isVerifyLike) return false;
+    // Exclude OAuth / sign-in buttons to prevent accidental login flows
+    var isSignIn = /sign.in|log.in|google|microsoft|apple|facebook|github|auth/i.test(t);
+    return !isSignIn;
   });
   if (verify) { verify.setAttribute('data-gs-verify','1'); return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:verify.innerText?.trim()||verify.value}); }
 
@@ -95,12 +109,19 @@ const VERIFY_RETRY_JS = `
   var btns = Array.from(document.querySelectorAll('button, input[type=submit], a[role=button]'));
   var btn = btns.find(b => {
     var t = (b.innerText?.trim() || b.value || '').toLowerCase();
-    return t.includes('verify') || t.includes('human') || t.includes('robot') || t.includes('continue') || t.includes('next') || t.includes('submit');
+    var isVerifyLike = t.includes('verify') || t.includes('human') || t.includes('robot') || t.includes('continue') || t.includes('next') || t.includes('submit');
+    if (!isVerifyLike) return false;
+    var isSignIn = /sign.in|log.in|google|microsoft|apple|facebook|github|auth/i.test(t);
+    return !isSignIn;
   });
   if (btn) { btn.setAttribute('data-gs-verify','1'); return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:btn.innerText?.trim()||btn.value}); }
 
   var cf = document.querySelector('#cf-stage input[type="checkbox"], .cf-turnstile input');
   if (cf) { cf.setAttribute('data-gs-verify','1'); return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:'turnstile'}); }
+
+  // Cloudflare Turnstile widget inside closed shadow DOM (detected via host container)
+  var cfTurnstileHost = document.querySelector('#cf-turnstile, [id^="cf-chl-widget-"]');
+  if (cfTurnstileHost) { return 'still-verifying'; }
 
   var modal = document.querySelector('[role="dialog"], .b_modal, [class*="verify"]');
   if (modal) {
