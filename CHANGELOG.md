@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Removed
+
+- **`googlesearch` / `gs` engine** — Removed the `google-search` extractor (`extractors/google-search.mjs`) and its `googlesearch`/`gs` engine aliases from `ENGINES` in `constants.mjs`. The classic Google Search extractor was broken in headless mode and not part of the `"all"` fan-out.
+- **`pplx` and `copilot` aliases** — Removed redundant engine aliases from `ENGINES` in `constants.mjs`. `pplx` was a longer alias for `perplexity` (shorter `p` exists) and `copilot` was an alias for `bing` (shorter `b` exists). Neither was documented in the tool schema or skill.
+
 ## [1.8.10] — 2026-05-11
 
 ### Removed
