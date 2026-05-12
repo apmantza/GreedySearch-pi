@@ -21,17 +21,13 @@ export const ENGINE_DOMAINS = {
 
 export const ENGINES = {
 	perplexity: "perplexity.mjs",
-	pplx: "perplexity.mjs",
 	p: "perplexity.mjs",
 	bing: "bing-copilot.mjs",
-	copilot: "bing-copilot.mjs",
 	b: "bing-copilot.mjs",
 	google: "google-ai.mjs",
 	g: "google-ai.mjs",
 	gemini: "gemini.mjs",
 	gem: "gemini.mjs",
-	googlesearch: "google-search.mjs",
-	gs: "google-search.mjs",
 };
 
 export const SOURCE_FETCH_CONCURRENCY = Math.max(
