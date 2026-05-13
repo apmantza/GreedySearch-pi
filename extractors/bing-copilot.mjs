@@ -317,6 +317,21 @@ async function main() {
 			`document.querySelector('${S.input}')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,keyCode:13})), 'ok'`,
 		]);
 
+		// Post-submit: Bing's antibot sometimes appears AFTER the query is sent.
+		// Fire-and-forget verification check — runs in parallel with stream wait.
+		// Zero added latency to the critical path; if it finds and clicks the
+		// challenge, the stream unblocks instead of timing out at 60s.
+		setTimeout(() => {
+			handleVerification(tab, cdp, 10000)
+				.then((v) => {
+					if (v === "clicked") {
+						console.error("[bing] Post-submit verification clicked");
+						env.verificationResult = "post-submit-clicked";
+					}
+				})
+				.catch(() => {});
+		}, 2000);
+
 		// Wait for Bing Copilot's response to finish streaming before extracting.
 		await waitForStreamComplete(tab, { timeout: 60000, minLength: 50 });
 
