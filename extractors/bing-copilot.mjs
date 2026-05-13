@@ -10,6 +10,7 @@
 // Errors go to stderr only — stdout is always clean JSON for piping.
 
 import {
+	buildEnvelope,
 	cdp,
 	formatAnswer,
 	getOrOpenTab,
@@ -36,7 +37,7 @@ const GLOBAL_VAR = "__bingClipboard";
 // Bing Copilot-specific helpers
 // ============================================================================
 
-async function extractAnswer(tab) {
+async function extractAnswer(tab, env) {
 	// Wait for the assistant copy button to exist. On fresh Copilot
 	// sessions the answer text can render before the button handler is
 	// fully hydrated.  Wait for the button + a small hydration delay.
@@ -47,11 +48,13 @@ async function extractAnswer(tab) {
 	await new Promise((r) => setTimeout(r, 800));
 
 	let answer = await clickCopyAndPollClipboard(tab, 5000);
+	let clipboardEmpty = !answer;
 
 	// Retry once if clipboard is empty (Copilot might be slow to wire the handler)
 	if (!answer) {
 		console.error("[bing] Clipboard empty, retrying copy/poll...");
 		answer = await clickCopyAndPollClipboard(tab, 8000);
+		clipboardEmpty = !answer;
 	}
 
 	// DOM fallback: visible Copilot can render a valid response while the copy
@@ -59,17 +62,21 @@ async function extractAnswer(tab) {
 	// answer from page text before treating this as a headless/iframe block.
 	if (!answer) {
 		answer = await extractFromVisibleDom(tab);
+		if (answer) env.fallbackUsed = "visibleDom";
 	}
 
 	// DOM fallback: if clipboard still empty, extract text directly from response DOM.
 	// This handles headless mode where Copilot renders the AI reply inside nested
 	// iframes (copilot.microsoft.com → copilot.fun → blob:…) and hides the copy button.
 	if (!answer) {
-		answer = await extractFromIframes(tab);
+		const iframeResult = await extractFromIframes(tab, env);
+		answer = iframeResult.answer;
+		if (answer) env.fallbackUsed = "iframeDom";
 	}
 
 	if (!answer) throw new Error("Clipboard interceptor returned empty text");
 
+	env.clipboardEmpty = clipboardEmpty;
 	const sources = parseSourcesFromMarkdown(answer);
 	return { answer: answer.trim(), sources };
 }
@@ -136,7 +143,7 @@ async function extractFromVisibleDom(tab) {
  * Returns the extracted text or empty string on failure (caller falls through to error
  * which triggers the visible Chrome auto-retry in search.mjs).
  */
-async function extractFromIframes(mainTab) {
+async function extractFromIframes(mainTab, env) {
 	try {
 		// Check if the AI copy button exists — if it does, we're in visible mode
 		// and clipboard should have worked. This is a different issue.
@@ -145,7 +152,7 @@ async function extractFromIframes(mainTab) {
 			mainTab,
 			`!!document.querySelector('${S.copyButton}')`,
 		]).catch(() => "false");
-		if (hasCopyBtn === "true") return ""; // not a headless/iframe issue
+		if (hasCopyBtn === "true") return { answer: "" }; // not a headless/iframe issue
 
 		// Check for Cloudflare challenge in the accessibility tree.
 		// If present, Copilot content is blocked entirely — no DOM extraction possible.
@@ -154,7 +161,8 @@ async function extractFromIframes(mainTab) {
 			console.error(
 				"[bing] Cloudflare challenge detected — content blocked in headless",
 			);
-			return ""; // Let caller throw → triggers visible auto-retry
+			env.blockedBy = "cloudflare";
+			return { answer: "" }; // Let caller throw → triggers visible auto-retry
 		}
 
 		console.error(
@@ -175,7 +183,7 @@ async function extractFromIframes(mainTab) {
 		);
 		if (!funFrame) {
 			console.error("[bing] No copilot.fun iframe target found");
-			return "";
+			return { answer: "" };
 		}
 
 		// Try to extract from the nested blob iframe (rarely succeeds due to Cloudflare)
@@ -190,7 +198,7 @@ async function extractFromIframes(mainTab) {
 			console.error(
 				`[bing] DOM extraction succeeded (${innerText.length} chars)`,
 			);
-			return innerText;
+			return { answer: innerText };
 		}
 
 		console.error(
@@ -199,7 +207,7 @@ async function extractFromIframes(mainTab) {
 	} catch (e) {
 		console.error(`[bing] DOM extraction failed: ${e.message}`);
 	}
-	return "";
+	return { answer: "" };
 }
 
 // ============================================================================
@@ -214,6 +222,20 @@ async function main() {
 	validateQuery(args, USAGE);
 
 	const { query, tabPrefix, short } = parseArgs(args);
+	const startTime = Date.now();
+	const mode =
+		process.env.GREEDY_SEARCH_VISIBLE === "1" ? "visible" : "headless";
+
+	// Lightweight envelope — no extra CDP calls, just tracks what we already know
+	const env = {
+		engine: "bing",
+		mode,
+		clipboardEmpty: null,
+		fallbackUsed: null,
+		blockedBy: null,
+		verificationResult: null,
+		inputReady: null,
+	};
 
 	try {
 		// Only refresh page list when creating a fresh tab (no prefix provided)
@@ -240,6 +262,7 @@ async function main() {
 
 		// Handle verification challenges (Cloudflare Turnstile, Microsoft auth, etc.)
 		const verifyResult = await handleVerification(tab, cdp, 10000);
+		env.verificationResult = verifyResult;
 		if (verifyResult === "needs-human") {
 			throw new Error(
 				"Copilot verification required — please solve it manually in the browser window",
@@ -272,6 +295,7 @@ async function main() {
 
 		// Wait for React app to mount input (up to 15s, longer after verification)
 		const inputReady = await waitForSelector(tab, S.input, 15000, 500);
+		env.inputReady = inputReady;
 		await new Promise((r) => setTimeout(r, jitter(300)));
 
 		if (!inputReady) {
@@ -296,21 +320,24 @@ async function main() {
 		// Wait for Bing Copilot's response to finish streaming before extracting.
 		await waitForStreamComplete(tab, { timeout: 60000, minLength: 50 });
 
-		const { answer, sources } = await extractAnswer(tab);
+		const { answer, sources } = await extractAnswer(tab, env);
 		if (!answer)
 			throw new Error("No answer extracted — Copilot may not have responded");
 
 		const finalUrl = await cdp(["eval", tab, "document.location.href"]).catch(
 			() => "",
 		);
+		env.durationMs = Date.now() - startTime;
 		outputJson({
 			query,
 			url: finalUrl,
 			answer: formatAnswer(answer, short),
 			sources,
+			_envelope: buildEnvelope(env),
 		});
 	} catch (e) {
-		handleError(e);
+		env.durationMs = Date.now() - startTime;
+		handleError(e, buildEnvelope(env));
 	}
 }
 

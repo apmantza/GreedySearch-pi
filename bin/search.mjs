@@ -43,7 +43,7 @@ import {
 import { writeOutput } from "../src/search/output.mjs";
 import {
 	findHeadlessBlockedEngines,
-	isHeadlessBlockedError,
+	isHeadlessBlockedResult,
 	isManualVerificationError,
 } from "../src/search/recovery.mjs";
 import {
@@ -500,7 +500,7 @@ async function main() {
 		const canRetryVisible =
 			recoveryEngine &&
 			process.env.GREEDY_SEARCH_VISIBLE !== "1" &&
-			isHeadlessBlockedError(e.message);
+			isHeadlessBlockedResult(e);
 
 		if (canRetryVisible) {
 			process.stderr.write(

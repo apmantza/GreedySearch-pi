@@ -552,10 +552,45 @@ export function outputJson(data) {
 }
 
 /**
- * Handle and output error, then exit
- * @param {Error} error - Error to handle
+ * Build a lightweight result envelope from data already collected during extraction.
+ * Zero additional CDP calls — everything here is already known.
+ * @param {object} fields
+ * @returns {object}
  */
-export function handleError(error) {
+export function buildEnvelope({
+	engine,
+	mode = "headless",
+	clipboardEmpty = null,
+	fallbackUsed = null,
+	blockedBy = null,
+	verificationResult = null,
+	inputReady = null,
+	durationMs = null,
+} = {}) {
+	return {
+		engine,
+		mode,
+		clipboardEmpty,
+		fallbackUsed,
+		blockedBy,
+		verificationResult,
+		inputReady,
+		durationMs,
+	};
+}
+
+/**
+ * Handle and output error, then exit.
+ * If an envelope is provided, writes it to stdout as JSON so the runner
+ * can parse structured diagnostics even on failure.
+ * @param {Error} error - Error to handle
+ * @param {object} [envelope] - Optional envelope object
+ */
+export function handleError(error, envelope = null) {
+	if (envelope) {
+		const out = JSON.stringify({ _envelope: envelope, error: error.message });
+		process.stdout.write(`${out}\n`);
+	}
 	process.stderr.write(`Error: ${error.message}\n`);
 	process.exit(1);
 }

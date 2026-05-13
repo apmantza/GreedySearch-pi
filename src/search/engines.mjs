@@ -60,7 +60,16 @@ export function runExtractor(
 					reject(new Error(`bad JSON from ${script}: ${out.slice(0, 100)}`));
 				}
 			} else {
-				reject(new Error(err.trim() || `extractor exit ${code}`));
+				// Try to parse structured error envelope from stdout before falling back
+				let envelope = null;
+				try {
+					const parsed = JSON.parse(out.trim());
+					if (parsed._envelope) envelope = parsed._envelope;
+				} catch {}
+				const msg = err.trim() || `extractor exit ${code}`;
+				const errObj = new Error(msg);
+				if (envelope) errObj.envelope = envelope;
+				reject(errObj);
 			}
 		});
 	});

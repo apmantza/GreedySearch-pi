@@ -20,7 +20,26 @@ export function isManualVerificationError(error) {
 
 export function findHeadlessBlockedEngines(resultsByEngine) {
 	return HEADLESS_RECOVERY_ENGINES.filter((engine) => {
-		const error = resultsByEngine?.[engine]?.error;
+		const result = resultsByEngine?.[engine];
+		if (!result) return false;
+		// Data-driven: check envelope first (zero regex cost)
+		if (result._envelope?.blockedBy) return true;
+		if (result._envelope?.verificationResult === "needs-human") return true;
+		// Fallback: legacy string matching for errors passed as plain strings
+		const error = result.error;
 		return error && isHeadlessBlockedError(error);
 	});
+}
+
+/**
+ * Check if an extractor Error carries a structured envelope indicating
+ * headless blocking. Used in single-engine recovery paths where the Error
+ * object is caught directly rather than parsed from a result record.
+ */
+export function isHeadlessBlockedResult(error) {
+	if (!error) return false;
+	const env = error.envelope;
+	if (env?.blockedBy) return true;
+	if (env?.verificationResult === "needs-human") return true;
+	return isHeadlessBlockedError(error.message);
 }
