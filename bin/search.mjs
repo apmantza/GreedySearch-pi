@@ -40,6 +40,7 @@ import {
 	fetchMultipleSources,
 	fetchTopSource,
 } from "../src/search/fetch-source.mjs";
+import { writeSourcesToFiles } from "../src/search/file-sources.mjs";
 import { writeOutput } from "../src/search/output.mjs";
 import {
 	findHeadlessBlockedEngines,
@@ -425,7 +426,7 @@ async function main() {
 				);
 
 				out._sources = mergeFetchDataIntoSources(out._sources, fetchedSources);
-				out._fetchedSources = fetchedSources;
+				out._fetchedSources = writeSourcesToFiles(fetchedSources);
 				process.stderr.write("PROGRESS:source-fetch:done\n");
 			}
 
