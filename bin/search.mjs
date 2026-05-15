@@ -40,10 +40,11 @@ import {
 	fetchMultipleSources,
 	fetchTopSource,
 } from "../src/search/fetch-source.mjs";
+import { writeSourcesToFiles } from "../src/search/file-sources.mjs";
 import { writeOutput } from "../src/search/output.mjs";
 import {
 	findHeadlessBlockedEngines,
-	isHeadlessBlockedError,
+	isHeadlessBlockedResult,
 	isManualVerificationError,
 } from "../src/search/recovery.mjs";
 import {
@@ -425,7 +426,7 @@ async function main() {
 				);
 
 				out._sources = mergeFetchDataIntoSources(out._sources, fetchedSources);
-				out._fetchedSources = fetchedSources;
+				out._fetchedSources = writeSourcesToFiles(fetchedSources);
 				process.stderr.write("PROGRESS:source-fetch:done\n");
 			}
 
@@ -500,7 +501,7 @@ async function main() {
 		const canRetryVisible =
 			recoveryEngine &&
 			process.env.GREEDY_SEARCH_VISIBLE !== "1" &&
-			isHeadlessBlockedError(e.message);
+			isHeadlessBlockedResult(e);
 
 		if (canRetryVisible) {
 			process.stderr.write(

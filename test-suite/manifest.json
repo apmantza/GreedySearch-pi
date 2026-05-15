@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "bing-headless-blocked",
+      "name": "Bing Copilot — Headless Cloudflare Block",
+      "path": "bing-headless-blocked.html",
+      "expected": {
+        "headless": { "verdict": "expected-fail", "blockedBy": "cloudflare" },
+        "visible": { "verdict": "pass", "blockedBy": null }
+      }
+    },
+    {
+      "id": "bing-visible-success",
+      "name": "Bing Copilot — Visible Mode Success",
+      "path": "bing-visible-success.html",
+      "expected": {
+        "headless": { "verdict": "expected-fail", "blockedBy": "cloudflare" },
+        "visible": { "verdict": "pass", "blockedBy": null }
+      }
+    },
+    {
+      "id": "perplexity-clipboard-empty",
+      "name": "Perplexity — Clipboard Interceptor Empty",
+      "path": "perplexity-clipboard-empty.html",
+      "expected": {
+        "headless": { "verdict": "expected-fail", "clipboardEmpty": true },
+        "visible": { "verdict": "pass", "clipboardEmpty": false }
+      }
+    },
+    {
+      "id": "perplexity-success",
+      "name": "Perplexity — Normal Response",
+      "path": "perplexity-success.html",
+      "expected": {
+        "headless": { "verdict": "pass", "clipboardEmpty": false },
+        "visible": { "verdict": "pass", "clipboardEmpty": false }
+      }
+    },
+    {
+      "id": "verification-modal",
+      "name": "Generic — Verification Modal",
+      "path": "verification-modal.html",
+      "expected": {
+        "headless": { "verdict": "expected-fail", "blockedBy": "verification" },
+        "visible": { "verdict": "pass", "blockedBy": null }
+      }
+    }
+  ]
+}

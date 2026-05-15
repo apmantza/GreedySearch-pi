@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bing Copilot — Headless Blocked Scenario</title>
+<style>
+  body { font-family: sans-serif; padding: 40px; background: #f5f5f5; }
+  .challenge { background: #fff; border: 1px solid #ddd; padding: 30px; max-width: 500px; margin: 0 auto; text-align: center; }
+  h1 { color: #d93025; }
+  iframe { border: none; width: 300px; height: 65px; margin: 20px 0; }
+</style>
+</head>
+<body>
+<div class="challenge">
+  <h1>⚠️ Security Check</h1>
+  <p>Please verify you are human to continue.</p>
+  <!-- Simulates Cloudflare Turnstile iframe that appears in headless Bing -->
+  <iframe src="https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/turnstile" title="challenge"></iframe>
+  <p id="cf-turnstile" style="display:none"></p>
+</div>
+
+<script>
+(function() {
+  window.__mode = 'headless';
+  window.__verdict = 'expected-fail';
+  window.__reason = 'Cloudflare Turnstile challenge blocks headless Chrome — extractor should detect iframe and set blockedBy=cloudflare';
+  window.__events = ['navigate:copilot.microsoft.com', 'detect:turnstile-iframe', 'detect:cf-turnstile-host'];
+  window.__expectedEnvelope = {
+    engine: 'bing',
+    mode: 'headless',
+    blockedBy: 'cloudflare',
+    verificationResult: 'clear',
+    clipboardEmpty: null
+  };
+})();
+</script>
+</body>
+</html>

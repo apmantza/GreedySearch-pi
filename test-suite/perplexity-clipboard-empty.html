@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Perplexity — Clipboard Empty Scenario</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+  .query-box { border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; }
+  #search-input { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 4px; }
+  .answer { background: #f9f9f9; padding: 16px; margin-top: 16px; border-radius: 8px; }
+  .copy-btn { background: #333; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Perplexity</h1>
+<div class="query-box">
+  <textarea id="search-input" placeholder="Ask anything..."></textarea>
+</div>
+<div class="answer" id="answer">
+  <p>This is a simulated Perplexity answer. The copy button exists but the clipboard interceptor fails to capture because <code>navigator.clipboard.writeText</code> is overridden by the page in a way that bypasses the interceptor.</p>
+  <button class="copy-btn" id="copy-btn">
+    <svg><use xlink:href="#pplx-icon-copy"></use></svg>
+  </button>
+</div>
+
+<script>
+(function() {
+  window.__mode = 'headless';
+  window.__verdict = 'expected-fail';
+  window.__reason = 'Clipboard interceptor returns empty — copy button click does not trigger writeText through the intercepted path. Extractor should retry once, then fail gracefully with clipboardEmpty=true.';
+  window.__events = ['navigate:perplexity.ai', 'detect:input-ready', 'type:query', 'submit:enter', 'stream:complete', 'copy:empty', 'retry:copy', 'copy:empty-again'];
+  window.__expectedEnvelope = {
+    engine: 'perplexity',
+    mode: 'headless',
+    blockedBy: null,
+    verificationResult: 'clear',
+    clipboardEmpty: true
+  };
+
+  // Override clipboard.writeText to bypass interceptor (simulates anti-bot)
+  navigator.clipboard.writeText = function(text) {
+    // Silently swallow — interceptor never sees it
+    return Promise.resolve();
+  };
+})();
+</script>
+</body>
+</html>

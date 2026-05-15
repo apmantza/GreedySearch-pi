@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GreedySearch Test Suite</title>
+<style>
+  :root { --pass: #34a853; --fail: #d93025; --warn: #f9ab00; --bg: #f8f9fa; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 960px; margin: 0 auto; padding: 24px; background: var(--bg); }
+  h1 { font-size: 28px; margin-bottom: 8px; }
+  .subtitle { color: #666; margin-bottom: 24px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  th, td { padding: 14px 16px; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #f1f3f4; font-weight: 600; font-size: 13px; text-transform: uppercase; color: #666; }
+  tr:hover { background: #f8f9fa; }
+  .tag { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+  .tag-pass { background: #e6f4ea; color: var(--pass); }
+  .tag-fail { background: #fce8e8; color: var(--fail); }
+  .tag-expected-fail { background: #fef3e8; color: #b06000; }
+  a { color: #1a73e8; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .instructions { background: #e8f0fe; padding: 16px; border-radius: 8px; margin-bottom: 24px; }
+  .instructions code { background: #fff; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>🧪 GreedySearch Test Suite</h1>
+<p class="subtitle">Expected-outcome-by-mode benchmark for browser-control extractors</p>
+
+<div class="instructions">
+  <strong>How to use:</strong> Open each scenario in the Chrome window that GreedySearch controls.
+  Run the extractor against it and compare the actual outcome with the expected one.
+  <br><br>
+  <code>cd test-suite &amp;&amp; python3 -m http.server 8765</code>
+  <br>
+  Then point GreedySearch extractors at <code>http://127.0.0.1:8765/{scenario}.html</code>
+</div>
+
+<table id="suite">
+  <thead>
+    <tr>
+      <th>Scenario</th>
+      <th>Description</th>
+      <th>Headless Expected</th>
+      <th>Visible Expected</th>
+      <th>Link</th>
+    </tr>
+  </thead>
+  <tbody>
+    <!-- Populated by JS from manifest.json -->
+  </tbody>
+</table>
+
+<script>
+fetch('manifest.json')
+  .then(r => r.json())
+  .then(data => {
+    const tbody = document.querySelector('#suite tbody');
+    for (const s of data.scenarios) {
+      const he = s.expected.headless;
+      const ve = s.expected.visible;
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td><strong>${s.name}</strong></td>
+        <td>${s.id}</td>
+        <td><span class="tag tag-${he.verdict}">${he.verdict}</span>
+          ${he.blockedBy ? `<br><small>blockedBy: ${he.blockedBy}</small>` : ''}
+          ${he.clipboardEmpty !== undefined ? `<br><small>clipboardEmpty: ${he.clipboardEmpty}</small>` : ''}
+        </td>
+        <td><span class="tag tag-${ve.verdict}">${ve.verdict}</span>
+          ${ve.blockedBy !== undefined ? `<br><small>blockedBy: ${ve.blockedBy}</small>` : ''}
+          ${ve.clipboardEmpty !== undefined ? `<br><small>clipboardEmpty: ${ve.clipboardEmpty}</small>` : ''}
+        </td>
+        <td><a href="${s.path}" target="_blank">Open →</a></td>
+      `;
+      tbody.appendChild(row);
+    }
+  });
+</script>
+</body>
+</html>

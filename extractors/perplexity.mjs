@@ -12,6 +12,7 @@
 // TODO: Refactor - this file has 42 lines duplicated with google-ai.mjs (line 28)
 
 import {
+	buildEnvelope,
 	cdp,
 	formatAnswer,
 	getOrOpenTab,
@@ -49,13 +50,14 @@ function findCopyButtonJsExpression() {
 // Extraction
 // ============================================================================
 
-async function extractAnswer(tab) {
+async function extractAnswer(tab, env) {
 	const copyBtnExpr = findCopyButtonJsExpression();
 
 	await cdp(["eval", tab, `${copyBtnExpr}?.click()`]);
 	await new Promise((r) => setTimeout(r, 400));
 
 	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	env.clipboardEmpty = !answer;
 
 	// Retry once if clipboard is empty (Perplexity might be slow to write)
 	if (!answer) {
@@ -63,6 +65,7 @@ async function extractAnswer(tab) {
 		await cdp(["eval", tab, `${copyBtnExpr}?.click()`]);
 		await new Promise((r) => setTimeout(r, 2000));
 		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+		env.clipboardEmpty = !answer;
 	}
 
 	if (!answer) throw new Error("Clipboard interceptor returned empty text");
@@ -83,6 +86,19 @@ async function main() {
 	validateQuery(args, USAGE);
 
 	const { query, tabPrefix, short } = parseArgs(args);
+	const startTime = Date.now();
+	const mode =
+		process.env.GREEDY_SEARCH_VISIBLE === "1" ? "visible" : "headless";
+
+	const env = {
+		engine: "perplexity",
+		mode,
+		clipboardEmpty: null,
+		fallbackUsed: null,
+		blockedBy: null,
+		verificationResult: null,
+		inputReady: null,
+	};
 
 	try {
 		// Only refresh page list when creating a fresh tab (no prefix provided)
@@ -107,6 +123,7 @@ async function main() {
 		}
 		// Handle verification challenges (Cloudflare Turnstile, etc.)
 		const verifyResult = await handleVerification(tab, cdp, 10000);
+		env.verificationResult = verifyResult;
 		if (verifyResult === "needs-human") {
 			throw new Error(
 				"Perplexity verification required — please solve it manually in the browser window",
@@ -121,7 +138,8 @@ async function main() {
 		}
 
 		// Wait for React app to mount input (up to 5s)
-		await waitForSelector(tab, S.input, 5000, 400);
+		const inputReady = await waitForSelector(tab, S.input, 5000, 400);
+		env.inputReady = inputReady;
 		await new Promise((r) => setTimeout(r, jitter(300)));
 
 		await injectClipboardInterceptor(tab, GLOBAL_VAR);
@@ -144,7 +162,7 @@ async function main() {
 			selector: "document.body",
 		});
 
-		const { answer, sources } = await extractAnswer(tab);
+		const { answer, sources } = await extractAnswer(tab, env);
 
 		if (!answer)
 			throw new Error(
@@ -154,14 +172,17 @@ async function main() {
 		const finalUrl = await cdp(["eval", tab, "document.location.href"]).catch(
 			() => "",
 		);
+		env.durationMs = Date.now() - startTime;
 		outputJson({
 			query,
 			url: finalUrl,
 			answer: formatAnswer(answer, short),
 			sources,
+			_envelope: buildEnvelope(env),
 		});
 	} catch (e) {
-		handleError(e);
+		env.durationMs = Date.now() - startTime;
+		handleError(e, buildEnvelope(env));
 	}
 }
 
