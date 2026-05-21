@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-05-22
+
 ### Added
 
 - **Query normalization** (`src/search/query.mjs`, new) — Two universal transforms applied before every search, zero latency overhead:
