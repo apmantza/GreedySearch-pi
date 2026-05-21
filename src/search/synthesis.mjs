@@ -152,6 +152,10 @@ export function buildSynthesisPrompt(
 		};
 	}
 
+	// Snippet budget: always include content for fetched sources so Gemini can
+	// make citation decisions based on what the sources actually say, not just
+	// their metadata. Grounded mode gets a larger budget per source.
+	const snippetChars = grounded ? 700 : 300;
 	const sourceRegistry = sources.slice(0, grounded ? 10 : 8).map((source) => ({
 		id: source.id,
 		title: source.title,
@@ -161,37 +165,44 @@ export function buildSynthesisPrompt(
 		isOfficial: source.isOfficial,
 		engines: source.engines,
 		engineCount: source.engineCount,
-		perEngine: source.perEngine,
 		fetch: source.fetch?.attempted
 			? {
 					ok: source.fetch.ok,
-					status: source.fetch.status,
 					publishedTime: source.fetch.publishedTime || "",
-					lastModified: source.fetch.lastModified || "",
 					byline: source.fetch.byline || "",
-					siteName: source.fetch.siteName || "",
-					...(grounded
-						? { snippet: trimText(source.fetch.snippet || "", 700) }
-						: {}),
+					snippet: trimText(source.fetch.snippet || "", snippetChars),
 				}
 			: undefined,
 	}));
 
 	return [
-		"Synthesize the following search results into a concise answer.",
-		"Compare the three engine responses (Perplexity, Bing, Google) and identify:",
-		"1. The main answer to the query",
-		"2. Where the engines agree",
-		"3. Where they disagree (if anywhere)",
-		"4. Any caveats or limitations",
-		"Use source IDs like S1, S2 when citing sources.",
-		"Format: Start with a brief answer, then list key points.",
+		"You are a research synthesizer. Combine these search engine results into a single authoritative answer.",
 		"",
 		`Query: ${query}`,
 		"",
-		`Engine results:\n${JSON.stringify(engineSummaries, null, 2)}`,
+		`Engine summaries:\n${JSON.stringify(engineSummaries, null, 2)}`,
 		"",
 		`Source registry:\n${JSON.stringify(sourceRegistry, null, 2)}`,
+		"",
+		"Instructions:",
+		"- Write a clear, direct answer in markdown (use headers/bullets where they help readability)",
+		"- Cite sources inline as [S1], [S2] etc. when making specific claims",
+		"- Prefer sources with content (fetch.ok=true and non-empty snippet) for citations",
+		"- Note where the engines agree or meaningfully disagree",
+		"- List any important caveats or limitations",
+		"- recommendedSources: the 2-4 source IDs most worth reading for this query",
+		"",
+		"Respond ONLY with a JSON object wrapped in BEGIN_JSON / END_JSON markers:",
+		"",
+		"BEGIN_JSON",
+		JSON.stringify({
+			answer: "<your markdown answer here>",
+			agreement: { level: "high|medium|mixed|conflicting", summary: "<one sentence>" },
+			differences: ["<notable difference between engines, if any>"],
+			caveats: ["<important caveat or limitation>"],
+			recommendedSources: ["S1", "S2"],
+		}, null, 2),
+		"END_JSON",
 	].join("\n");
 }
 

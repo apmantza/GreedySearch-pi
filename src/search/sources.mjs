@@ -167,6 +167,25 @@ export function bestRank(source) {
 	return ranks.length ? Math.min(...ranks) : 99;
 }
 
+// Discussion-only hosts that get a stronger penalty vs. general community hosts.
+// Q&A sites (stackoverflow, stackexchange) are intentionally excluded.
+const DISCUSSION_HOSTS = ["reddit.com", "news.ycombinator.com", "lobste.rs"];
+
+/**
+ * Composite relevance score combining all signals continuously instead of
+ * cascading tiebreakers. Weights chosen so a query-relevant official source
+ * ranked #1 by one engine beats any multi-engine consensus from generic sites,
+ * while multi-engine consensus beats a single-engine community post.
+ */
+export function computeCompositeScore(source) {
+	return (
+		source.smartScore * 3 +
+		source.engineCount * 5 +
+		sourceTypePriority(source.sourceType) * 2 +
+		Math.max(0, 7 - bestRank(source))
+	);
+}
+
 export function inferPreferredDomains(query) {
 	const normalized = query.toLowerCase();
 	const matches = [];
@@ -340,9 +359,19 @@ export function buildSourceRegistry(out, query = "") {
 				smartScore += 2;
 			}
 
-			// Penalize community/discussion sites for technical queries
-			if (sourceType === "community" && preferredDomains.length > 0) {
-				smartScore -= 2;
+			// Penalize discussion forums for technical queries — high noise, rarely canonical.
+			// Q&A sites (stackoverflow, stackexchange) are excluded: they often have the
+			// best practical answer and shouldn't be penalised just because an official
+			// domain also exists.
+			if (preferredDomains.length > 0) {
+				if (matchesDomain(domain, DISCUSSION_HOSTS)) {
+					smartScore -= 3;
+				} else if (
+					sourceType === "community" &&
+					!matchesDomain(domain, ["stackoverflow.com", "stackexchange.com"])
+				) {
+					smartScore -= 1;
+				}
 			}
 
 			const existing = seen.get(canonicalUrl) || {
@@ -387,24 +416,11 @@ export function buildSourceRegistry(out, query = "") {
 			engineCount: source.engines.length,
 		}))
 		.sort((a, b) => {
-			// Primary: smart score (query-aware domain boosting)
-			if (b.smartScore !== a.smartScore) return b.smartScore - a.smartScore;
-
-			// Secondary: consensus (sources found by more engines)
-			if (b.engineCount !== a.engineCount) return b.engineCount - a.engineCount;
-
-			// Tertiary: source type priority
-			if (
-				sourceTypePriority(b.sourceType) !== sourceTypePriority(a.sourceType)
-			) {
-				return (
-					sourceTypePriority(b.sourceType) - sourceTypePriority(a.sourceType)
-				);
-			}
-
-			// Quaternary: best rank across engines
-			if (bestRank(a) !== bestRank(b)) return bestRank(a) - bestRank(b);
-
+			// Single composite score so all signals contribute simultaneously.
+			// Avoids rank being ignored when engineCount differs, and smartScore
+			// dominating even when rank/type signal would break the tie better.
+			const diff = computeCompositeScore(b) - computeCompositeScore(a);
+			if (diff !== 0) return diff;
 			return a.domain.localeCompare(b.domain);
 		})
 		.slice(0, 12)
