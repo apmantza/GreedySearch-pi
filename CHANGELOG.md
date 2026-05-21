@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Query normalization** (`src/search/query.mjs`, new) — Two universal transforms applied before every search, zero latency overhead:
+  - **Preamble stripping**: removes agent-generated openers ("can you explain", "I need to know about", "tell me", etc.) that add noise without search signal. "Can you explain how the Rust borrow checker works?" → "how the Rust borrow checker works?"
+  - **Recency anchoring**: appends the current year when the query contains explicit temporal language (`latest`, `current`, `recent`, `up-to-date`) but no version number or year is already present. "latest FastAPI best practices" → "latest FastAPI best practices 2026". Skipped when a version number like `3.13` or a year like `2024` is already in the query. No Google-specific keyword conversion — all three engines use AI modes that handle natural-language questions natively.
+
 ### Changed
 
 - **Source ranking: composite score replaces cascading tiebreakers** (`src/search/sources.mjs`) — All ranking signals (query-domain boost, engine consensus, source type, best rank) now contribute simultaneously via a weighted formula: `smartScore×3 + engineCount×5 + sourceTypePriority×2 + max(0,7−rank)`. Previously rank was only a quaternary tiebreaker and was ignored whenever engines disagreed on a source — a site ranked #1 by one engine could lose to a site ranked #8 by two engines. Now rank is always a real signal.

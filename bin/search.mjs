@@ -53,6 +53,7 @@ import {
 } from "../src/search/sources.mjs";
 import { buildConfidence } from "../src/search/synthesis.mjs";
 import { synthesizeWithGemini } from "../src/search/synthesis-runner.mjs";
+import { normalizeQuery } from "../src/search/query.mjs";
 
 const CONFIG_DIR = join(homedir(), ".config", "greedysearch");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -241,7 +242,7 @@ async function main() {
 				ALL_ENGINES.map((e, i) =>
 					runExtractor(
 						ENGINES[e],
-						query,
+						normalizeQuery(query),
 						engineTabs[i],
 						short,
 						engineTimeoutMs,
@@ -496,7 +497,7 @@ async function main() {
 	}
 
 	try {
-		const result = await runExtractor(script, query, null, short, null, locale);
+		const result = await runExtractor(script, normalizeQuery(query), null, short, null, locale);
 		if (fetchSource && result.sources?.length > 0) {
 			result.topSource = await fetchTopSource(result.sources[0].url);
 		}
