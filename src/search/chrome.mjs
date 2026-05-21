@@ -114,6 +114,65 @@ function getPortPid() {
 }
 
 /**
+ * Send Browser.close via CDP WebSocket so Chrome flushes its cookie DB to disk
+ * before we force-kill it. Gives the process up to `graceMs` to exit on its own.
+ * Falls back to force-kill if Chrome is still running after the grace period.
+ * Returns true if the process is gone after the call.
+ */
+async function gracefulCloseChrome(graceMs = 1500) {
+	try {
+		const version = await new Promise((resolve, reject) => {
+			const req = http.get(
+				`http://localhost:${GREEDY_PORT}/json/version`,
+				(res) => {
+					let body = "";
+					res.on("data", (d) => (body += d));
+					res.on("end", () => {
+						try {
+							resolve(JSON.parse(body));
+						} catch {
+							reject(new Error("bad JSON"));
+						}
+					});
+				},
+			);
+			req.on("error", reject);
+			req.setTimeout(1000, () => {
+				req.destroy();
+				reject(new Error("timeout"));
+			});
+		});
+
+		const ws = new globalThis.WebSocket(version.webSocketDebuggerUrl);
+		await new Promise((resolve) => {
+			ws.onopen = () => {
+				ws.send(JSON.stringify({ id: 1, method: "Browser.close" }));
+				// Give Chrome a moment to receive the command before we close the socket
+				setTimeout(() => {
+					ws.close();
+					resolve();
+				}, 200);
+			};
+			ws.onerror = () => resolve();
+			setTimeout(resolve, 1000);
+		});
+	} catch {
+		// Chrome not reachable — skip to force-kill
+	}
+
+	// Wait for Chrome to exit gracefully (flushes SQLite cookie DB)
+	const deadline = Date.now() + graceMs;
+	while (Date.now() < deadline) {
+		const pid = getPortPid();
+		if (!pid) return true; // already gone
+		await new Promise((r) => setTimeout(r, 150));
+	}
+
+	// Still running — force-kill
+	return killProcessOnPort();
+}
+
+/**
  * Force-kill whatever process is listening on GREEDY_PORT.
  * Uses OS tools to find the PID (not the PID file — handles ghost processes).
  * Never touches the user's main Chrome (which runs on different ports).
@@ -159,7 +218,9 @@ export async function killChrome() {
 		return false;
 	}
 
-	const killed = killProcessOnPort();
+	// Graceful close: sends Browser.close so Chrome flushes its cookie DB,
+	// then force-kills if it doesn't exit within the grace period.
+	const killed = await gracefulCloseChrome(1500);
 
 	// Clean up tracking files regardless of kill success
 	try {

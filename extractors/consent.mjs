@@ -1,4 +1,6 @@
 import { randomInt } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import http from "node:http";
 
 // consent.mjs — auto-dismiss common cookie/consent banners and human-verification pages
 // Call dismissConsent(tab, cdpFn) after navigating to any page.
@@ -149,6 +151,63 @@ function rng(min, max) {
 }
 
 /**
+ * Fire a browser-level Input.dispatchMouseEvent via Chrome's top-level CDP
+ * WebSocket. Unlike page-session dispatch, this routes through the compositor
+ * and reaches OOPIFs (e.g. Cloudflare Turnstile in a cross-origin iframe).
+ * Best-effort — errors are silently swallowed.
+ */
+async function browserLevelClick(x, y) {
+	if (!globalThis.WebSocket) return;
+	const profileDir = process.env.CDP_PROFILE_DIR;
+	if (!profileDir) return;
+	const portFile = `${profileDir.replaceAll("\\", "/")}/DevToolsActivePort`;
+	if (!existsSync(portFile)) return;
+	const port = readFileSync(portFile, "utf8").trim().split("\n")[0];
+
+	const version = await new Promise((resolve, reject) => {
+		const req = http.get(`http://localhost:${port}/json/version`, (res) => {
+			let body = "";
+			res.on("data", (d) => (body += d));
+			res.on("end", () => {
+				try { resolve(JSON.parse(body)); } catch { reject(new Error("bad JSON")); }
+			});
+		});
+		req.on("error", reject);
+		req.setTimeout(1000, () => { req.destroy(); reject(new Error("timeout")); });
+	});
+
+	const ws = new globalThis.WebSocket(version.webSocketDebuggerUrl);
+	let msgId = 0;
+
+	await new Promise((resolve) => {
+		ws.onopen = async () => {
+			const send = (method, params) => new Promise((r) => {
+				const id = ++msgId;
+				const handler = (evt) => {
+					if (JSON.parse(evt.data).id === id) {
+						ws.removeEventListener("message", handler);
+						r();
+					}
+				};
+				ws.addEventListener("message", handler);
+				ws.send(JSON.stringify({ id, method, params }));
+			});
+
+			const cx = x + rng(-2, 2);
+			const cy = y + rng(-2, 2);
+			await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx, y: cy, button: "none" });
+			await new Promise((r) => setTimeout(r, rng(80, 160)));
+			await send("Input.dispatchMouseEvent", { type: "mousePressed", x: cx, y: cy, button: "left", clickCount: 1 });
+			await new Promise((r) => setTimeout(r, rng(30, 80)));
+			await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: cx + rng(-1, 1), y: cy + rng(-1, 1), button: "left", clickCount: 1 });
+			setTimeout(() => { ws.close(); resolve(); }, 200);
+		};
+		ws.onerror = () => resolve();
+		setTimeout(resolve, 3000);
+	});
+}
+
+/**
  * Perform a human-like click at specific coordinates via CDP Input.dispatchMouseEvent.
  * Sends: mouseMoved → randomPause → mousePressed → randomPause → mouseReleased
  * with coordinate jitter and variable timing to mimic human motor variance.
@@ -196,6 +255,11 @@ export async function humanClickXY(tab, cdpFn, x, y) {
 		JSON.stringify({ ...base, type: "mouseReleased", x: rx, y: ry }),
 	]);
 
+	// Also fire via browser-level CDP WebSocket so the click reaches OOPIFs
+	// (cross-origin iframes like Cloudflare Turnstile) that page-session
+	// dispatch can't route to. Best-effort — never throws.
+	await browserLevelClick(cx, cy).catch(() => {});
+
 	// Post-click settle
 	await new Promise((r) => setTimeout(r, rng(100, 300)));
 
@@ -222,7 +286,14 @@ export async function humanClickElement(tab, cdpFn, selector) {
 		return null; // Element not found
 	}
 
-	const { x, y } = JSON.parse(rect);
+	const parsed = JSON.parse(rect);
+	// Skip elements with zero dimensions or off-screen position — clicking at
+	// (0,0) is a false positive (hidden/unmounted element matched the selector).
+	if (parsed.w === 0 || parsed.h === 0 || (parsed.x === 0 && parsed.y === 0)) {
+		return null;
+	}
+
+	const { x, y } = parsed;
 	return humanClickXY(tab, cdpFn, x, y);
 }
 
@@ -250,6 +321,8 @@ async function tryHumanClick(tab, cdp, detectResult) {
 			return r !== null;
 		}
 		if (info.t === "xy") {
+			// Skip zero/invalid coordinates — element is off-screen or not rendered
+			if (!info.x && !info.y) return false;
 			process.stderr.write(
 				`[greedysearch] Human-clicking at (${info.x.toFixed(0)}, ${info.y.toFixed(0)})...\n`,
 			);

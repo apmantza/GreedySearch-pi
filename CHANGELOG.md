@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Gemini lands in wrong frame context** (`bin/cdp.mjs`) — `captureMainContext` picked the first `isDefault` execution context after `Runtime.enable`, which for Gemini was the empty `_/bscframe` child iframe rather than the `app` main frame. All evals were running against an empty document, so `rich-textarea .ql-editor` was never found. Fixed by fetching the root frame ID from `Page.getFrameTree` and preferring the context whose `auxData.frameId` matches. Falls back to the old behaviour for sites with a single context. Fixes Gemini extraction on first cold start.
+
+- **Bing Copilot CF headless fast-fail** (`extractors/bing-copilot.mjs`) — Cloudflare blocks the Copilot response iframe *after* query submission, not during navigation, so the extractor wasted ~18s polling the clipboard before `extractFromIframes` finally detected the challenge. Added an accessibility-tree snap check at the top of `extractAnswer` in headless mode that fast-fails immediately when a CF challenge is present. Headless failure time: ~27s → ~6s.
+
+- **Perplexity Cloudflare headless detection** (`extractors/perplexity.mjs`) — Perplexity is CF-protected in headless just like Bing. Added the same early snap check before the input selector wait. Also added the post-verification settle + re-navigation block (matching Bing's flow) so the page has time to redirect from the CF challenge page to the real homepage before the input is searched for. Input `waitForSelector` timeout increased 5s → 15s to cover CF redirect + React hydration time. Added an explicit `!inputReady` throw instead of falling through to a confusing `cdp click` failure.
+
+- **False-positive verification clicks at (0, 0)** (`extractors/consent.mjs`) — On Cloudflare challenge pages (Perplexity, Copilot), `VERIFY_DETECT_JS` matched hidden/unmounted elements whose `getBoundingClientRect` returned a zero rect. `humanClickElement` now skips elements with zero dimensions or (0, 0) center. `tryHumanClick` skips `{t:'xy'}` payloads with both coordinates at zero. Prevents clicks that "succeeded" but hit the wrong place and left the challenge loop believing it had cleared.
+
+- **CF cookie persistence across Chrome restarts** (`src/search/chrome.mjs`) — Chrome was killed with `taskkill /F` (force-kill) before it could flush its SQLite cookie database, so `cf_clearance` cookies earned during visible recovery were lost on the next headless run. `killChrome` now sends `Browser.close` via the browser-level CDP WebSocket first, waits up to 1.5s for Chrome to exit gracefully (flushing cookies), then falls back to force-kill if still running. After a single human-solved Turnstile, subsequent headless runs reuse the cached cookie and skip the challenge entirely.
+
+- **Browser-level OOPIF click for Turnstile** (`extractors/consent.mjs`) — Cloudflare Turnstile renders in a cross-origin OOPIF (`challenges.cloudflare.com`). Page-session `Input.dispatchMouseEvent` doesn't route into OOPIFs. `humanClickXY` now additionally fires the same click sequence via the browser-level CDP WebSocket (`/json/version` → `webSocketDebuggerUrl`), which routes through the top-level compositor and reaches the OOPIF — without attaching to the target (which would poison it). The page-level click is kept for regular elements; the browser-level click is a best-effort addition that never throws.
+
 ### Removed
 
 - **`googlesearch` / `gs` engine** — Removed the `google-search` extractor (`extractors/google-search.mjs`) and its `googlesearch`/`gs` engine aliases from `ENGINES` in `constants.mjs`. The classic Google Search extractor was broken in headless mode and not part of the `"all"` fan-out.

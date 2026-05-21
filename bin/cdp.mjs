@@ -365,10 +365,23 @@ async function captureMainContext(cdp, sid) {
 	// Always disable Runtime after capturing
 	await cdp.send("Runtime.disable", {}, sid).catch(() => {});
 
-	// Find the main world context
-	const main = contexts.find(
+	// Get the root frame ID so we can prefer its context when multiple
+	// isDefault contexts exist (e.g. Gemini embeds _/bscframe as a child
+	// frame whose context fires first and would otherwise be picked instead).
+	let rootFrameId = null;
+	try {
+		const ft = await cdp.send("Page.getFrameTree", {}, sid);
+		rootFrameId = ft?.frameTree?.frame?.id ?? null;
+	} catch {}
+
+	const defaults = contexts.filter(
 		(ctx) => ctx.auxData?.isDefault && ctx.auxData?.type === "default",
 	);
+	// Prefer the context whose frameId matches the root frame
+	const main =
+		(rootFrameId && defaults.find((ctx) => ctx.auxData?.frameId === rootFrameId)) ||
+		defaults[0] ||
+		null;
 	return main?.id ?? null;
 }
 

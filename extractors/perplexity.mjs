@@ -131,15 +131,43 @@ async function main() {
 		}
 		await dismissConsent(tab, cdp);
 
-		// After verification, page may have redirected or reloaded — wait for it to settle
+		// After verification, page may have redirected — wait for it to settle
+		// then re-navigate to homepage if we ended up somewhere else.
 		if (verifyResult === "clicked") {
 			await new Promise((r) => setTimeout(r, TIMING.afterVerify));
-			await dismissConsent(tab, cdp);
+			const postVerifyUrl = await cdp(["eval", tab, "document.location.href"]).catch(() => "");
+			let onPerplexityAfter = false;
+			try {
+				const host = new URL(postVerifyUrl).hostname.toLowerCase();
+				onPerplexityAfter = host === "perplexity.ai" || host.endsWith(".perplexity.ai");
+			} catch {}
+			if (!onPerplexityAfter) {
+				await cdp(["nav", tab, "https://www.perplexity.ai/"], 20000);
+				await new Promise((r) => setTimeout(r, 800));
+				await dismissConsent(tab, cdp);
+			}
 		}
 
-		// Wait for React app to mount input (up to 5s)
-		const inputReady = await waitForSelector(tab, S.input, 5000, 400);
+		// In headless mode: snap the accessibility tree to detect Cloudflare
+		// before burning the selector wait. Perplexity is CF-protected in headless
+		// just like Bing — fast-fail triggers the visible retry.
+		if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
+			const snap = await cdp(["snap", tab]).catch(() => "");
+			if (/cloudflare|challenge|security check/i.test(snap)) {
+				console.error("[perplexity] Cloudflare challenge in snap — fast-failing to visible retry");
+				env.blockedBy = "cloudflare";
+				throw new Error("Cloudflare challenge detected — headless blocked");
+			}
+		}
+
+		// Wait for React app to mount input (up to 15s — gives CF redirect + hydration time)
+		const inputReady = await waitForSelector(tab, S.input, 15000, 400);
 		env.inputReady = inputReady;
+
+		if (!inputReady) {
+			throw new Error("Perplexity input not found — page may not have loaded or is in unexpected state");
+		}
+
 		await new Promise((r) => setTimeout(r, jitter(300)));
 
 		await injectClipboardInterceptor(tab, GLOBAL_VAR);

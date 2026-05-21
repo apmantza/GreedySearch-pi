@@ -38,6 +38,19 @@ const GLOBAL_VAR = "__bingClipboard";
 // ============================================================================
 
 async function extractAnswer(tab, env) {
+	// In headless mode: snap the accessibility tree before spending ~18s on
+	// clipboard polls. Copilot loads its input fine in headless but renders
+	// responses behind a Cloudflare-protected iframe — detecting that here
+	// fast-fails to the visible retry instead of burning all the poll time.
+	if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
+		const snap = await cdp(["snap", tab]).catch(() => "");
+		if (/cloudflare|challenge|security check/i.test(snap)) {
+			console.error("[bing] Cloudflare challenge in snap — fast-failing to visible retry");
+			env.blockedBy = "cloudflare";
+			throw new Error("Cloudflare challenge detected — headless blocked");
+		}
+	}
+
 	// Wait for the assistant copy button to exist. On fresh Copilot
 	// sessions the answer text can render before the button handler is
 	// fully hydrated.  Wait for the button + a small hydration delay.
