@@ -32,7 +32,7 @@ export const ENGINES = {
 
 export const SOURCE_FETCH_CONCURRENCY = Math.max(
 	1,
-	Number.parseInt(process.env.GREEDY_FETCH_CONCURRENCY || "4", 10) || 4,
+	Number.parseInt(process.env.GREEDY_FETCH_CONCURRENCY || "5", 10) || 5,
 );
 
 // Tell cdp.mjs to prefer the GreedySearch Chrome profile's DevToolsActivePort

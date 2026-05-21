@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Gemini tab pre-navigated in parallel with source fetch** (`bin/search.mjs`, `extractors/gemini.mjs`) — In `all` mode, a Gemini tab is now opened and navigated to `gemini.google.com/app` concurrently with source fetching instead of sequentially after it. `gemini.mjs` skips the navigation if the tab is already on the Gemini domain (same pattern as Bing/Perplexity). Saves ~4s off synthesis start on every standard-depth `all` search.
+
+- **Source fetch concurrency 4→5** (`src/search/constants.mjs`) — Default `SOURCE_FETCH_CONCURRENCY` increased from 4 to 5. With 5 top sources fetched per search, this runs all fetches in a single parallel batch instead of 4+1 sequential batches. Saves ~1s when any source in the first batch is slow (browser-fetched sources can take 3-4s each). Still overridable via `GREEDY_FETCH_CONCURRENCY` env var.
+
+- **Bing copy-button wait 5s→2s** (`extractors/bing-copilot.mjs`) — `waitForCopyButton` timeout reduced from 5s to 2s. The Cloudflare snap check at the top of `extractAnswer` guarantees we only reach this point on a clean response, where the copy button appears within ~1s of stream completion. Saves up to 3s per Bing call.
+
 ### Fixed
 
 - **Gemini lands in wrong frame context** (`bin/cdp.mjs`) — `captureMainContext` picked the first `isDefault` execution context after `Runtime.enable`, which for Gemini was the empty `_/bscframe` child iframe rather than the `app` main frame. All evals were running against an empty document, so `rich-textarea .ql-editor` was never found. Fixed by fetching the root frame ID from `Page.getFrameTree` and preferring the context whose `auxData.frameId` matches. Falls back to the old behaviour for sites with a single context. Fixes Gemini extraction on first cold start.

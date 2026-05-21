@@ -155,9 +155,19 @@ async function main() {
 		await cdp(["list"]);
 		const tab = await getOrOpenTab(tabPrefix);
 
-		// Each search = fresh conversation
-		await cdp(["nav", tab, "https://gemini.google.com/app"], 20000);
-		await new Promise((r) => setTimeout(r, 600));
+		// Skip navigation if tab was pre-seeded to Gemini (e.g. by search.mjs
+		// opening the tab in parallel with source fetch to save ~4s nav time).
+		const currentUrl = await cdp(["eval", tab, "document.location.href"]).catch(() => "");
+		let onGemini = false;
+		try {
+			const host = new URL(currentUrl).hostname.toLowerCase();
+			onGemini = host === "gemini.google.com" || host.endsWith(".gemini.google.com");
+		} catch {}
+
+		if (!onGemini) {
+			await cdp(["nav", tab, "https://gemini.google.com/app"], 20000);
+			await new Promise((r) => setTimeout(r, 600));
+		}
 		await dismissConsent(tab, cdp);
 		await handleVerification(tab, cdp, 10000);
 

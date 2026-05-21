@@ -416,7 +416,17 @@ async function main() {
 			// Build a canonical source registry across all engines
 			out._sources = buildSourceRegistry(out, query);
 
+			// Pre-navigate Gemini tab in parallel with source fetch so the page
+			// is already loaded when synthesis starts — saves ~4s of nav time.
+			let geminiTabPromise = null;
+			if (depth !== "fast") {
+				geminiTabPromise = openNewTab("https://gemini.google.com/app")
+					.then((tab) => { activateTab(tab).catch(() => {}); return tab; })
+					.catch(() => null);
+			}
+
 			// Source fetching: default for all "all" searches
+			// Fetch all sources in a single batch (concurrency = source count).
 			if (depth !== "fast" && out._sources.length > 0) {
 				process.stderr.write("PROGRESS:source-fetch:start\n");
 				const fetchedSources = await fetchMultipleSources(
@@ -437,8 +447,7 @@ async function main() {
 					"[greedysearch] Synthesizing results with Gemini...\n",
 				);
 				try {
-					const geminiTab = await openNewTab();
-					await activateTab(geminiTab);
+					const geminiTab = await geminiTabPromise ?? await openNewTab();
 					const synthesis = await synthesizeWithGemini(query, out, {
 						grounded: depth === "deep",
 						tabPrefix: geminiTab,

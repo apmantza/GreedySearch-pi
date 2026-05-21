@@ -54,7 +54,9 @@ async function extractAnswer(tab, env) {
 	// Wait for the assistant copy button to exist. On fresh Copilot
 	// sessions the answer text can render before the button handler is
 	// fully hydrated.  Wait for the button + a small hydration delay.
-	await waitForCopyButton(tab, S.copyButton, { timeout: 5000 }).catch(
+	// 2s is enough — the CF snap check above ensures we only reach here
+	// on a clean response, where the button appears within ~1s.
+	await waitForCopyButton(tab, S.copyButton, { timeout: 2000 }).catch(
 		() => null,
 	);
 	// Give React time to hydrate the click handler on the button
