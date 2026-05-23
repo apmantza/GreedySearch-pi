@@ -95,7 +95,7 @@ export function normalizeUrl(rawUrl) {
 			}
 		}
 		url.searchParams.sort();
-		const normalizedPath = url.pathname.replace(/\/+$/, "") || "/";
+		const normalizedPath = url.pathname.replace(/\/{1,10}$/, "") || "/";
 		url.pathname = normalizedPath;
 		const normalized = url.toString();
 		return normalizedPath === "/" ? normalized.replace(/\/$/, "") : normalized;

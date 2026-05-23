@@ -125,9 +125,10 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 		renderCall(args, theme) {
 			const q = (args.query || "").slice(0, 60);
 			const qDisplay = q.length < (args.query || "").length ? `${q}...` : q;
-			const engineDisplay = args.engine && args.engine !== "all"
-				? theme.fg("dim", ` (${args.engine})`)
-				: "";
+			const engineDisplay =
+				args.engine && args.engine !== "all"
+					? theme.fg("dim", ` (${args.engine})`)
+					: "";
 			return new Text(
 				`${theme.fg("toolTitle", theme.bold("greedy_search"))} "${theme.fg("accent", qDisplay)}"${engineDisplay}`,
 				0,
@@ -141,28 +142,41 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			}
 
 			const textContent = result.content.find((c) => c.type === "text");
-			const raw = (result.details as any)?.raw as Record<string, unknown> | undefined;
+			const raw = (result.details as any)?.raw as
+				| Record<string, unknown>
+				| undefined;
 
 			// Collapsed: one-line summary only
 			if (!expanded) {
-				const needsHuman = raw?._needsHumanVerification as Record<string, unknown> | undefined;
+				const needsHuman = raw?._needsHumanVerification as
+					| Record<string, unknown>
+					| undefined;
 				if (needsHuman) {
-					return new Text(theme.fg("warning", " → Manual verification required"), 0, 0);
+					return new Text(
+						theme.fg("warning", " → Manual verification required"),
+						0,
+						0,
+					);
 				}
 
-				const synthesis = raw?._synthesis as Record<string, unknown> | undefined;
+				const synthesis = raw?._synthesis as
+					| Record<string, unknown>
+					| undefined;
 				const sources = raw?._sources as Array<unknown> | undefined;
 				if (synthesis) {
 					const sourceCount = Array.isArray(sources) ? sources.length : 0;
 					const consensus = synthesis.consensus as string | undefined;
 					let summary = " → Synthesized";
-					if (sourceCount > 0) summary += ` · ${sourceCount} source${sourceCount > 1 ? "s" : ""}`;
+					if (sourceCount > 0)
+						summary += ` · ${sourceCount} source${sourceCount > 1 ? "s" : ""}`;
 					if (consensus) summary += ` · ${consensus}`;
 					return new Text(theme.fg("muted", summary), 0, 0);
 				}
 
 				// Single engine: count its sources
-				const engineKeys = Object.keys(raw || {}).filter((k) => !k.startsWith("_"));
+				const engineKeys = Object.keys(raw || {}).filter(
+					(k) => !k.startsWith("_"),
+				);
 				let totalSources = 0;
 				for (const key of engineKeys) {
 					const eng = (raw as any)[key] as Record<string, unknown> | undefined;
@@ -171,7 +185,10 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				}
 				if (totalSources > 0) {
 					return new Text(
-						theme.fg("muted", ` → ${totalSources} source${totalSources > 1 ? "s" : ""}`),
+						theme.fg(
+							"muted",
+							` → ${totalSources} source${totalSources > 1 ? "s" : ""}`,
+						),
 						0,
 						0,
 					);
@@ -185,7 +202,10 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				return new Text("", 0, 0);
 			}
 
-			const lines = textContent.text.split("\n").map((line) => theme.fg("toolOutput", line)).join("\n");
+			const lines = textContent.text
+				.split("\n")
+				.map((line) => theme.fg("toolOutput", line))
+				.join("\n");
 			return new Text(`\n${lines}`, 0, 0);
 		},
 	});

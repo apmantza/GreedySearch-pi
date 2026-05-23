@@ -562,31 +562,20 @@ export function checkContentQuality(extracted) {
 	}
 
 	// Suspicious content patterns that indicate bot block or incomplete extraction
-	const suspiciousPatterns = [
-		{ pattern: /\bloading\b.{0,50}?\bplease wait\b/is, desc: "loading page" },
-		{
-			pattern: /please\s+ensure\s+javascript\s+is\s+enabled/i,
-			desc: "requires javascript",
-		},
-		{
-			pattern: /enable\s+javascript\s+to\s+view/i,
-			desc: "requires javascript",
-		},
-		{
-			pattern: /just\s+a\s+moment\b/i,
-			desc: "cloudflare challenge detected in content",
-		},
-		{ pattern: /verify\s+you\s+are\s+human/i, desc: "human verification" },
-		{ pattern: /captcha\s+required/i, desc: "captcha in extracted content" },
-		{ pattern: /access\s+denied/i, desc: "access denied in content" },
-		{
-			pattern: /^\s*sign\s+in\s*$|^\s*log\s+in\s*$/im,
-			desc: "login form only",
-		},
+	// Use simple string checks instead of regex to avoid ReDoS (SonarCloud javasecurity:S5852)
+	const suspiciousChecks = [
+		{ check: () => markdown.includes("loading") && markdown.includes("please wait"), desc: "loading page" },
+		{ check: () => markdown.includes("please ensure javascript is enabled"), desc: "requires javascript" },
+		{ check: () => markdown.includes("enable javascript to view"), desc: "requires javascript" },
+		{ check: () => markdown.includes("just a moment"), desc: "cloudflare challenge detected in content" },
+		{ check: () => markdown.includes("verify you are human"), desc: "human verification" },
+		{ check: () => markdown.includes("captcha required"), desc: "captcha in extracted content" },
+		{ check: () => markdown.includes("access denied"), desc: "access denied in content" },
+		{ check: () => /^\s*sign\s+in\s*$|^\s*log\s+in\s*$/im.test(markdown), desc: "login form only" },
 	];
 
-	for (const { pattern, desc } of suspiciousPatterns) {
-		if (pattern.test(markdown)) {
+	for (const { check, desc } of suspiciousChecks) {
+		if (check()) {
 			return { ok: false, reason: desc };
 		}
 	}

@@ -49,6 +49,7 @@ export const SELECTORS = {
 		sourcesExclude: ["gemini.google", "gstatic", "google.com/search"],
 		citationButtonPattern: 'button[aria-label*="citation from"]',
 		// For parsing citation aria-labels: "View source details for citation from {name}. Opens side panel."
-		citationNameRegex: /from\s+([^.]+)\.\s/,
+		// Bounded + non-overlapping character classes to prevent ReDoS
+		citationNameRegex: /from\s{1,20}([^.]{1,200})\.\s/,
 	},
 };
