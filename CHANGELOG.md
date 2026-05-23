@@ -6,6 +6,8 @@
 
 - **Visible Chrome launches minimized** (`bin/launch-visible.mjs`) — After Chrome's CDP endpoint becomes ready, `minimizeViaCDP` sends `Browser.setWindowBounds { windowState: "minimized" }` via the browser-level WebSocket. Chrome lands in the taskbar immediately instead of stealing focus from the user's active window. Closes [#20](https://github.com/apmantza/GreedySearch-pi/issues/20).
 
+- **Recovery path always returns to headless** (`bin/search.mjs`) — After a visible-mode retry (triggered by Cloudflare blocking headless), the pipeline now unconditionally kills visible Chrome and relaunches headless before running Gemini synthesis. Previously the switch-back only happened when zero engines were recovered (`recovered === 0`), so a partial recovery left visible Chrome alive and caused synthesis to open the Gemini tab in the visible window.
+
 - **Gemini tab no longer steals focus during synthesis** (`bin/search.mjs`) — Removed the `activateTab` call on the pre-navigated Gemini tab. `Target.activateTarget` was restoring the minimized Chrome window mid-search; CDP synthesis operates on the target ID directly and has no need for the tab to be Chrome's active tab.
 
 ### Changed

@@ -387,11 +387,13 @@ async function main() {
 						// in the shared profile and future headless runs will reuse them.
 					}
 				} finally {
-					// Keep visible Chrome alive if engines were recovered (cookies now cached)
-					// or if the user needs to solve verification manually.
-					// Killing Chrome with taskkill /F would lose the cookie database writes.
-					if (!keepVisibleForHuman && recovered === 0) {
-						// Kill visible Chrome, relaunch headless for remaining pipeline
+					if (keepVisibleForHuman) {
+						// User must interact — keep visible Chrome open but out of the way
+						minimizeChrome().catch(() => {});
+					} else {
+						// Switch back to headless for synthesis + source fetch.
+						// killHeadlessChrome() sends Browser.close first so Chrome flushes
+						// its cookie database before the force-kill — cookies are preserved.
 						await closeTabs(retryTabs);
 						process.stderr.write(
 							"[greedysearch] Switching back to headless Chrome...\n",
@@ -402,11 +404,6 @@ async function main() {
 						await ensureChrome();
 						await cdp(["list"]);
 					}
-				}
-
-				// Minimize visible Chrome if it was kept alive (recovery succeeded or needs-human)
-				if (keepVisibleForHuman || recovered > 0) {
-					minimizeChrome().catch(() => {});
 				}
 
 				// Clear engineTabs — finally{} closeTabs handles empty arrays gracefully
