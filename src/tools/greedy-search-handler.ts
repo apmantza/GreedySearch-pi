@@ -138,7 +138,11 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 
 		renderResult(result, { expanded, isPartial }, theme) {
 			if (isPartial) {
-				return new Text(theme.fg("warning", "Searching..."), 0, 0);
+				const progressText = (result.content.find((c) => c.type === "text") as any)?.text as string | undefined;
+				const display = progressText
+					? progressText.replace(/\*\*/g, "")
+					: "Searching...";
+				return new Text(theme.fg("warning", display), 0, 0);
 			}
 
 			const textContent = result.content.find((c) => c.type === "text");
