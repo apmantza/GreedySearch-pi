@@ -15,6 +15,7 @@
   - **`navigator.userAgentData`** — Spoofed to match the detected UA version and remove any `HeadlessChrome` brand entry. `getHighEntropyValues()` returns consistent architecture, platform, and full version list.
   - **`window.outerWidth/Height`** — Patched from `0` (headless default) to mirror `innerWidth/Height`. A zero outer dimension is a well-known one-signal bot detector.
   - **`screen.colorDepth/pixelDepth`** — Ensured to report `24` when unset.
+  - **GPU rendering re-enabled in headless** — Removed `--disable-gpu` and `--disable-software-rasterizer`. With `--headless=new`, Chrome uses hardware GPU acceleration (ANGLE/Direct3D on Windows), producing canvas and WebGL output identical to visible mode. Cloudflare Turnstile passes automatically on Perplexity without triggering visible-mode retry.
 
 ## [1.9.0] — 2026-05-22
 
