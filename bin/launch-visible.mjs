@@ -113,7 +113,13 @@ async function minimizeViaCDP(port) {
 		const targetId = targets.find((t) => t.type === "page")?.id;
 		if (!targetId) return;
 
-		const wsPath = new URL(version.webSocketDebuggerUrl).pathname;
+		// Validate browser WebSocket URL to prevent SSRF (SonarCloud javasecurity:S5335)
+		const wsUrlStr = version.webSocketDebuggerUrl;
+		if (typeof wsUrlStr !== "string") return;
+		const wsUrl = new URL(wsUrlStr);
+		if (wsUrl.hostname !== "localhost" && wsUrl.hostname !== "127.0.0.1") return;
+		if (!/^ws:\/\/localhost:\d+/.test(`ws://${wsUrl.host}`)) return;
+		const wsPath = wsUrl.pathname;
 		const ws = new WebSocket(`ws://localhost:${port}${wsPath}`);
 		await new Promise((resolve) => {
 			ws.onopen = () =>

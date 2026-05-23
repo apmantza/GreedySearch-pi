@@ -83,7 +83,9 @@ function getChromeVersion(chromePath) {
 	try {
 		const appDir = join(chromePath, "..");
 		const entries = readdirSync(appDir);
-		const ver = entries.find((e) => /^\d{1,10}\.\d{1,10}\.\d{1,10}\.\d{1,10}$/.test(e));
+		const ver = entries.find((e) =>
+			/^\d{1,10}\.\d{1,10}\.\d{1,10}\.\d{1,10}$/.test(e),
+		);
 		if (ver) return ver.split(".")[0];
 	} catch {}
 
