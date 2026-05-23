@@ -25,7 +25,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-	activateTab,
 	cdp,
 	closeTab,
 	closeTabs,
@@ -422,7 +421,6 @@ async function main() {
 			let geminiTabPromise = null;
 			if (depth !== "fast") {
 				geminiTabPromise = openNewTab("https://gemini.google.com/app")
-					.then((tab) => { activateTab(tab).catch(() => {}); return tab; })
 					.catch(() => null);
 			}
 

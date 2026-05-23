@@ -6,6 +6,8 @@
 
 - **Visible Chrome launches minimized** (`bin/launch-visible.mjs`) — After Chrome's CDP endpoint becomes ready, `minimizeViaCDP` sends `Browser.setWindowBounds { windowState: "minimized" }` via the browser-level WebSocket. Chrome lands in the taskbar immediately instead of stealing focus from the user's active window. Closes [#20](https://github.com/apmantza/GreedySearch-pi/issues/20).
 
+- **Gemini tab no longer steals focus during synthesis** (`bin/search.mjs`) — Removed the `activateTab` call on the pre-navigated Gemini tab. `Target.activateTarget` was restoring the minimized Chrome window mid-search; CDP synthesis operates on the target ID directly and has no need for the tab to be Chrome's active tab.
+
 ## [1.9.0] — 2026-05-22
 
 ### Added
