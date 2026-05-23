@@ -8,6 +8,8 @@
 
 - **Recovery path always returns to headless** (`bin/search.mjs`) — After a visible-mode retry (triggered by Cloudflare blocking headless), the pipeline now unconditionally kills visible Chrome and relaunches headless before running Gemini synthesis. Previously the switch-back only happened when zero engines were recovered (`recovered === 0`), so a partial recovery left visible Chrome alive and caused synthesis to open the Gemini tab in the visible window.
 
+- **`minimizeViaCDP` guard inverted in `launch.mjs`** (`bin/launch.mjs`) — The early-return guard was `if (isVisible()) return` which caused the function to exit immediately in the only case it was ever called (visible Chrome launch via `GREEDY_SEARCH_VISIBLE=1`). Changed to `if (isHeadless()) return`. Also removed the unnecessary 1s sleep (Chrome is already confirmed ready via `writePortFile()` before this is called) and applied the SonarCloud S8480 fix (`wsPath` extracted from `webSocketDebuggerUrl`, WebSocket URL reconstructed as `ws://localhost:${PORT}${wsPath}`).
+
 - **Gemini tab no longer steals focus during synthesis** (`bin/search.mjs`) — Removed the `activateTab` call on the pre-navigated Gemini tab. `Target.activateTarget` was restoring the minimized Chrome window mid-search; CDP synthesis operates on the target ID directly and has no need for the tab to be Chrome's active tab.
 
 ### Changed
