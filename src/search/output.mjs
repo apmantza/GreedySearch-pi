@@ -2,7 +2,7 @@
 //
 // Extracted from search.mjs.
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const __dir =
@@ -17,9 +17,31 @@ export function slugify(query) {
 		.slice(0, 60);
 }
 
+const RESULTS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const RESULTS_MIN_KEEP = 10;
+
+function purgeOldResults(dir) {
+	try {
+		const files = readdirSync(dir)
+			.filter((f) => f.endsWith(".json") || f.endsWith(".md"))
+			.map((f) => ({ f, mtime: statSync(join(dir, f)).mtimeMs }))
+			.sort((a, b) => b.mtime - a.mtime);
+
+		const cutoff = Date.now() - RESULTS_MAX_AGE_MS;
+		for (let i = RESULTS_MIN_KEEP; i < files.length; i++) {
+			if (files[i].mtime < cutoff) {
+				rmSync(join(dir, files[i].f), { force: true });
+			}
+		}
+	} catch {
+		// best-effort
+	}
+}
+
 export function resultsDir() {
 	const dir = join(__dir, "..", "..", "results");
 	mkdirSync(dir, { recursive: true });
+	purgeOldResults(dir);
 	return dir;
 }
 

@@ -18,6 +18,8 @@
 
 ### Changed
 
+- **Result file auto-purge** (`src/search/output.mjs`) — On each search run, files older than 7 days are deleted from the results directory. The 10 most recent files are always kept regardless of age. Runs inside `resultsDir()` so it's transparent and zero-overhead.
+
 - **`greedy_search` tool: collapsed rendering** (`src/tools/greedy-search-handler.ts`) — Added `renderCall` and `renderResult` hooks. The call line shows the query (truncated to 60 chars) and engine. The result collapses to a one-line summary: synthesis path shows source count + consensus label; single-engine path shows source count; human-verification path shows a warning. Full output is available via expand (Ctrl+O). Also migrated peer deps from `@mariozechner/pi-coding-agent` to `@earendil-works/pi-coding-agent` and added `@earendil-works/pi-tui` for the `Text` primitive.
 
 - **Headless stealth hardening** (`bin/launch.mjs`, `extractors/common.mjs`) — Four fingerprinting gaps closed:
