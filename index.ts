@@ -11,7 +11,7 @@
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { registerGreedySearchTool } from "./src/tools/greedy-search-handler.js";
 import { cdpAvailable } from "./src/tools/shared.js";

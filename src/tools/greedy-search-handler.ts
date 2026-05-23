@@ -2,7 +2,8 @@
  * greedy_search tool handler — multi-engine AI web search
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { formatResults } from "../formatters/results.js";
 import {
@@ -119,6 +120,73 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			} catch (e) {
 				return errorResult("Search failed", e);
 			}
+		},
+
+		renderCall(args, theme) {
+			const q = (args.query || "").slice(0, 60);
+			const qDisplay = q.length < (args.query || "").length ? `${q}...` : q;
+			const engineDisplay = args.engine && args.engine !== "all"
+				? theme.fg("dim", ` (${args.engine})`)
+				: "";
+			return new Text(
+				`${theme.fg("toolTitle", theme.bold("greedy_search"))} "${theme.fg("accent", qDisplay)}"${engineDisplay}`,
+				0,
+				0,
+			);
+		},
+
+		renderResult(result, { expanded, isPartial }, theme) {
+			if (isPartial) {
+				return new Text(theme.fg("warning", "Searching..."), 0, 0);
+			}
+
+			const textContent = result.content.find((c) => c.type === "text");
+			const raw = (result.details as any)?.raw as Record<string, unknown> | undefined;
+
+			// Collapsed: one-line summary only
+			if (!expanded) {
+				const needsHuman = raw?._needsHumanVerification as Record<string, unknown> | undefined;
+				if (needsHuman) {
+					return new Text(theme.fg("warning", " → Manual verification required"), 0, 0);
+				}
+
+				const synthesis = raw?._synthesis as Record<string, unknown> | undefined;
+				const sources = raw?._sources as Array<unknown> | undefined;
+				if (synthesis) {
+					const sourceCount = Array.isArray(sources) ? sources.length : 0;
+					const consensus = synthesis.consensus as string | undefined;
+					let summary = " → Synthesized";
+					if (sourceCount > 0) summary += ` · ${sourceCount} source${sourceCount > 1 ? "s" : ""}`;
+					if (consensus) summary += ` · ${consensus}`;
+					return new Text(theme.fg("muted", summary), 0, 0);
+				}
+
+				// Single engine: count its sources
+				const engineKeys = Object.keys(raw || {}).filter((k) => !k.startsWith("_"));
+				let totalSources = 0;
+				for (const key of engineKeys) {
+					const eng = (raw as any)[key] as Record<string, unknown> | undefined;
+					const s = eng?.sources as Array<unknown> | undefined;
+					if (Array.isArray(s)) totalSources += s.length;
+				}
+				if (totalSources > 0) {
+					return new Text(
+						theme.fg("muted", ` → ${totalSources} source${totalSources > 1 ? "s" : ""}`),
+						0,
+						0,
+					);
+				}
+
+				return new Text(theme.fg("muted", " → Done"), 0, 0);
+			}
+
+			// Expanded: full output
+			if (!textContent || textContent.type !== "text") {
+				return new Text("", 0, 0);
+			}
+
+			const lines = textContent.text.split("\n").map((line) => theme.fg("toolOutput", line)).join("\n");
+			return new Text(`\n${lines}`, 0, 0);
 		},
 	});
 }
