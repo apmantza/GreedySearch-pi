@@ -19,7 +19,7 @@ jobs:
       contents: read
     if: github.repository == 'apmantza/GreedySearch-pi'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Open PR to pi-webaio
         env:
