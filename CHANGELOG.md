@@ -8,11 +8,15 @@
 
 - **Recovery path always returns to headless** (`bin/search.mjs`) — After a visible-mode retry (triggered by Cloudflare blocking headless), the pipeline now unconditionally kills visible Chrome and relaunches headless before running Gemini synthesis. Previously the switch-back only happened when zero engines were recovered (`recovered === 0`), so a partial recovery left visible Chrome alive and caused synthesis to open the Gemini tab in the visible window.
 
+- **ReDoS hotspots fixed** (`bin/launch.mjs`, `extractors/selectors.mjs`, `src/fetcher.mjs`, `src/search/sources.mjs`) — Four SonarCloud `javasecurity:S5852` hotspots resolved: (1) Chrome version directory regex bounded (`\d+` → `\d{1,10}` ×4 groups); (2) Perplexity citation name regex bounded (`\s+` → `\s{1,20}`, `[^.]+` → `[^.]{1,200}`); (3) seven suspicious-content regex patterns in `checkContentQuality` replaced with `String.includes` checks (faster and immune to backtracking on adversarial input); (4) trailing-slash removal regex bounded (`\/+$` → `\/{1,10}$`).
+
 - **`minimizeViaCDP` guard inverted in `launch.mjs`** (`bin/launch.mjs`) — The early-return guard was `if (isVisible()) return` which caused the function to exit immediately in the only case it was ever called (visible Chrome launch via `GREEDY_SEARCH_VISIBLE=1`). Changed to `if (isHeadless()) return`. Also removed the unnecessary 1s sleep (Chrome is already confirmed ready via `writePortFile()` before this is called) and applied the SonarCloud S8480 fix (`wsPath` extracted from `webSocketDebuggerUrl`, WebSocket URL reconstructed as `ws://localhost:${PORT}${wsPath}`).
 
 - **Gemini tab no longer steals focus during synthesis** (`bin/search.mjs`) — Removed the `activateTab` call on the pre-navigated Gemini tab. `Target.activateTarget` was restoring the minimized Chrome window mid-search; CDP synthesis operates on the target ID directly and has no need for the tab to be Chrome's active tab.
 
 ### Changed
+
+- **`greedy_search` tool: collapsed rendering** (`src/tools/greedy-search-handler.ts`) — Added `renderCall` and `renderResult` hooks. The call line shows the query (truncated to 60 chars) and engine. The result collapses to a one-line summary: synthesis path shows source count + consensus label; single-engine path shows source count; human-verification path shows a warning. Full output is available via expand (Ctrl+O). Also migrated peer deps from `@mariozechner/pi-coding-agent` to `@earendil-works/pi-coding-agent` and added `@earendil-works/pi-tui` for the `Text` primitive.
 
 - **Headless stealth hardening** (`bin/launch.mjs`, `extractors/common.mjs`) — Four fingerprinting gaps closed:
   - **UA version auto-detected** — `getChromeVersion` reads the versioned sub-directory inside the Chrome Application folder (e.g. `148.0.7778.168/`) to extract the real major version, then injects it into the `--user-agent` flag. Eliminates the TLS/UA mismatch that was caused by the hardcoded `Chrome/131` string (actual binary was `Chrome/148`).
