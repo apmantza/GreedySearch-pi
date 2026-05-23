@@ -165,11 +165,11 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				const sources = raw?._sources as Array<unknown> | undefined;
 				if (synthesis) {
 					const sourceCount = Array.isArray(sources) ? sources.length : 0;
-					const consensus = synthesis.consensus as string | undefined;
+					const agreement = (synthesis.agreement as Record<string, unknown> | undefined)?.level as string | undefined;
 					let summary = " → Synthesized";
 					if (sourceCount > 0)
 						summary += ` · ${sourceCount} source${sourceCount > 1 ? "s" : ""}`;
-					if (consensus) summary += ` · ${consensus}`;
+					if (agreement) summary += ` · ${agreement}`;
 					return new Text(theme.fg("muted", summary), 0, 0);
 				}
 
