@@ -113,7 +113,8 @@ async function minimizeViaCDP(port) {
 		const targetId = targets.find((t) => t.type === "page")?.id;
 		if (!targetId) return;
 
-		const ws = new WebSocket(version.webSocketDebuggerUrl);
+		const wsPath = new URL(version.webSocketDebuggerUrl).pathname;
+		const ws = new WebSocket(`ws://localhost:${port}${wsPath}`);
 		await new Promise((resolve) => {
 			ws.onopen = () =>
 				ws.send(
