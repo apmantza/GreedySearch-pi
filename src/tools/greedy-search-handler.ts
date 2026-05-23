@@ -194,6 +194,15 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 					);
 				}
 
+				// No structured data — show content text as error/fallback
+				const snippet = (textContent as any)?.text as string | undefined;
+				if (snippet) {
+					return new Text(
+						theme.fg("warning", ` → ${snippet.slice(0, 80)}`),
+						0,
+						0,
+					);
+				}
 				return new Text(theme.fg("muted", " → Done"), 0, 0);
 			}
 
