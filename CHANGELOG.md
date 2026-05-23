@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.9.1] — 2026-05-23
+
 ### Fixed
 
 - **Visible Chrome launches minimized** (`bin/launch-visible.mjs`) — After Chrome's CDP endpoint becomes ready, `minimizeViaCDP` sends `Browser.setWindowBounds { windowState: "minimized" }` via the browser-level WebSocket. Chrome lands in the taskbar immediately instead of stealing focus from the user's active window. Closes [#20](https://github.com/apmantza/GreedySearch-pi/issues/20).
