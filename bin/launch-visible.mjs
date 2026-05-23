@@ -108,8 +108,12 @@ function httpGet(url, timeoutMs = 1000) {
 
 async function minimizeViaCDP(port) {
 	try {
-		const version = await httpGet(`http://localhost:${port}/json/version`).then((r) => JSON.parse(r.body));
-		const targets = await httpGet(`http://localhost:${port}/json/list`).then((r) => JSON.parse(r.body));
+		const version = await httpGet(`http://localhost:${port}/json/version`).then(
+			(r) => JSON.parse(r.body),
+		);
+		const targets = await httpGet(`http://localhost:${port}/json/list`).then(
+			(r) => JSON.parse(r.body),
+		);
 		const targetId = targets.find((t) => t.type === "page")?.id;
 		if (!targetId) return;
 
@@ -117,7 +121,8 @@ async function minimizeViaCDP(port) {
 		const wsUrlStr = version.webSocketDebuggerUrl;
 		if (typeof wsUrlStr !== "string") return;
 		const wsUrl = new URL(wsUrlStr);
-		if (wsUrl.hostname !== "localhost" && wsUrl.hostname !== "127.0.0.1") return;
+		if (wsUrl.hostname !== "localhost" && wsUrl.hostname !== "127.0.0.1")
+			return;
 		if (!/^ws:\/\/localhost:\d+/.test(`ws://${wsUrl.host}`)) return;
 		const wsPath = wsUrl.pathname;
 		const ws = new WebSocket(`ws://localhost:${port}${wsPath}`);
