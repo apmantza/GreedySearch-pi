@@ -594,7 +594,7 @@ export function checkContentQuality(extracted) {
 			desc: "access denied in content",
 		},
 		{
-			check: () => /^\s*sign\s+in\s*$|^\s*log\s+in\s*$/im.test(markdown),
+			check: () => /^\s{0,10}sign\s{1,5}in\s{0,10}$|^\s{0,10}log\s{1,5}in\s{0,10}$/im.test(markdown),
 			desc: "login form only",
 		},
 	];

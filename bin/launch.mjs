@@ -95,7 +95,7 @@ function getChromeVersion(chromePath) {
 			encoding: "utf8",
 			timeout: 5000,
 		}).trim();
-		const m = out.match(/(\d+)\.\d+\.\d+/);
+		const m = out.match(/(\d{1,10})\.\d{1,10}\.\d{1,10}/);
 		if (m) return m[1];
 	} catch {}
 
