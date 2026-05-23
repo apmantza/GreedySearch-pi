@@ -9,6 +9,8 @@
  */
 
 import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -122,10 +124,6 @@ export default function greedySearchExtension(pi: ExtensionAPI) {
 		},
 	});
 }
-
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-// Config helpers for /set-greedy-locale command
-import { homedir } from "node:os";
 
 const USER_CONFIG_DIR = join(homedir(), ".config", "greedysearch");
 const USER_CONFIG_FILE = join(USER_CONFIG_DIR, "config.json");

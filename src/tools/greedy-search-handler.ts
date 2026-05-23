@@ -35,7 +35,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			}),
 			depth: Type.String({
 				description:
-					'Search depth: "fast" (single engine, ~15-30s), "standard" (3 engines + synthesis, ~30-90s), "deep" (3 engines + source fetching + synthesis + confidence, ~60-180s). Default: "standard".',
+					'Search depth: "fast" (no synthesis/source fetch, ~15-30s), "standard" (synthesis + sources, ~30-90s), "deep" (synthesis + source fetching + confidence, ~60-180s). Default: "standard". Note: single-engine searches always run in fast mode regardless of this setting — synthesis requires multiple engines.',
 				default: "standard",
 			}),
 			fullAnswer: Type.Optional(
@@ -94,6 +94,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			const fullAnswer = fullAnswerParam ?? engine !== "all";
 			if (fullAnswer) flags.push("--full");
 			if (depth === "deep") flags.push("--depth", "deep");
+			else if (depth === "fast") flags.push("--fast");
 			else if (depth === "standard" && engine === "all")
 				flags.push("--synthesize");
 

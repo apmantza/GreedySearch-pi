@@ -4,11 +4,7 @@
  */
 
 import { formatAgreementLevel } from "../utils/helpers.js";
-import {
-	formatSourceLine,
-	pickSources,
-	renderSourceEvidence,
-} from "./sources.js";
+import { formatSourceLine, pickSources } from "./sources.js";
 
 /**
  * Render synthesis data (answer, consensus, differences, caveats, claims, sources)
