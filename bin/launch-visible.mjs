@@ -106,6 +106,57 @@ function httpGet(url, timeoutMs = 1000) {
 	});
 }
 
+async function minimizeViaCDP(port) {
+	try {
+		const version = await httpGet(`http://localhost:${port}/json/version`).then((r) => JSON.parse(r.body));
+		const targets = await httpGet(`http://localhost:${port}/json/list`).then((r) => JSON.parse(r.body));
+		const targetId = targets.find((t) => t.type === "page")?.id;
+		if (!targetId) return;
+
+		const ws = new WebSocket(version.webSocketDebuggerUrl);
+		await new Promise((resolve) => {
+			ws.onopen = () =>
+				ws.send(
+					JSON.stringify({
+						id: 1,
+						method: "Browser.getWindowForTarget",
+						params: { targetId },
+					}),
+				);
+			ws.onmessage = (ev) => {
+				const msg = JSON.parse(ev.data);
+				if (msg.id === 1 && msg.result?.windowId) {
+					ws.send(
+						JSON.stringify({
+							id: 2,
+							method: "Browser.setWindowBounds",
+							params: {
+								windowId: msg.result.windowId,
+								bounds: { windowState: "minimized" },
+							},
+						}),
+					);
+				} else if (msg.id === 2) {
+					ws.close();
+					resolve();
+				}
+			};
+			ws.onerror = () => {
+				ws.close();
+				resolve();
+			};
+			setTimeout(() => {
+				try {
+					ws.close();
+				} catch {}
+				resolve();
+			}, 5000);
+		});
+	} catch {
+		// best-effort — Chrome is still usable if minimize fails
+	}
+}
+
 async function waitForPort(timeoutMs = 15000) {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
@@ -225,6 +276,8 @@ async function main() {
 		console.error("Chrome did not become ready within 15s.");
 		process.exit(1);
 	}
+
+	await minimizeViaCDP(PORT);
 
 	console.log("Visible Chrome ready on port 9222.");
 	console.log("Keep this terminal open to keep Chrome alive.");
