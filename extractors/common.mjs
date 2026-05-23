@@ -195,6 +195,55 @@ export async function injectHeadlessStealth(tab) {
     };
   } catch(_) {}
 
+  // ── window outer dimensions ──────────────────────────
+  // outerWidth/Height = 0 in headless — a well-known bot signal.
+  // Mirror innerWidth/Height (set by --window-size flag) so the ratio is sane.
+  try {
+    if (!window.outerWidth)  Object.defineProperty(window, 'outerWidth',  { get: () => window.innerWidth  || 1920, configurable: true });
+    if (!window.outerHeight) Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight || 1080, configurable: true });
+  } catch(_) {}
+
+  // ── screen properties ─────────────────────────────────
+  try {
+    if (!screen.colorDepth) Object.defineProperty(screen, 'colorDepth', { get: () => 24, configurable: true });
+    if (!screen.pixelDepth) Object.defineProperty(screen, 'pixelDepth', { get: () => 24, configurable: true });
+  } catch(_) {}
+
+  // ── navigator.userAgentData (UA Client Hints) ─────────
+  // Derive version from the UA string already set by --user-agent flag so the
+  // two APIs are always consistent. Removes any "HeadlessChrome" brand entry.
+  try {
+    var _uaMajor = (navigator.userAgent.match(/Chrome\/(\d+)/) || [])[1] || '136';
+    var _uaFull  = (navigator.userAgent.match(/Chrome\/([\d.]+)/) || [])[1] || (_uaMajor + '.0.0.0');
+    var _brands  = [
+      { brand: 'Not)A;Brand',  version: '99' },
+      { brand: 'Google Chrome', version: _uaMajor },
+      { brand: 'Chromium',      version: _uaMajor },
+    ];
+    Object.defineProperty(navigator, 'userAgentData', {
+      get: function() {
+        return {
+          brands: _brands, mobile: false, platform: 'Windows',
+          getHighEntropyValues: function() {
+            return Promise.resolve({
+              architecture: 'x86', bitness: '64',
+              brands: _brands,
+              fullVersionList: [
+                { brand: 'Not)A;Brand',   version: '99.0.0.0' },
+                { brand: 'Google Chrome', version: _uaFull },
+                { brand: 'Chromium',      version: _uaFull },
+              ],
+              mobile: false, model: '', platform: 'Windows',
+              platformVersion: '15.0.0', uaFullVersion: _uaFull, wow64: false,
+            });
+          },
+          toJSON: function() { return { brands: _brands, mobile: false, platform: 'Windows' }; },
+        };
+      },
+      configurable: true,
+    });
+  } catch(_) {}
+
   // ── CDP Runtime serialization guard ──────────────────
   // Sites detect CDP by putting a getter on Error.prototype.stack
   // and checking if console.log triggers it (only happens when

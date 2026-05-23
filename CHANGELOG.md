@@ -8,6 +8,14 @@
 
 - **Gemini tab no longer steals focus during synthesis** (`bin/search.mjs`) — Removed the `activateTab` call on the pre-navigated Gemini tab. `Target.activateTarget` was restoring the minimized Chrome window mid-search; CDP synthesis operates on the target ID directly and has no need for the tab to be Chrome's active tab.
 
+### Changed
+
+- **Headless stealth hardening** (`bin/launch.mjs`, `extractors/common.mjs`) — Four fingerprinting gaps closed:
+  - **UA version auto-detected** — `getChromeVersion` reads the versioned sub-directory inside the Chrome Application folder (e.g. `148.0.7778.168/`) to extract the real major version, then injects it into the `--user-agent` flag. Eliminates the TLS/UA mismatch that was caused by the hardcoded `Chrome/131` string (actual binary was `Chrome/148`).
+  - **`navigator.userAgentData`** — Spoofed to match the detected UA version and remove any `HeadlessChrome` brand entry. `getHighEntropyValues()` returns consistent architecture, platform, and full version list.
+  - **`window.outerWidth/Height`** — Patched from `0` (headless default) to mirror `innerWidth/Height`. A zero outer dimension is a well-known one-signal bot detector.
+  - **`screen.colorDepth/pixelDepth`** — Ensured to report `24` when unset.
+
 ## [1.9.0] — 2026-05-22
 
 ### Added

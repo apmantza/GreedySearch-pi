@@ -22,6 +22,7 @@ import { execSync, spawn } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
 	unlinkSync,
 	writeFileSync,
@@ -75,13 +76,38 @@ const BASE_CHROME_FLAGS = [
 	"--window-size=1920,1080",
 ];
 
-function buildChromeFlags() {
+function getChromeVersion(chromePath) {
+	// Primary: versioned sub-directory inside the Chrome Application folder.
+	// Chrome always creates one (e.g. "148.0.7778.168") — works on all platforms,
+	// avoids launching the GUI process just to read a version string.
+	try {
+		const appDir = join(chromePath, "..");
+		const entries = readdirSync(appDir);
+		const ver = entries.find((e) => /^\d+\.\d+\.\d+\.\d+$/.test(e));
+		if (ver) return ver.split(".")[0];
+	} catch {}
+
+	// Fallback: `chrome --version` — works on macOS/Linux where Chrome is a CLI process.
+	try {
+		const out = execSync(`"${chromePath}" --version`, {
+			encoding: "utf8",
+			timeout: 5000,
+		}).trim();
+		const m = out.match(/(\d+)\.\d+\.\d+/);
+		if (m) return m[1];
+	} catch {}
+
+	return null;
+}
+
+function buildChromeFlags(chromePath) {
 	const flags = [...BASE_CHROME_FLAGS];
 	if (isHeadless()) {
 		flags.push("--headless=new");
 		flags.push("--disable-gpu");
+		const major = getChromeVersion(chromePath) || "136";
 		flags.push(
-			"--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+			`--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`,
 		);
 		if (platform() === "win32") flags.push("--disable-software-rasterizer");
 	}
@@ -389,7 +415,7 @@ async function main() {
 		console.log("Window will be minimized");
 	}
 
-	const proc = spawn(CHROME_EXE, buildChromeFlags(), {
+	const proc = spawn(CHROME_EXE, buildChromeFlags(CHROME_EXE), {
 		detached: true,
 		stdio: "ignore",
 	});
