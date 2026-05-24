@@ -307,6 +307,26 @@ if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 		);
 	}
 
+	const markdownQueries = normalizeResearchQueries(
+		{
+			queries: [
+				"site:[GitHub](https://github.com) Lightpanda",
+				"read [official docs](https://example.com/docs) now",
+			],
+		},
+		"Lightpanda browser",
+		3,
+		{ includeOriginal: false, expand: false },
+	);
+	if (
+		markdownQueries[0]?.query === "site:GitHub Lightpanda" &&
+		markdownQueries[1]?.query === "read official docs now"
+	) {
+		passMsg("research queries: markdown links sanitized without regex");
+	} else {
+		failMsg(`research queries: markdown sanitize unexpected ${JSON.stringify(markdownQueries)}`);
+	}
+
 	subsection("Source ranking — social domains are low-priority");
 	const { buildSourceRegistry } = await import("./src/search/sources.mjs");
 	const ranked = buildSourceRegistry(

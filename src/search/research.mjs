@@ -140,11 +140,60 @@ function addResearchQuery(
 }
 
 function sanitizeResearchQuery(query) {
-	return String(query)
-		.replace(/site:\[([^\]]+)\]\(https?:\/\/[^)]+\)/gi, "site:$1")
-		.replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, "$1")
-		.replaceAll(/\s+/g, " ")
-		.trim();
+	return collapseWhitespace(stripMarkdownLinks(String(query)));
+}
+
+function stripMarkdownLinks(value) {
+	let output = "";
+	let index = 0;
+	while (index < value.length) {
+		const openLabel = value.indexOf("[", index);
+		if (openLabel === -1) {
+			output += value.slice(index);
+			break;
+		}
+		const closeLabel = value.indexOf("]", openLabel + 1);
+		if (
+			closeLabel === -1 ||
+			value[closeLabel + 1] !== "(" ||
+			closeLabel === openLabel + 1
+		) {
+			output += value.slice(index, openLabel + 1);
+			index = openLabel + 1;
+			continue;
+		}
+		const closeUrl = value.indexOf(")", closeLabel + 2);
+		if (closeUrl === -1) {
+			output += value.slice(index, openLabel + 1);
+			index = openLabel + 1;
+			continue;
+		}
+		const url = value.slice(closeLabel + 2, closeUrl).trimStart();
+		if (!url.startsWith("http://") && !url.startsWith("https://")) {
+			output += value.slice(index, openLabel + 1);
+			index = openLabel + 1;
+			continue;
+		}
+		output += value.slice(index, openLabel);
+		output += value.slice(openLabel + 1, closeLabel);
+		index = closeUrl + 1;
+	}
+	return output;
+}
+
+function collapseWhitespace(value) {
+	let output = "";
+	let previousWasWhitespace = false;
+	for (const char of value) {
+		if (char === " " || char === "\t" || char === "\n" || char === "\r") {
+			if (!previousWasWhitespace) output += " ";
+			previousWasWhitespace = true;
+		} else {
+			output += char;
+			previousWasWhitespace = false;
+		}
+	}
+	return output.trim();
 }
 
 function summarizeEngineAnswers(result) {
