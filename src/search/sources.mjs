@@ -37,6 +37,16 @@ export const NEWS_HOSTS = [
 	"zdnet.com",
 ];
 
+export const SOCIAL_HOSTS = [
+	"facebook.com",
+	"instagram.com",
+	"linkedin.com",
+	"pinterest.com",
+	"tiktok.com",
+	"twitter.com",
+	"x.com",
+];
+
 export function trimText(text = "", maxChars = 240) {
 	const clean = String(text).replaceAll(/\s+/g, " ").trim();
 	if (clean.length <= maxChars) return clean;
@@ -122,6 +132,7 @@ export function classifySourceType(domain, title = "", rawUrl = "") {
 	const lowerUrl = rawUrl.toLowerCase();
 
 	if (domain === "github.com" || domain === "gitlab.com") return "repo";
+	if (matchesDomain(domain, SOCIAL_HOSTS)) return "social";
 	if (matchesDomain(domain, COMMUNITY_HOSTS)) return "community";
 	if (matchesDomain(domain, NEWS_HOSTS)) return "news";
 	if (
@@ -157,6 +168,8 @@ export function sourceTypePriority(sourceType) {
 			return 1;
 		case "news":
 			return 0;
+		case "social":
+			return -6;
 		default:
 			return 0;
 	}
@@ -308,6 +321,10 @@ export function inferPreferredDomains(query) {
 	if (normalized.includes("gemini") || normalized.includes("google ai")) {
 		matches.push("ai.google.dev", "developers.google.com");
 	}
+	for (const socialHost of SOCIAL_HOSTS) {
+		const bareName = socialHost.replace(/\.com$/, "");
+		if (normalized.includes(bareName)) matches.push(socialHost);
+	}
 
 	return [...new Set(matches)];
 }
@@ -359,10 +376,15 @@ export function buildSourceRegistry(out, query = "") {
 				smartScore += 2;
 			}
 
-			// Penalize discussion forums for technical queries — high noise, rarely canonical.
-			// Q&A sites (stackoverflow, stackexchange) are excluded: they often have the
-			// best practical answer and shouldn't be penalised just because an official
-			// domain also exists.
+			// Penalize discussion/social sites for technical queries — high noise,
+			// hard to fetch cleanly, and rarely canonical. Q&A sites (StackOverflow,
+			// StackExchange) are excluded from the community penalty.
+			const queryTargetsSocialHost = preferredDomains.some((pd) =>
+				domainMatches(domain, pd),
+			);
+			if (sourceType === "social" && !queryTargetsSocialHost) {
+				smartScore -= 12;
+			}
 			if (preferredDomains.length > 0) {
 				if (matchesDomain(domain, DISCUSSION_HOSTS)) {
 					smartScore -= 3;

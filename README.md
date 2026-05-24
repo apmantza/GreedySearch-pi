@@ -37,6 +37,12 @@ greedy_search({
   engine: "all",
   depth: "deep",
 });
+greedy_search({
+  query: "Evaluate browser automation options for AI agents",
+  depth: "research",
+  breadth: 3,
+  iterations: 2,
+});
 // Headless is the default — no window. To force visible Chrome:
 greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 ```
@@ -45,7 +51,10 @@ greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 
 - `query` (required)
 - `engine`: `all` (default), `perplexity`, `bing`, `google`, `gemini`
-- `depth`: `standard` (default), `fast`, `deep`
+- `depth`: `standard` (default), `fast`, `deep`, `research`
+- `breadth`: research mode query breadth, 1-5 (default 3)
+- `iterations`: research mode rounds, 1-3 (default 2)
+- `maxSources`: research mode fetched source cap, 3-12
 - `fullAnswer`: return full single-engine output instead of preview
 - `headless`: set to `false` to show Chrome window (default: `true`)
 - `visible` / `alwaysVisible`: set to `true` to always use visible Chrome for this search
@@ -65,6 +74,7 @@ greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 - `fast` - quickest, no synthesis/source fetching
 - `standard` - balanced default for `engine: "all"` (synthesis + fetched sources)
 - `deep` - strongest grounding and confidence metadata
+- `research` - slowest; iterative query planning, fast multi-engine searches, source fetching, learning extraction, and a final cited report
 
 ## Runtime commands
 

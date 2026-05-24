@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Iterative research mode** (`bin/search.mjs`, `src/search/research.mjs`) — Added `--research` / `--depth research` and `greedy_search({ depth: "research" })`. The new mode plans focused follow-up queries, runs fast multi-engine searches, fetches and deduplicates sources, extracts compact learnings/gaps with Gemini, and writes a final cited report. Optional knobs: `breadth` (1-5), `iterations` (1-3), and `maxSources` (3-12). Research mode now fills under-planned breadth with deterministic fallback query angles so `breadth: 3` actually fans out even when Gemini is conservative.
+
+### Fixed
+
+- **Pi TUI peer import no longer required at load time** (`src/tools/greedy-search-handler.ts`) — Replaced the direct `@earendil-works/pi-tui` runtime import with a tiny local `Text` component implementation so Pi/jiti extension import works even when optional TUI peer packages are not installed locally.
+
+- **Research source quality cleanup** (`src/search/sources.mjs`, `src/search/research.mjs`) — Social/login-wall domains (`facebook.com`, `linkedin.com`, `x.com`, etc.) now receive a strong ranking penalty unless the query explicitly targets that platform. Research source dedupe now uses the same composite score as normal source ranking, per-round learning extraction errors are recorded in `_research.rounds[].learningError`, child-search stderr forwarding is filtered so noisy page CSS/HTML cannot flood research logs, and markdown links in Gemini-generated follow-up queries are sanitized before search.
+
+- **Bing headless stealth hardening** (`extractors/common.mjs`, `bin/launch.mjs`) — Adopted low-risk ideas from Obscura's stealth model: `navigator.webdriver` now resolves to `undefined` instead of `false`, navigator plugins/mimeTypes/mediaDevices/connection/pdfViewer/platform/vendor are made more Chrome-like, patched functions stringify as `[native code]`, canvas noise is stable per page instead of random on each call, and Chrome launches with `--lang=en-US` plus `--force-color-profile=srgb`. Live Bing headless smoke passed after the change without visible recovery.
+
 ## [1.9.1] — 2026-05-23
 
 ### Fixed

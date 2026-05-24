@@ -2,9 +2,11 @@
  * greedy_search tool handler — multi-engine AI web search
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
+
+type ExtensionAPI = {
+	registerTool(tool: Record<string, unknown>): void;
+};
 import { formatResults } from "../formatters/results.js";
 import {
 	ALL_ENGINES,
@@ -15,6 +17,35 @@ import {
 	runSearch,
 	stripQuotes,
 } from "./shared.js";
+
+class Text {
+	constructor(
+		private text: string,
+		private paddingX = 0,
+		private paddingY = 0,
+	) {}
+
+	render(width: number): string[] {
+		const horizontal = " ".repeat(this.paddingX);
+		const blank = "";
+		const contentWidth = Math.max(1, width - this.paddingX * 2);
+		const lines = this.text.split("\n").flatMap((line) => {
+			if (line.length <= contentWidth) return [`${horizontal}${line}`];
+			const wrapped: string[] = [];
+			for (let i = 0; i < line.length; i += contentWidth) {
+				wrapped.push(`${horizontal}${line.slice(i, i + contentWidth)}`);
+			}
+			return wrapped;
+		});
+		return [
+			...Array.from({ length: this.paddingY }, () => blank),
+			...lines,
+			...Array.from({ length: this.paddingY }, () => blank),
+		];
+	}
+
+	invalidate() {}
+}
 
 export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 	pi.registerTool({
@@ -35,9 +66,29 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			}),
 			depth: Type.String({
 				description:
-					'Search depth: "fast" (no synthesis/source fetch, ~15-30s), "standard" (synthesis + sources, ~30-90s), "deep" (synthesis + source fetching + confidence, ~60-180s). Default: "standard". Note: single-engine searches always run in fast mode regardless of this setting — synthesis requires multiple engines.',
+					'Search depth: "fast" (no synthesis/source fetch, ~15-30s), "standard" (synthesis + sources, ~30-90s), "deep" (stronger grounding, ~60-180s), "research" (iterative query/learnings loop; slowest). Default: "standard". Note: single-engine searches default to fast unless depth is "research".',
 				default: "standard",
 			}),
+			breadth: Type.Optional(
+				Type.Number({
+					description:
+						'Only for depth="research": number of parallel research directions per round, 1-5 (default: 3).',
+					default: 3,
+				}),
+			),
+			iterations: Type.Optional(
+				Type.Number({
+					description:
+						'Only for depth="research": number of iterative research rounds, 1-3 (default: 2).',
+					default: 2,
+				}),
+			),
+			maxSources: Type.Optional(
+				Type.Number({
+					description:
+						'Only for depth="research": maximum fetched sources for the final report, 3-12.',
+				}),
+			),
 			fullAnswer: Type.Optional(
 				Type.Boolean({
 					description:
@@ -71,7 +122,10 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			const { query, fullAnswer: fullAnswerParam } = params as {
 				query: string;
 				engine: string;
-				depth?: "fast" | "standard" | "deep";
+				depth?: "fast" | "standard" | "deep" | "research";
+				breadth?: number;
+				iterations?: number;
+				maxSources?: number;
 				fullAnswer?: boolean;
 				headless?: boolean;
 				visible?: boolean;
@@ -79,7 +133,8 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			};
 			const engine = stripQuotes((params as any).engine ?? "all") || "all";
 			const depth = (stripQuotes((params as any).depth ?? "standard") ||
-				"standard") as "fast" | "standard" | "deep";
+				"standard") as "fast" | "standard" | "deep" | "research";
+			const effectiveEngine = depth === "research" ? "all" : engine;
 			const visible =
 				(params as any).visible === true ||
 				(params as any).alwaysVisible === true ||
@@ -91,21 +146,34 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			if (!cdpAvailable(baseDir)) return cdpMissingResult();
 
 			const flags: string[] = [];
-			const fullAnswer = fullAnswerParam ?? engine !== "all";
+			const fullAnswer = fullAnswerParam ?? effectiveEngine !== "all";
 			if (fullAnswer) flags.push("--full");
-			if (depth === "deep") flags.push("--depth", "deep");
+			if (depth === "research") {
+				flags.push("--depth", "research");
+				if (typeof (params as any).breadth === "number")
+					flags.push("--breadth", String((params as any).breadth));
+				if (typeof (params as any).iterations === "number")
+					flags.push("--iterations", String((params as any).iterations));
+				if (typeof (params as any).maxSources === "number")
+					flags.push("--max-sources", String((params as any).maxSources));
+			} else if (depth === "deep") flags.push("--depth", "deep");
 			else if (depth === "fast") flags.push("--fast");
 			else if (depth === "standard" && engine === "all")
 				flags.push("--synthesize");
 
 			const onProgress =
-				engine === "all"
-					? makeProgressTracker(ALL_ENGINES, onUpdate, "Searching", depth)
+				effectiveEngine === "all"
+					? makeProgressTracker(
+							ALL_ENGINES,
+							onUpdate,
+							depth === "research" ? "Researching" : "Searching",
+							depth,
+						)
 					: undefined;
 
 			try {
 				const data = await runSearch(
-					engine,
+					effectiveEngine,
 					query,
 					flags,
 					`${baseDir}/bin/search.mjs`,
@@ -113,7 +181,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 					onProgress,
 					headless,
 				);
-				const text = formatResults(engine, data);
+				const text = formatResults(effectiveEngine, data);
 				return {
 					content: [{ type: "text", text: text || "No results returned." }],
 					details: { raw: data },
@@ -139,7 +207,9 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 
 		renderResult(result, { expanded, isPartial }, theme) {
 			if (isPartial) {
-				const progressText = (result.content.find((c) => c.type === "text") as any)?.text as string | undefined;
+				const progressText = (
+					result.content.find((c) => c.type === "text") as any
+				)?.text as string | undefined;
 				const display = progressText
 					? progressText.replace(/\*\*/g, "")
 					: "Searching...";
@@ -170,7 +240,9 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				const sources = raw?._sources as Array<unknown> | undefined;
 				if (synthesis) {
 					const sourceCount = Array.isArray(sources) ? sources.length : 0;
-					const agreement = (synthesis.agreement as Record<string, unknown> | undefined)?.level as string | undefined;
+					const agreement = (
+						synthesis.agreement as Record<string, unknown> | undefined
+					)?.level as string | undefined;
 					let summary = " → Synthesized";
 					if (sourceCount > 0)
 						summary += ` · ${sourceCount} source${sourceCount > 1 ? "s" : ""}`;

@@ -74,6 +74,8 @@ const BASE_CHROME_FLAGS = [
 	`--user-data-dir=${PROFILE_DIR}`,
 	"--profile-directory=Default",
 	"--window-size=1920,1080",
+	"--lang=en-US",
+	"--force-color-profile=srgb",
 ];
 
 function getChromeVersion(chromePath) {

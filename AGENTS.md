@@ -7,7 +7,8 @@ GreedySearch-pi is a Pi package/extension that registers the `greedy_search` too
 - **Headless-first with visible fallback** — Headless is the default for speed and resource efficiency. When Cloudflare/Turnstile blocks an engine in headless, automatic visible recovery establishes cookies in the shared Chrome profile, then switches back to headless. Subsequent searches benefit from the cached session. Recovery only applies to Bing and Perplexity (Google intentionally excluded).
 - **Speed optimizations** — All extractors use tight timeouts: 20s navigation, 10s verification retry (Turnstile never clears in headless, so longer retries are waste), 600ms post-nav settle. Engine budgets are 30s (fast) / 55s (standard) to account for CDP contention from parallel extractors. Solo times: Google 9s, Perplexity 13s, Gemini 14s, Bing 16s.
 - **Resilient synthesis** — When one engine fails (even with manual verification), synthesis continues with the engines that succeeded. Source-fetch workers catch individual errors — a single bad URL won't crash the batch.
-- **Stealth where it matters** — `Page.addScriptToEvaluateOnNewDocument` patches are awaited for Bing tabs (Copilot's Cloudflare blocks headless without them), but fire-and-forget for Perplexity/Google (Perplexity's anti-bot detects the aggressive canvas/console patches). Tabs are created blank → stealth injected → extractor navigates, ensuring stealth is active before page load.
+- **Iterative research mode** — `depth: "research"` / `--depth research` performs a deep-research loop: plan focused queries, run fast multi-engine searches, fetch/dedupe sources, extract compact learnings/gaps/follow-ups with Gemini, and synthesize a final cited report. It should remain no-API-key and reuse GreedySearch engines/fetchers; do not reintroduce Firecrawl/OpenAI dependencies from the reference implementation.
+- **Stealth where it matters** — `Page.addScriptToEvaluateOnNewDocument` patches are awaited for Bing tabs (Copilot's Cloudflare blocks headless without them), but fire-and-forget for Perplexity/Google (Perplexity's anti-bot detects the aggressive canvas/console patches). Tabs are created blank → stealth injected → extractor navigates, ensuring stealth is active before page load. Keep Bing-oriented patches Chrome-like: `navigator.webdriver` should be `undefined`, patched functions should stringify as native code, canvas noise should be stable per page (not random per call), and navigator plugins/mimeTypes/mediaDevices/userAgentData should stay internally consistent with the launch UA.
 
 ## Read the skill first
 
@@ -86,6 +87,30 @@ GREEDY_SEARCH_ALWAYS_VISIBLE=1
 GREEDY_SEARCH_VISIBLE=1
 ```
 
+## Research mode
+
+Research mode lives in `src/search/research.mjs` and is orchestrated from `bin/search.mjs` before the normal `engine === "all"` path.
+
+Usage:
+
+```js
+greedy_search({ query: "topic", depth: "research", breadth: 3, iterations: 2, maxSources: 8 });
+```
+
+```bash
+node bin/search.mjs all --inline --stdin --depth research --breadth 3 --iterations 2 --max-sources 8 <<'EOF'
+topic
+EOF
+```
+
+Important behavior:
+
+- Research child searches must use `--stdin`; never leak query text in process args.
+- Child-search stderr is intentionally filtered in `runFastAllSearch()` so page CSS/HTML cannot flood Pi output. Preserve `PROGRESS:*`, `[greedysearch]`, and extractor diagnostic lines only.
+- Social/login-wall sources are low-quality citations. `src/search/sources.mjs` penalizes `facebook.com`, `linkedin.com`, `x.com`/`twitter.com`, etc. unless the query explicitly targets that platform.
+- If Gemini under-plans fewer queries than requested breadth, deterministic fallback angles fill the breadth (official docs/GitHub, benchmarks/limitations, alternatives/use-cases, anti-bot/rendering caveats). Keep this so `breadth` remains meaningful.
+- Per-round learning failures should be captured in `_research.rounds[].learningError` instead of aborting the whole run.
+
 ## Recovery policy
 
 Recovery helpers live in `src/search/recovery.mjs`.
@@ -120,7 +145,7 @@ Known behaviors:
   4. visible DOM text fallback,
   5. iframe/headless block detection fallback.
 
-Do not “fix” Bing by only adding a larger fixed sleep; prefer readiness/polling/fallbacks.
+Do not “fix” Bing by only adding a larger fixed sleep; prefer readiness/polling/fallbacks. If Bing suddenly starts forcing visible recovery, first run a single headless smoke (`node bin/search.mjs bing --inline --stdin --fast`) and inspect `_envelope.blockedBy`, `_envelope.verificationResult`, and `_envelope.durationMs` before changing timeouts.
 
 ### Perplexity
 
@@ -161,6 +186,10 @@ EOF
 node bin/launch.mjs --kill || node bin/kill-visible.mjs
 node bin/search.mjs bing --inline --stdin --fast <<'EOF'
 hello world headless smoke test
+EOF
+
+node bin/search.mjs all --inline --stdin --depth research --breadth 1 --iterations 1 --max-sources 3 <<'EOF'
+What is Lightpanda browser and when should AI agents use it?
 EOF
 ```
 

@@ -9,12 +9,13 @@ Use `greedy_search` for live web answers.
 greedy_search({ query: "React 19 changes", depth: "standard" });
 ```
 
-**Params:** `query` (required), `engine`: `all`|`perplexity`|`bing`|`google`|`gemini`, `depth`: `fast`|`standard`|`deep`
+**Params:** `query` (required), `engine`: `all`|`perplexity`|`bing`|`google`|`gemini`, `depth`: `fast`|`standard`|`deep`|`research`
 
 **Depths:**
 - `fast`: ~15-30s, single engine, no synthesis
 - `standard`: ~30-90s, all engines + Gemini synthesis + sources
 - `deep`: ~60-180s, stronger grounding + confidence metadata
+- `research`: slowest, iterative query planning + follow-up searches + learning extraction; optional `breadth` 1-5, `iterations` 1-3, `maxSources` 3-12
 
 **Blocks:** Headless by default; auto-retries in visible mode. If human verification is needed, visible Chrome stays open — tell the user to solve it and rerun.
 

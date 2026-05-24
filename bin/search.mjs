@@ -53,6 +53,7 @@ import {
 import { buildConfidence } from "../src/search/synthesis.mjs";
 import { synthesizeWithGemini } from "../src/search/synthesis-runner.mjs";
 import { normalizeQuery } from "../src/search/query.mjs";
+import { runResearchMode } from "../src/search/research.mjs";
 
 const CONFIG_DIR = join(homedir(), ".config", "greedysearch");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -94,6 +95,10 @@ async function main() {
 				"  --fast              Quick mode: no source fetching or synthesis",
 				"  --synthesize        Deprecated: synthesis is now default for multi-engine",
 				"  --deep-research     Deprecated: source fetching is now default",
+				"  --research          Iterative query/learnings loop (alias: --depth research)",
+				"  --breadth <n>       Research mode query breadth, 1-5 (default: 3)",
+				"  --iterations <n>    Research mode rounds, 1-3 (default: 2)",
+				"  --max-sources <n>   Research mode fetched source cap, 3-12",
 				"  --fetch-top-source  Fetch content from top source",
 				"  --inline            Output JSON to stdout (for piping)",
 				"  --locale <lang>     Force results language (en, de, fr, etc.)",
@@ -109,6 +114,7 @@ async function main() {
 				"Examples:",
 				'  node search.mjs all "Node.js streams"           # Default: sources + synthesis',
 				'  node search.mjs all "quick check" --fast        # Fast: no sources/synthesis',
+				'  node search.mjs all "browser automation" --research --breadth 3 --iterations 2',
 				'  node search.mjs p "what is memoization"         # Single engine: fast mode',
 			].join("\n")}\n`,
 		);
@@ -156,6 +162,9 @@ async function main() {
 	if (args.includes("--deep")) {
 		depth = "deep";
 	}
+	if (args.includes("--research")) {
+		depth = "research";
+	}
 	if (args.includes("--synthesize")) {
 		process.stderr.write(
 			"[greedysearch] --synthesize is deprecated; synthesis is now default for multi-engine\n",
@@ -166,6 +175,14 @@ async function main() {
 	const short = !full;
 	const fetchSource = args.includes("--fetch-top-source");
 	const inline = args.includes("--inline");
+	const breadthIdx = args.indexOf("--breadth");
+	const iterationsIdx = args.indexOf("--iterations");
+	const maxSourcesIdx = args.indexOf("--max-sources");
+	const researchBreadth = breadthIdx === -1 ? undefined : args[breadthIdx + 1];
+	const researchIterations =
+		iterationsIdx === -1 ? undefined : args[iterationsIdx + 1];
+	const researchMaxSources =
+		maxSourcesIdx === -1 ? undefined : args[maxSourcesIdx + 1];
 	// Headless is the default — only disable if GREEDY_SEARCH_VISIBLE=1
 	if (process.env.GREEDY_SEARCH_VISIBLE !== "1")
 		process.env.GREEDY_SEARCH_HEADLESS = "1";
@@ -194,6 +211,7 @@ async function main() {
 			a !== "--synthesize" &&
 			a !== "--deep-research" &&
 			a !== "--deep" &&
+			a !== "--research" &&
 			a !== "--inline" &&
 			a !== "--stdin" &&
 			a !== "--headless" &&
@@ -201,9 +219,17 @@ async function main() {
 			a !== "--always-visible" &&
 			a !== "--depth" &&
 			a !== "--out" &&
+			a !== "--locale" &&
+			a !== "--breadth" &&
+			a !== "--iterations" &&
+			a !== "--max-sources" &&
 			a !== "--help" &&
 			(depthIdx === -1 || i !== depthIdx + 1) &&
-			(outIdx === -1 || i !== outIdx + 1),
+			(outIdx === -1 || i !== outIdx + 1) &&
+			(localeIdx === -1 || i !== localeIdx + 1) &&
+			(breadthIdx === -1 || i !== breadthIdx + 1) &&
+			(iterationsIdx === -1 || i !== iterationsIdx + 1) &&
+			(maxSourcesIdx === -1 || i !== maxSourcesIdx + 1),
 	);
 	const engine = rest[0]?.toLowerCase();
 	// Read query from stdin when --stdin flag is set (avoids leaking query in process table)
@@ -213,6 +239,28 @@ async function main() {
 		query = await readStdin();
 	} else {
 		query = rest.slice(1).join(" ");
+	}
+
+	if (depth === "research") {
+		if (engine !== "all") {
+			process.stderr.write(
+				`[greedysearch] Research mode uses all engines; ignoring engine "${engine}".\n`,
+			);
+		}
+		const out = await runResearchMode({
+			query: normalizeQuery(query),
+			breadth: researchBreadth,
+			iterations: researchIterations,
+			maxSources: researchMaxSources,
+			locale,
+			short,
+		});
+		writeOutput(out, outFile, {
+			inline,
+			synthesize: true,
+			query,
+		});
+		return;
 	}
 
 	if (engine === "all") {
@@ -417,8 +465,9 @@ async function main() {
 			// is already loaded when synthesis starts — saves ~4s of nav time.
 			let geminiTabPromise = null;
 			if (depth !== "fast") {
-				geminiTabPromise = openNewTab("https://gemini.google.com/app")
-					.catch(() => null);
+				geminiTabPromise = openNewTab("https://gemini.google.com/app").catch(
+					() => null,
+				);
 			}
 
 			// Source fetching: default for all "all" searches
@@ -443,7 +492,7 @@ async function main() {
 					"[greedysearch] Synthesizing results with Gemini...\n",
 				);
 				try {
-					const geminiTab = await geminiTabPromise ?? await openNewTab();
+					const geminiTab = (await geminiTabPromise) ?? (await openNewTab());
 					const synthesis = await synthesizeWithGemini(query, out, {
 						grounded: depth === "deep",
 						tabPrefix: geminiTab,
@@ -492,7 +541,14 @@ async function main() {
 	}
 
 	try {
-		const result = await runExtractor(script, normalizeQuery(query), null, short, null, locale);
+		const result = await runExtractor(
+			script,
+			normalizeQuery(query),
+			null,
+			short,
+			null,
+			locale,
+		);
 		if (fetchSource && result.sources?.length > 0) {
 			result.topSource = await fetchTopSource(result.sources[0].url);
 		}

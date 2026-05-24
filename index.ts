@@ -13,9 +13,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { registerGreedySearchTool } from "./src/tools/greedy-search-handler.js";
+
+type ExtensionAPI = any;
 import { cdpAvailable } from "./src/tools/shared.js";
 
 const __dir = dirname(fileURLToPath(import.meta.url));

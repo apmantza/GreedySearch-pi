@@ -252,6 +252,98 @@ if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 	const headlessResult = typeof isHeadlessCheck === "function";
 	if (headlessResult) passMsg("isChromeHeadless: function exists");
 	else failMsg("isChromeHeadless: not a function");
+
+	subsection("Research mode option/query normalization");
+	const { clampResearchOptions, normalizeResearchQueries } = await import(
+		"./src/search/research.mjs"
+	);
+	const clamped = clampResearchOptions({
+		breadth: 99,
+		iterations: 0,
+	});
+	if (
+		clamped.breadth === 5 &&
+		clamped.iterations === 1 &&
+		clamped.maxSources === 10
+	) {
+		passMsg("research options: clamp and fallback values");
+	} else {
+		failMsg(
+			`research options: expected breadth=5 iterations=1 maxSources=10, got ${JSON.stringify(clamped)}`,
+		);
+	}
+
+	const researchQueries = normalizeResearchQueries(
+		{
+			queries: [
+				{ query: "  browser automation AI agents  ", researchGoal: "Compare" },
+				{ query: "browser automation AI agents", researchGoal: "duplicate" },
+				"Lightpanda browser CDP automation",
+			],
+		},
+		"AI browser research",
+		3,
+	);
+	if (
+		researchQueries.length === 3 &&
+		researchQueries[0].query === "AI browser research" &&
+		researchQueries[1].query === "browser automation AI agents"
+	) {
+		passMsg("research queries: prepend original and dedupe planned queries");
+	} else {
+		failMsg(`research queries: unexpected ${JSON.stringify(researchQueries)}`);
+	}
+
+	const expandedQueries = normalizeResearchQueries(
+		null,
+		"Lightpanda browser",
+		3,
+	);
+	if (expandedQueries.length === 3) {
+		passMsg("research queries: fallback expansion fills requested breadth");
+	} else {
+		failMsg(
+			`research queries: expected 3 expanded queries, got ${expandedQueries.length}`,
+		);
+	}
+
+	subsection("Source ranking — social domains are low-priority");
+	const { buildSourceRegistry } = await import("./src/search/sources.mjs");
+	const ranked = buildSourceRegistry(
+		{
+			perplexity: {
+				sources: [
+					{
+						title: "Facebook post",
+						url: "https://facebook.com/groups/x/posts/1",
+					},
+					{
+						title: "Official docs",
+						url: "https://docs.example.com/lightpanda",
+					},
+				],
+			},
+			bing: {
+				sources: [
+					{
+						title: "Facebook mirror",
+						url: "https://www.facebook.com/groups/x/posts/1",
+					},
+					{ title: "Project", url: "https://example.com/lightpanda" },
+				],
+			},
+		},
+		"Lightpanda browser documentation",
+	);
+	const facebookRank = ranked.findIndex((s) => s.domain === "facebook.com");
+	const docsRank = ranked.findIndex((s) => s.domain === "docs.example.com");
+	if (docsRank !== -1 && facebookRank !== -1 && docsRank < facebookRank) {
+		passMsg("source ranking: docs outrank multi-engine Facebook/social source");
+	} else {
+		failMsg(
+			`source ranking: unexpected order ${ranked.map((s) => s.domain).join(",")}`,
+		);
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
