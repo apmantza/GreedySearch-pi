@@ -8,8 +8,6 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchMultipleSources } from "./fetch-source.mjs";
-import { writeSourcesToFiles } from "./file-sources.mjs";
 import {
 	buildSourceRegistry,
 	computeCompositeScore,
@@ -25,6 +23,16 @@ const __dir = fileURLToPath(new URL(".", import.meta.url)).replace(
 	"$1",
 );
 const SEARCH_BIN = join(__dir, "..", "..", "bin", "search.mjs");
+
+async function fetchMultipleResearchSources(...args) {
+	const { fetchMultipleSources } = await import("./fetch-source.mjs");
+	return fetchMultipleSources(...args);
+}
+
+async function writeResearchSourcesToFiles(...args) {
+	const { writeSourcesToFiles } = await import("./file-sources.mjs");
+	return writeSourcesToFiles(...args);
+}
 
 export function clampResearchOptions({
 	breadth = 3,
@@ -468,7 +476,7 @@ export async function runResearchMode({
 		);
 		if (remainingFetchBudget > 0 && combinedSources.length > 0) {
 			process.stderr.write(`PROGRESS:research:round-${roundNumber}:fetching\n`);
-			const fetched = await fetchMultipleSources(
+			const fetched = await fetchMultipleResearchSources(
 				combinedSources,
 				Math.min(remainingFetchBudget, combinedSources.length),
 				8000,
@@ -579,7 +587,7 @@ export async function runResearchMode({
 		synthesis.error = error.message;
 	}
 
-	const fetchedFiles = writeSourcesToFiles(fetchedSources);
+	const fetchedFiles = await writeResearchSourcesToFiles(fetchedSources);
 	process.stderr.write("PROGRESS:research:done\n");
 
 	return {
