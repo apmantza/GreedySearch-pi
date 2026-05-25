@@ -20,6 +20,8 @@
 
 - **Bing headless stealth hardening** (`extractors/common.mjs`, `bin/launch.mjs`) — Adopted low-risk ideas from Obscura's stealth model: `navigator.webdriver` now resolves to `undefined` instead of `false`, navigator plugins/mimeTypes/mediaDevices/connection/pdfViewer/platform/vendor are made more Chrome-like, patched functions stringify as `[native code]`, canvas noise is stable per page instead of random on each call, and Chrome launches with `--lang=en-US` plus `--force-color-profile=srgb`. Live Bing headless smoke passed after the change without visible recovery.
 
+- **Research/Bing false recovery fixed** (`bin/search.mjs`, `extractors/bing-copilot.mjs`, `extractors/consent.mjs`) — Research child searches no longer mark Bing/Perplexity failed before visible recovery has a final status, Bing fast-mode keeps a bounded 40s parent budget, and Bing's short-mode stream wait caps at 25s so research can extract rendered partial answers before timing out. Bing verification detection now reuses the DOM-based `handleVerification` detector instead of scanning accessibility text for generic words like “Cloudflare” or “challenge”, preventing false visible-recovery trips when the user query/answer is about anti-bot systems. Added locale-agnostic DOM/accessibility fallback extraction that picks the assistant article without relying solely on English “Copilot said” labels.
+
 ## [1.9.1] — 2026-05-23
 
 ### Fixed

@@ -334,11 +334,16 @@ async function tryHumanClick(tab, cdp, detectResult) {
 	return false;
 }
 
+export async function detectVerificationChallenge(tab, cdp) {
+	const result = await cdp(["eval", tab, VERIFY_DETECT_JS]).catch(() => null);
+	return result && result !== "null" ? result : null;
+}
+
 // Returns 'clear' | 'clicked' | 'needs-human'
 export async function handleVerification(tab, cdp, waitMs = 30000) {
-	const result = await cdp(["eval", tab, VERIFY_DETECT_JS]).catch(() => null);
+	const result = await detectVerificationChallenge(tab, cdp);
 
-	if (!result || result === "null") return "clear";
+	if (!result) return "clear";
 
 	// Hard CAPTCHA page — wait for user to solve it manually
 	if (result === "sorry-page") {

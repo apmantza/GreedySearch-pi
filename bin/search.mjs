@@ -280,9 +280,12 @@ async function main() {
 		await cdp(["list"]);
 
 		// Time-bounded per-engine extraction so slow engines don't stall the batch.
-		// Fast mode: 22s per engine (total budget ~25s incl overhead).
-		// Standard/deep: 35s per engine (total budget ~40s incl overhead).
-		const engineTimeoutMs = depth === "fast" ? 30000 : 55000;
+		// Bing can take a little longer than Google/Perplexity under CDP contention;
+		// keep fast mode bounded while avoiding most false recovery trips.
+		const engineTimeoutFor = (engineName) => {
+			if (depth !== "fast") return 55000;
+			return engineName === "bing" ? 40000 : 30000;
+		};
 
 		try {
 			const results = await Promise.allSettled(
@@ -292,7 +295,7 @@ async function main() {
 						normalizeQuery(query),
 						engineTabs[i],
 						short,
-						engineTimeoutMs,
+						engineTimeoutFor(e),
 						locale,
 					)
 						.then((r) => {
@@ -300,7 +303,8 @@ async function main() {
 							return { engine: e, ...r };
 						})
 						.catch((err) => {
-							process.stderr.write(`PROGRESS:${e}:error\n`);
+							// Do not emit PROGRESS:error yet: Bing/Perplexity may recover in
+							// visible mode. Emit the final status after recovery has run.
 							throw err;
 						}),
 				),
@@ -321,13 +325,16 @@ async function main() {
 			// then continue headless with the profile now carrying valid session state.
 			// Recovery is allowed even in fast mode because verification failure would
 			// otherwise produce no usable result.
-			const cfBlocked = findHeadlessBlockedEngines(out);
+			const recoveryCandidates = findHeadlessBlockedEngines(out);
 
-			if (cfBlocked.length > 0 && process.env.GREEDY_SEARCH_VISIBLE !== "1") {
+			if (
+				recoveryCandidates.length > 0 &&
+				process.env.GREEDY_SEARCH_VISIBLE !== "1"
+			) {
 				process.stderr.write(
-					`[greedysearch] 🔓 Cloudflare/verification blocked ${cfBlocked.join(", ")} in headless — retrying visible to establish cookies...\n`,
+					`[greedysearch] 🔓 Headless ${recoveryCandidates.join(", ")} search hit timeout/verification/antibot signals — retrying visible to establish cookies...\n`,
 				);
-				for (const blockedEngine of cfBlocked) {
+				for (const blockedEngine of recoveryCandidates) {
 					process.stderr.write(
 						`[greedysearch] ${blockedEngine} recovery starting in visible mode...\n`,
 					);
@@ -344,7 +351,7 @@ async function main() {
 				const retryTabs = [];
 				let keepVisibleForHuman = false;
 				let recovered = 0;
-				for (let i = 0; i < cfBlocked.length; i++) {
+				for (let i = 0; i < recoveryCandidates.length; i++) {
 					const tab = await openNewTab();
 					retryTabs.push(tab);
 				}
@@ -354,7 +361,7 @@ async function main() {
 					// ("Inspected target navigated or closed"). If so, the cookies are now cached
 					// and a second retry on the same tab should succeed.
 					const retries = await Promise.allSettled(
-						cfBlocked.map((e, i) =>
+						recoveryCandidates.map((e, i) =>
 							runExtractor(ENGINES[e], query, retryTabs[i], short, null, locale)
 								.then((r) => ({ engine: e, ...r }))
 								.catch((err) => ({ engine: e, error: err.message })),
@@ -377,11 +384,11 @@ async function main() {
 					}
 					if (recovered > 0) {
 						process.stderr.write(
-							`[greedysearch] ✅ ${recovered}/${cfBlocked.length} engine(s) recovered — cookies cached for future headless runs.\n`,
+							`[greedysearch] ✅ ${recovered}/${recoveryCandidates.length} engine(s) recovered — cookies cached for future headless runs.\n`,
 						);
 					} else {
 						process.stderr.write(
-							`[greedysearch] ⚠️ Recovery attempt failed — ${cfBlocked.join(", ")} still blocked in visible mode.\n`,
+							`[greedysearch] ⚠️ Recovery attempt did not extract an answer — ${recoveryCandidates.join(", ")} may still need manual verification or a DOM fallback.\n`,
 						);
 					}
 
@@ -394,7 +401,7 @@ async function main() {
 						);
 						const secondRetries = await Promise.allSettled(
 							stillBlocked.map((e) => {
-								const idx = cfBlocked.indexOf(e);
+								const idx = recoveryCandidates.indexOf(e);
 								return runExtractor(
 									ENGINES[e],
 									query,
@@ -463,6 +470,19 @@ async function main() {
 
 				// Clear engineTabs — finally{} closeTabs handles empty arrays gracefully
 				engineTabs.length = 0;
+			}
+
+			for (const engineName of ALL_ENGINES) {
+				if (!out[engineName]?.error) continue;
+				if (recoveryCandidates.includes(engineName)) {
+					if (process.env.GREEDY_SEARCH_VISIBLE === "1") {
+						process.stderr.write(
+							`PROGRESS:${engineName}:${isManualVerificationError(out[engineName].error) ? "needs-human" : "error"}\n`,
+						);
+					}
+					continue;
+				}
+				process.stderr.write(`PROGRESS:${engineName}:error\n`);
 			}
 
 			// Build a canonical source registry across all engines

@@ -27,7 +27,11 @@ import {
 	waitForSelector,
 	waitForStreamComplete,
 } from "./common.mjs";
-import { dismissConsent, handleVerification } from "./consent.mjs";
+import {
+	detectVerificationChallenge,
+	dismissConsent,
+	handleVerification,
+} from "./consent.mjs";
 import { SELECTORS } from "./selectors.mjs";
 
 const S = SELECTORS.bing;
@@ -37,17 +41,19 @@ const GLOBAL_VAR = "__bingClipboard";
 // Bing Copilot-specific helpers
 // ============================================================================
 
-async function extractAnswer(tab, env) {
+async function extractAnswer(tab, env, query = "") {
 	// In headless mode: snap the accessibility tree before spending ~18s on
 	// clipboard polls. Copilot loads its input fine in headless but renders
 	// responses behind a Cloudflare-protected iframe — detecting that here
 	// fast-fails to the visible retry instead of burning all the poll time.
 	if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
-		const snap = await cdp(["snap", tab]).catch(() => "");
-		if (/cloudflare|challenge|security check/i.test(snap)) {
-			console.error("[bing] Cloudflare challenge in snap — fast-failing to visible retry");
-			env.blockedBy = "cloudflare";
-			throw new Error("Cloudflare challenge detected — headless blocked");
+		const verification = await detectVerificationChallenge(tab, cdp);
+		if (verification) {
+			console.error(
+				"[bing] Verification challenge detected — fast-failing to visible retry",
+			);
+			env.blockedBy = "verification";
+			throw new Error("Verification challenge detected — headless blocked");
 		}
 	}
 
@@ -76,8 +82,17 @@ async function extractAnswer(tab, env) {
 	// action/clipboard interceptor remains empty. Extract the last assistant
 	// answer from page text before treating this as a headless/iframe block.
 	if (!answer) {
-		answer = await extractFromVisibleDom(tab);
+		answer = await extractFromVisibleDom(tab, query);
 		if (answer) env.fallbackUsed = "visibleDom";
+	}
+
+	// Accessibility fallback: if Copilot visibly rendered an answer but the
+	// clipboard/DOM selectors missed it, the accessibility tree often still has
+	// the assistant article text. This prevents false "blocked" reports when a
+	// human can plainly see Bing answered in the browser.
+	if (!answer) {
+		answer = await extractFromAccessibilityTree(tab, query);
+		if (answer) env.fallbackUsed = "accessibilityTree";
 	}
 
 	// DOM fallback: if clipboard still empty, extract text directly from response DOM.
@@ -124,22 +139,35 @@ async function clickCopyAndPollClipboard(tab, timeoutMs) {
  * fails. Keep this conservative: require a "Copilot said" marker and strip
  * known composer/action text after the answer.
  */
-async function extractFromVisibleDom(tab) {
+async function extractFromVisibleDom(tab, query = "") {
 	try {
 		const bodyText = await cdp([
 			"eval",
 			tab,
 			"document.body?.innerText || ''",
 		]).catch(() => "");
-		if (!bodyText || !bodyText.includes("Copilot said")) return "";
 
-		const answer = bodyText
-			.split(/Copilot said\s*/i)
-			.pop()
-			.split(
-				/\n[^\S\n]*(?:Good response|Bad response|Share message|Copy message|Read aloud|Regenerate|Edit in a page|Message Copilot|Smart)(?![\w])/i,
-			)[0]
-			.trim();
+		let answer = "";
+		if (bodyText && bodyText.includes("Copilot said")) {
+			answer = cleanCopilotArticleText(
+				bodyText
+					.split(/Copilot said\s*/i)
+					.pop()
+					.split(
+						/\n[^\S\n]*(?:Good response|Bad response|Share message|Copy message|Read aloud|Regenerate|Edit in a page|Message Copilot|Smart)(?![\w])/i,
+					)[0],
+			);
+		}
+
+		if (!answer) {
+			const articlesJson = await cdp([
+				"eval",
+				tab,
+				`JSON.stringify(Array.from(document.querySelectorAll('article')).map(a => a.innerText || '').filter(Boolean))`,
+			]).catch(() => "[]");
+			const articles = JSON.parse(articlesJson || "[]");
+			answer = pickAnswerArticle(articles, query);
+		}
 
 		if (answer.length < 20) return "";
 		console.error(
@@ -150,6 +178,59 @@ async function extractFromVisibleDom(tab) {
 		console.error(`[bing] Visible DOM extraction failed: ${e.message}`);
 		return "";
 	}
+}
+
+async function extractFromAccessibilityTree(tab, query = "") {
+	try {
+		const snap = await cdp(["snap", tab]).catch(() => "");
+		if (!snap || (await detectVerificationChallenge(tab, cdp))) return "";
+
+		const articleLines = snap
+			.split("\n")
+			.map((line) => line.match(/^\s*\[article\]\s+(.+)$/i)?.[1])
+			.filter(Boolean);
+		if (articleLines.length === 0) return "";
+
+		const answer = pickAnswerArticle(articleLines, query);
+		if (answer.length < 50) return "";
+		console.error(
+			`[bing] Accessibility extraction succeeded (${answer.length} chars)`,
+		);
+		return answer;
+	} catch (e) {
+		console.error(`[bing] Accessibility extraction failed: ${e.message}`);
+		return "";
+	}
+}
+
+function pickAnswerArticle(articles, query = "") {
+	const normalizedQuery = normalizeForCompare(query);
+	const candidates = articles
+		.map((text) => cleanCopilotArticleText(text))
+		.filter((text) => text.length >= 50)
+		.filter((text) => {
+			if (!normalizedQuery) return true;
+			const normalizedText = normalizeForCompare(text);
+			return (
+				!normalizedText.includes(normalizedQuery) ||
+				text.length > query.length * 3
+			);
+		});
+	return candidates.at(-1) || "";
+}
+
+function normalizeForCompare(text = "") {
+	return String(text).toLocaleLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function cleanCopilotArticleText(text = "") {
+	return String(text)
+		.replace(/\s+/g, " ")
+		.replace(
+			/\s+(?:Good response|Bad response|Share message|Copy message|Read aloud|Regenerate|Edit in a page|Message Copilot|Smart)(?![\w]).*$/i,
+			"",
+		)
+		.trim();
 }
 
 /**
@@ -171,12 +252,11 @@ async function extractFromIframes(mainTab, env) {
 
 		// Check for Cloudflare challenge in the accessibility tree.
 		// If present, Copilot content is blocked entirely — no DOM extraction possible.
-		const snap = await cdp(["snap", mainTab]).catch(() => "");
-		if (/cloudflare|challenge|security|verification/i.test(snap)) {
+		if (await detectVerificationChallenge(mainTab, cdp)) {
 			console.error(
-				"[bing] Cloudflare challenge detected — content blocked in headless",
+				"[bing] Verification challenge detected — content blocked in headless",
 			);
-			env.blockedBy = "cloudflare";
+			env.blockedBy = "verification";
 			return { answer: "" }; // Let caller throw → triggers visible auto-retry
 		}
 
@@ -348,9 +428,14 @@ async function main() {
 		}, 2000);
 
 		// Wait for Bing Copilot's response to finish streaming before extracting.
-		await waitForStreamComplete(tab, { timeout: 60000, minLength: 50 });
+		// In --short/fast mode, cap this below the parent 40s budget and extract
+		// whatever has rendered so research child searches stay fast.
+		await waitForStreamComplete(tab, {
+			timeout: short ? 25000 : 60000,
+			minLength: 50,
+		});
 
-		const { answer, sources } = await extractAnswer(tab, env);
+		const { answer, sources } = await extractAnswer(tab, env, query);
 		if (!answer)
 			throw new Error("No answer extracted — Copilot may not have responded");
 
