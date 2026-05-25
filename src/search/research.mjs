@@ -1061,7 +1061,7 @@ export function auditCitations(answer, sources) {
 
 	// Extract source IDs: matches patterns like [S1], [S2], [S3, S4], (S1), S1,
 	// and also F1, F2 (fetched source IDs)
-	const idPattern = /\b[S F](\d+)\b/g;
+	const idPattern = /\b[SF](\d+)\b/g;
 	const citedIds = new Set();
 	let match;
 	while ((match = idPattern.exec(answer)) !== null) {
@@ -1151,9 +1151,9 @@ export async function runResearchMode({
 	// Manifest tracking
 	const startedAt = new Date().toISOString();
 	const startMs = Date.now();
-	const totalActionsRun = 0;
-	const totalSearches = 0;
-	const totalFetches = 0;
+	let totalActionsRun = 0;
+	let totalSearches = 0;
+	let totalFetches = 0;
 	const engineFailures = [];
 
 	process.stderr.write(

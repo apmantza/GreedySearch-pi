@@ -328,7 +328,9 @@ async function main() {
 					`[greedysearch] 🔓 Cloudflare/verification blocked ${cfBlocked.join(", ")} in headless — retrying visible to establish cookies...\n`,
 				);
 				for (const blockedEngine of cfBlocked) {
-					process.stderr.write(`PROGRESS:${blockedEngine}:needs-human\n`);
+					process.stderr.write(
+						`[greedysearch] ${blockedEngine} recovery starting in visible mode...\n`,
+					);
 				}
 				// Close headless tabs, kill headless Chrome
 				await closeTabs(engineTabs);
@@ -364,6 +366,7 @@ async function main() {
 						if (r.status === "fulfilled" && !r.value.error) {
 							out[r.value.engine] = r.value;
 							recovered++;
+							process.stderr.write(`PROGRESS:${r.value.engine}:done\n`);
 						} else if (r.status === "fulfilled") {
 							out[r.value.engine] = r.value;
 							stillBlocked.push(r.value.engine);
@@ -409,6 +412,7 @@ async function main() {
 							if (r.status === "fulfilled" && !r.value.error) {
 								out[r.value.engine] = r.value;
 								recovered++;
+								process.stderr.write(`PROGRESS:${r.value.engine}:done\n`);
 								process.stderr.write(
 									`[greedysearch] ✅ ${r.value.engine} recovered on second visible retry.\n`,
 								);
@@ -421,6 +425,9 @@ async function main() {
 					}
 
 					if (stillBlocked.length > 0) {
+						for (const blockedEngine of stillBlocked) {
+							process.stderr.write(`PROGRESS:${blockedEngine}:needs-human\n`);
+						}
 						keepVisibleForHuman = true;
 						out._needsHumanVerification = {
 							engines: stillBlocked,
