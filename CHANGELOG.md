@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- **Pi update dependency install is leaner** (`package.json`, `package-lock.json`) — Moved the direct `@sinclair/typebox` import into runtime dependencies and marked the Pi host peer as optional so npm does not auto-install a full nested `@earendil-works/pi-coding-agent` tree during git-package updates. This keeps `pi update` focused on GreedySearch runtime deps (`jsdom`, `@mozilla/readability`, `turndown`) and avoids partial installs that leave `jsdom/package.json` missing.
+
 - **Pi TUI peer import no longer required at load time** (`src/tools/greedy-search-handler.ts`) — Replaced the direct `@earendil-works/pi-tui` runtime import with a tiny local `Text` component implementation so Pi/jiti extension import works even when optional TUI peer packages are not installed locally.
 
 - **Research unit tests no longer require fetcher dependencies at import time** (`src/search/research.mjs`) — Research mode now lazy-loads source fetching/file-output helpers only during live research execution, keeping pure planning/normalization unit tests runnable in CI's tarball install simulation without local `node_modules`.

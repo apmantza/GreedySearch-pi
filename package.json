@@ -45,11 +45,16 @@
 	},
 	"dependencies": {
 		"@mozilla/readability": "^0.6.0",
+		"@sinclair/typebox": "^0.34.48",
 		"jsdom": "^24.0.0",
 		"turndown": "^7.1.2"
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*",
-		"@sinclair/typebox": "*"
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		}
 	}
 }
