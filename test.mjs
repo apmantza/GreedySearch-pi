@@ -324,7 +324,9 @@ if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 	) {
 		passMsg("research queries: markdown links sanitized without regex");
 	} else {
-		failMsg(`research queries: markdown sanitize unexpected ${JSON.stringify(markdownQueries)}`);
+		failMsg(
+			`research queries: markdown sanitize unexpected ${JSON.stringify(markdownQueries)}`,
+		);
 	}
 
 	subsection("Source ranking — social domains are low-priority");
@@ -363,6 +365,329 @@ if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 		failMsg(
 			`source ranking: unexpected order ${ranked.map((s) => s.domain).join(",")}`,
 		);
+	}
+
+	// ─── Phase 2: Quality Evaluator + Novelty Gate ────────────────────────
+
+	subsection("Novelty Gate — Jaccard similarity");
+	const {
+		jaccardSimilarity,
+		isDuplicateQuery,
+		tokenSet,
+		buildFallbackQueriesFromGaps,
+	} = await import("./src/search/research.mjs");
+
+	// tokenSet basics
+	const tokens1 = tokenSet("hello world");
+	const tokens2 = tokenSet("HELLO World");
+	if (tokens1.size === 2) passMsg("tokenSet: basic tokenization (2 tokens)");
+	else failMsg(`tokenSet: expected 2 tokens, got ${tokens1.size}`);
+	if (
+		tokens1.size === tokens2.size &&
+		[...tokens1].every((t) => tokens2.has(t))
+	)
+		passMsg("tokenSet: case-insensitive");
+	else failMsg("tokenSet: case sensitivity mismatch");
+
+	// jaccardSimilarity
+	const jExact = jaccardSimilarity("hello world", "hello world");
+	if (Math.abs(jExact - 1.0) < 0.001) passMsg("jaccard: exact match = 1.0");
+	else failMsg(`jaccard: exact match expected 1.0, got ${jExact}`);
+
+	const jNone = jaccardSimilarity("hello world", "foo bar baz");
+	if (Math.abs(jNone - 0.0) < 0.001) passMsg("jaccard: no overlap = 0.0");
+	else failMsg(`jaccard: no overlap expected 0.0, got ${jNone}`);
+
+	const jPartial = jaccardSimilarity(
+		"AI browser automation",
+		"browser automation testing",
+	);
+	if (jPartial > 0.0 && jPartial < 1.0)
+		passMsg(`jaccard: partial overlap = ${jPartial.toFixed(3)}`);
+	else failMsg(`jaccard: partial overlap expected 0<x<1, got ${jPartial}`);
+
+	const jNearDup = jaccardSimilarity("react hooks tutorial", "react hooks");
+	if (jNearDup > 0.6)
+		passMsg(`jaccard: near-duplicate = ${jNearDup.toFixed(3)}`);
+	else
+		failMsg(
+			`jaccard: near-duplicate expected >0.6, got ${jNearDup.toFixed(3)}`,
+		);
+
+	// isDuplicateQuery
+	const used = new Set();
+	used.add("react hooks tutorial 2024");
+	used.add("vue composition api");
+
+	if (
+		isDuplicateQuery("React Hooks Tutorial 2024", used, {
+			roundIndex: 0,
+			originalQuery: "react hooks",
+		})
+	) {
+		passMsg("isDuplicateQuery: exact dup detected (case-insensitive)");
+	} else {
+		failMsg("isDuplicateQuery: exact dup not detected");
+	}
+
+	if (
+		isDuplicateQuery("react hooks tutorial 2024 guide", used, {
+			roundIndex: 2,
+			originalQuery: "react hooks",
+		})
+	) {
+		passMsg("isDuplicateQuery: near-dup rejected (threshold 0.75)");
+	} else {
+		failMsg("isDuplicateQuery: near-dup not rejected");
+	}
+
+	if (
+		!isDuplicateQuery("svelte reactive statements", used, {
+			roundIndex: 2,
+			originalQuery: "react hooks",
+		})
+	) {
+		passMsg("isDuplicateQuery: novel query passes");
+	} else {
+		failMsg("isDuplicateQuery: novel query incorrectly rejected");
+	}
+
+	// Original query rejection after round 1
+	if (
+		isDuplicateQuery("react hooks", used, {
+			roundIndex: 1,
+			originalQuery: "react hooks",
+		})
+	) {
+		passMsg("isDuplicateQuery: original query rejected after round 1");
+	} else {
+		failMsg("isDuplicateQuery: original query not rejected after round 1");
+	}
+
+	// Original query allowed in round 0
+	if (
+		!isDuplicateQuery("react hooks", used, {
+			roundIndex: 0,
+			originalQuery: "react hooks",
+		})
+	) {
+		passMsg("isDuplicateQuery: original query allowed in round 0");
+	} else {
+		failMsg("isDuplicateQuery: original query rejected in round 0");
+	}
+
+	// buildFallbackQueriesFromGaps
+	const fallbacks = buildFallbackQueriesFromGaps(
+		["API support unknown", "production usage unclear"],
+		"Lightpanda browser",
+		new Set(["lightpanda browser overview"]),
+		2,
+		1,
+	);
+	if (fallbacks.length > 0 && fallbacks.length <= 2)
+		passMsg(`fallback queries: generated ${fallbacks.length} queries`);
+	else failMsg(`fallback queries: expected 1-2, got ${fallbacks.length}`);
+	// Gap text is embedded in researchGoal, not query
+	const gapTargets = fallbacks.some(
+		(f) =>
+			f.researchGoal.toLowerCase().includes("api") ||
+			f.researchGoal.toLowerCase().includes("production"),
+	);
+	if (gapTargets) passMsg("fallback queries: targets identified gaps");
+	else failMsg("fallback queries: gaps not targeted");
+
+	// ─── Phase 3: Action Planner ──────────────────────────────────────────
+
+	subsection("Action Planner — validation & parsing");
+	const { validateAction, parseActionPlan, queriesToActions } = await import(
+		"./src/search/research.mjs"
+	);
+
+	// validateAction
+	const validSearch = validateAction({
+		type: "search",
+		query: "React 19 features",
+		researchGoal: "Understand new features",
+	});
+	if (
+		validSearch &&
+		validSearch.type === "search" &&
+		validSearch.query === "React 19 features"
+	) {
+		passMsg("validateAction: valid search action");
+	} else {
+		failMsg(
+			`validateAction: search action failed: ${JSON.stringify(validSearch)}`,
+		);
+	}
+
+	const validFetch = validateAction({
+		type: "fetchUrl",
+		url: "https://react.dev/learn",
+		researchGoal: "Read official docs",
+	});
+	if (
+		validFetch &&
+		validFetch.type === "fetchUrl" &&
+		validFetch.url === "https://react.dev/learn"
+	) {
+		passMsg("validateAction: valid fetchUrl action");
+	} else {
+		failMsg(`validateAction: fetchUrl failed: ${JSON.stringify(validFetch)}`);
+	}
+
+	if (!validateAction({ type: "unknown" })) {
+		passMsg("validateAction: unknown type rejected");
+	} else {
+		failMsg("validateAction: unknown type not rejected");
+	}
+
+	if (!validateAction(null)) {
+		passMsg("validateAction: null input rejected");
+	} else {
+		failMsg("validateAction: null not rejected");
+	}
+
+	if (!validateAction({ type: "search" })) {
+		passMsg("validateAction: search without query rejected");
+	} else {
+		failMsg("validateAction: search without query not rejected");
+	}
+
+	if (!validateAction({ type: "fetchUrl" })) {
+		passMsg("validateAction: fetchUrl without url rejected");
+	} else {
+		failMsg("validateAction: fetchUrl without url not rejected");
+	}
+
+	// parseActionPlan
+	const planResult = parseActionPlan(
+		{
+			answer: `BEGIN_JSON
+{"actions": [
+  {"type":"search","query":"React 19 server components","researchGoal":"SSR info"},
+  {"type":"fetchUrl","url":"https://react.dev/blog","researchGoal":"Blog post"},
+  {"type":"search","query":"","researchGoal":"Empty query"}
+]}
+END_JSON`,
+		},
+		3,
+	);
+	if (planResult.length === 2) {
+		passMsg("parseActionPlan: 2 valid actions (empty query filtered)");
+	} else {
+		failMsg(`parseActionPlan: expected 2 actions, got ${planResult.length}`);
+	}
+
+	// queriesToActions
+	const qActions = queriesToActions([
+		"react concurrent features",
+		{ query: "vue 3 setup syntax", researchGoal: "Vue setup" },
+		"", // empty
+	]);
+	if (qActions.length === 2 && qActions[0].type === "search") {
+		passMsg("queriesToActions: converts strings and objects");
+	} else {
+		failMsg(`queriesToActions: unexpected result: ${JSON.stringify(qActions)}`);
+	}
+
+	// ─── Phase 4: Citation Audit ──────────────────────────────────────────
+
+	subsection("Citation Audit");
+	const { auditCitations } = await import("./src/search/research.mjs");
+
+	// Test with valid citations
+	const sources1 = [
+		{
+			id: "S1",
+			title: "React docs",
+			fetch: { ok: true },
+			content: "x".repeat(200),
+		},
+		{ id: "S2", title: "MDN", fetch: { ok: true }, content: "x".repeat(200) },
+		{ id: "S3", title: "Stack Overflow", fetch: { ok: false } },
+	];
+
+	const audit1 = auditCitations(
+		"React hooks are powerful [S1]. See also [S2] for details.",
+		sources1,
+	);
+	if (audit1.cited.includes("S1") && audit1.cited.includes("S2")) {
+		passMsg("citation audit: extracts S1, S2 from answer text");
+	} else {
+		failMsg(
+			`citation audit: cited list unexpected: ${JSON.stringify(audit1.cited)}`,
+		);
+	}
+	if (audit1.ok) {
+		passMsg("citation audit: ok=true when all cited sources exist");
+	} else {
+		failMsg("citation audit: ok should be true");
+	}
+	if (audit1.missing.length === 0) {
+		passMsg("citation audit: no missing citations");
+	} else {
+		failMsg(
+			`citation audit: unexpected missing: ${JSON.stringify(audit1.missing)}`,
+		);
+	}
+
+	// Test with missing citation
+	const audit2 = auditCitations("See reference [S9] for details.", sources1);
+	if (!audit2.ok && audit2.missing.length > 0) {
+		passMsg("citation audit: missing citation detected");
+	} else {
+		failMsg("citation audit: missing citation not detected");
+	}
+
+	// Test with unfetched source
+	const audit3 = auditCitations("Info from [S3] confirms this.", sources1);
+	if (audit3.unfetched.includes("S3")) {
+		passMsg("citation audit: unfetched source flagged");
+	} else {
+		failMsg("citation audit: unfetched source not flagged");
+	}
+
+	// Test with no citations in answer
+	const audit4 = auditCitations(
+		"This is a plain answer with no citations.",
+		sources1,
+	);
+	if (audit4.ok && audit4.cited.length === 0) {
+		passMsg("citation audit: no citations = ok");
+	} else {
+		failMsg("citation audit: empty citations unexpected");
+	}
+
+	// Test with empty/null inputs
+	const audit5 = auditCitations("", []);
+	if (audit5.ok && audit5.cited.length === 0) {
+		passMsg("citation audit: empty input handled");
+	} else {
+		failMsg("citation audit: empty input not handled");
+	}
+
+	// Mixed citation IDs (S and F)
+	const sourcesMixed = [
+		{ id: "S1", title: "Source 1", content: "x".repeat(200) },
+		{ id: "S2", title: "Source 2" },
+	];
+	const auditMixed = auditCitations("Refs: [S1] [S2] [S5].", sourcesMixed);
+	if (
+		auditMixed.cited.includes("S1") &&
+		auditMixed.cited.includes("S2") &&
+		auditMixed.cited.includes("S5")
+	) {
+		passMsg("citation audit: multiple citation IDs extracted");
+	} else {
+		failMsg(
+			`citation audit: unexpected cited: ${JSON.stringify(auditMixed.cited)}`,
+		);
+	}
+	if (auditMixed.unfetched.includes("S2")) {
+		passMsg("citation audit: S2 flagged as unfetched (no content)");
+	} else {
+		failMsg("citation audit: S2 should be flagged as unfetched");
 	}
 }
 
