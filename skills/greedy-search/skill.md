@@ -1,22 +1,12 @@
 ---
 name: greedy-search
-description: Live web search via Perplexity, Bing, Google AI, and Gemini. Use for current docs, recent errors/framework changes, dependency choices, or stale-knowledge questions. NOT for codebase search.
+description: Web search via Perplexity, Bing, Google AI & Gemini. Current docs, recent changes, dependency choices. NOT codebase search.
 ---
 
-Use `greedy_search` for live web answers.
+`greedy_search({ query, engine: "all"|"perplexity"|"bing"|"google"|"gemini", depth: "fast"|"standard"|"deep"|"research", breadth: 1-5, iterations: 1-3, maxSources: 3-12, visible: bool })`
 
-```js
-greedy_search({ query: "React 19 changes", depth: "standard" });
-```
+**Depth:** `fast`(15-30s, no synthesis) · `standard`(30-90s, all+synthesis+sources) · `deep`(60-180s, stronger grounding) · `research`(slowest, iterative planning+follow-ups+learning extraction; uses breadth/iterations/maxSources)
 
-**Params:** `query` (required), `engine`: `all`|`perplexity`|`bing`|`google`|`gemini`, `depth`: `fast`|`standard`|`deep`|`research`
+**Auto-recovery:** Headless default. Bing/Perplexity auto-retry visible on CF block. Manual CAPTCHA → visible stays open; solve then rerun.
 
-**Depths:**
-- `fast`: ~15-30s, single engine, no synthesis
-- `standard`: ~30-90s, all engines + Gemini synthesis + sources
-- `deep`: ~60-180s, stronger grounding + confidence metadata
-- `research`: slowest, iterative query planning + follow-up searches + learning extraction; optional `breadth` 1-5, `iterations` 1-3, `maxSources` 3-12
-
-**Blocks:** Headless by default; auto-retries in visible mode. If human verification is needed, visible Chrome stays open — tell the user to solve it and rerun.
-
-**CDP safety:** Never call raw `bin/cdp.mjs`. Use `bin/cdp-greedy.mjs`, `bin/cdp-visible.mjs`, or `bin/cdp-headless.mjs`.
+**CDP safety:** Use `bin/cdp-greedy.mjs` only. Never raw `bin/cdp.mjs`.

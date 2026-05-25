@@ -4,6 +4,16 @@
 
 ### Added
 
+### Fixed
+
+### Changed
+
+### Removed
+
+## [1.9.2] — 2026-05-25
+
+### Added
+
 - **Iterative research mode** (`bin/search.mjs`, `src/search/research.mjs`) — Added `--research` / `--depth research` and `greedy_search({ depth: "research" })`. The new mode plans focused follow-up queries, runs fast multi-engine searches, fetches and deduplicates sources, extracts compact learnings/gaps with Gemini, and writes a final cited report. Optional knobs: `breadth` (1-5), `iterations` (1-3), and `maxSources` (3-12). Research mode now fills under-planned breadth with deterministic fallback query angles so `breadth: 3` actually fans out even when Gemini is conservative.
 
 ### Fixed
@@ -37,19 +47,6 @@
 - **`minimizeViaCDP` guard inverted in `launch.mjs`** (`bin/launch.mjs`) — The early-return guard was `if (isVisible()) return` which caused the function to exit immediately in the only case it was ever called (visible Chrome launch via `GREEDY_SEARCH_VISIBLE=1`). Changed to `if (isHeadless()) return`. Also removed the unnecessary 1s sleep (Chrome is already confirmed ready via `writePortFile()` before this is called) and applied the SonarCloud S8480 fix (`wsPath` extracted from `webSocketDebuggerUrl`, WebSocket URL reconstructed as `ws://localhost:${PORT}${wsPath}`).
 
 - **Gemini tab no longer steals focus during synthesis** (`bin/search.mjs`) — Removed the `activateTab` call on the pre-navigated Gemini tab. `Target.activateTarget` was restoring the minimized Chrome window mid-search; CDP synthesis operates on the target ID directly and has no need for the tab to be Chrome's active tab.
-
-### Changed
-
-- **Result file auto-purge** (`src/search/output.mjs`) — On each search run, files older than 7 days are deleted from the results directory. The 10 most recent files are always kept regardless of age. Runs inside `resultsDir()` so it's transparent and zero-overhead.
-
-- **`greedy_search` tool: collapsed rendering** (`src/tools/greedy-search-handler.ts`) — Added `renderCall` and `renderResult` hooks. The call line shows the query (truncated to 60 chars) and engine. The result collapses to a one-line summary: synthesis path shows source count + consensus label; single-engine path shows source count; human-verification path shows a warning. Full output is available via expand (Ctrl+O). Also migrated peer deps from `@mariozechner/pi-coding-agent` to `@earendil-works/pi-coding-agent` and added `@earendil-works/pi-tui` for the `Text` primitive.
-
-- **Headless stealth hardening** (`bin/launch.mjs`, `extractors/common.mjs`) — Four fingerprinting gaps closed:
-  - **UA version auto-detected** — `getChromeVersion` reads the versioned sub-directory inside the Chrome Application folder (e.g. `148.0.7778.168/`) to extract the real major version, then injects it into the `--user-agent` flag. Eliminates the TLS/UA mismatch that was caused by the hardcoded `Chrome/131` string (actual binary was `Chrome/148`).
-  - **`navigator.userAgentData`** — Spoofed to match the detected UA version and remove any `HeadlessChrome` brand entry. `getHighEntropyValues()` returns consistent architecture, platform, and full version list.
-  - **`window.outerWidth/Height`** — Patched from `0` (headless default) to mirror `innerWidth/Height`. A zero outer dimension is a well-known one-signal bot detector.
-  - **`screen.colorDepth/pixelDepth`** — Ensured to report `24` when unset.
-  - **GPU rendering re-enabled in headless** — Removed `--disable-gpu` and `--disable-software-rasterizer`. With `--headless=new`, Chrome uses hardware GPU acceleration (ANGLE/Direct3D on Windows), producing canvas and WebGL output identical to visible mode. Cloudflare Turnstile passes automatically on Perplexity without triggering visible-mode retry.
 
 ## [1.9.0] — 2026-05-22
 
