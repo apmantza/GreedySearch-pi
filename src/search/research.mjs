@@ -281,6 +281,7 @@ function buildQualityEvaluationPrompt(
 		"Identify remaining knowledge gaps.",
 		"Propose targeted next actions (search queries or direct URL fetches) that would most improve the research.",
 		"Decide whether to continue or stop.",
+		"terminationReason must be one of: quality_threshold | max_rounds | no_novel_actions | insufficient_evidence.",
 		"",
 		`Original research question: ${originalQuery}`,
 		`Rounds completed: ${JSON.stringify(roundSummaries, null, 2)}`,
@@ -301,11 +302,7 @@ function buildQualityEvaluationPrompt(
 				},
 				knowledgeGaps: ["specific gap or missing evidence"],
 				shouldContinue: true,
-				terminationReason:
-					"quality_threshold" ||
-					"max_rounds" ||
-					"no_novel_actions" ||
-					"insufficient_evidence",
+				terminationReason: "quality_threshold",
 				nextActions: [
 					{ type: "search", query: "targeted search query" },
 					{ type: "fetchUrl", url: "https://example.com/primary-doc" },

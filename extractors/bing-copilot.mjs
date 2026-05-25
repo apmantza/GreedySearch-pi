@@ -150,9 +150,9 @@ async function extractFromVisibleDom(tab, query = "") {
 		let answer = "";
 		if (bodyText && bodyText.includes("Copilot said")) {
 			// safe linear extraction — no ReDoS-vulnerable regex split
-		const copilotSplit = bodyText.split(/Copilot said\s*/i);
-		const afterCopilot = copilotSplit.pop() || "";
-		answer = cleanCopilotArticleText(truncateAtBoilerplate(afterCopilot));
+			const copilotSplit = bodyText.split(/Copilot said\s*/i);
+			const afterCopilot = copilotSplit.pop() || "";
+			answer = cleanCopilotArticleText(truncateAtBoilerplate(afterCopilot));
 		}
 
 		if (!answer) {
