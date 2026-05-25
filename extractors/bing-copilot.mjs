@@ -149,14 +149,10 @@ async function extractFromVisibleDom(tab, query = "") {
 
 		let answer = "";
 		if (bodyText && bodyText.includes("Copilot said")) {
-			answer = cleanCopilotArticleText(
-				bodyText
-					.split(/Copilot said\s*/i)
-					.pop()
-					.split(
-						/\n[^\S\n]*(?:Good response|Bad response|Share message|Copy message|Read aloud|Regenerate|Edit in a page|Message Copilot|Smart)(?![\w])/i,
-					)[0],
-			);
+			// safe linear extraction — no ReDoS-vulnerable regex split
+		const copilotSplit = bodyText.split(/Copilot said\s*/i);
+		const afterCopilot = copilotSplit.pop() || "";
+		answer = cleanCopilotArticleText(truncateAtBoilerplate(afterCopilot));
 		}
 
 		if (!answer) {
@@ -223,14 +219,49 @@ function normalizeForCompare(text = "") {
 	return String(text).toLocaleLowerCase().replace(/\s+/g, " ").trim();
 }
 
+/** Boilerplate markers that appear after Copilot answers — safe linear search, no ReDoS */
+const BOILERPLATE_MARKERS = [
+	"Good response",
+	"Bad response",
+	"Share message",
+	"Copy message",
+	"Read aloud",
+	"Regenerate",
+	"Edit in a page",
+	"Message Copilot",
+	"Smart",
+];
+
+/**
+ * Linear-time truncation at the first boilerplate marker preceded by whitespace
+ * and NOT followed by a word character (matches the intent of the original regex
+ * without catastrophic backtracking).
+ */
+function truncateAtBoilerplate(text) {
+	let earliest = text.length;
+	for (const marker of BOILERPLATE_MARKERS) {
+		let searchFrom = 0;
+		while (searchFrom < text.length) {
+			const idx = text.indexOf(marker, searchFrom);
+			if (idx === -1) break;
+			// Preceding char must be whitespace (equivalent to \s+ in original)
+			const before = idx > 0 ? text[idx - 1] : "";
+			const precededByWhitespace = !before || /\s/.test(before);
+			// Negative lookahead equivalent: marker NOT followed by a word char
+			const after = text[idx + marker.length] || "";
+			const notFollowedByWord = !after || !/\w/.test(after);
+			if (precededByWhitespace && notFollowedByWord) {
+				if (idx < earliest) earliest = idx;
+				break;
+			}
+			searchFrom = idx + marker.length;
+		}
+	}
+	return earliest < text.length ? text.slice(0, earliest) : text;
+}
+
 function cleanCopilotArticleText(text = "") {
-	return String(text)
-		.replace(/\s+/g, " ")
-		.replace(
-			/\s+(?:Good response|Bad response|Share message|Copy message|Read aloud|Regenerate|Edit in a page|Message Copilot|Smart)(?![\w]).*$/i,
-			"",
-		)
-		.trim();
+	return truncateAtBoilerplate(String(text).replace(/\s+/g, " ")).trim();
 }
 
 /**
