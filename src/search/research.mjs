@@ -871,7 +871,7 @@ function buildLearningPrompt(
 			id: `F${index + 1}`,
 			title: source.title || "",
 			url: source.finalUrl || source.url || "",
-			snippet: trimText(source.content || source.snippet || "", 1800),
+			snippet: trimText(source.content || source.snippet || "", 3000),
 		}));
 
 	return [
@@ -912,16 +912,25 @@ function buildFinalReportPrompt(originalQuery, rounds, sources) {
 		fetch: source.fetch?.attempted
 			? {
 					ok: source.fetch.ok,
-					snippet: trimText(source.fetch.snippet || "", 700),
+					snippet: trimText(source.fetch.snippet || "", 1200),
 					publishedTime: source.fetch.publishedTime || "",
 				}
 			: undefined,
 	}));
 
 	return [
-		"You are writing the final answer for an iterative deep-research run.",
-		"Use the learnings and source registry below. Prefer concrete, sourced claims and call out uncertainty.",
-		"Write a clear markdown report with: concise answer, key findings, evidence/citations using [S1] style IDs, caveats, and recommended next steps if useful.",
+		"You are writing the final research report for an iterative deep-research run.",
+		"Produce a thorough markdown report organized into clear sections.",
+		"",
+		"Use the learnings and source registry below. Every substantive claim MUST be backed by an [S1] citation.",
+		'Where engines disagree, surface the conflicting claims explicitly in the "differences" array.',
+		'Include a "Key Claims" structure that maps each distinct claim to its supporting source IDs.',
+		"",
+		"Report structure:",
+		"1. ## Summary — A 2-4 sentence executive summary of findings",
+		"2. ## Key Findings — The main findings, organized by theme or question, each with inline citations",
+		"3. ## Areas of Disagreement — Where engines or sources conflict (if any)",
+		"4. ## Limitations & Caveats — Important qualifiers, gaps, or uncertainties",
 		"",
 		`Original research question: ${originalQuery}`,
 		`Learnings: ${JSON.stringify(learnings, null, 2)}`,
@@ -932,12 +941,20 @@ function buildFinalReportPrompt(originalQuery, rounds, sources) {
 		"BEGIN_JSON",
 		JSON.stringify(
 			{
-				answer: "markdown report with inline [S1] citations",
+				answer: "markdown report with sections and inline [S1] citations",
 				agreement: {
 					level: "high|medium|low|mixed|conflicting",
 					summary: "one-sentence confidence summary",
 				},
-				caveats: ["important caveat"],
+				differences: ["notable disagreement or conflict between sources"],
+				caveats: ["important caveat or qualification"],
+				claims: [
+					{
+						claim: "specific factual statement from the research",
+						support: "strong|moderate|weak|conflicting",
+						sourceIds: ["S1", "S2"],
+					},
+				],
 				recommendedSources: ["S1", "S2"],
 			},
 			null,
@@ -1133,7 +1150,7 @@ export async function runResearchMode({
 	iterations = 2,
 	maxSources,
 	locale = null,
-	short = true,
+	short = false,
 	qualityThreshold = 8.5,
 } = {}) {
 	const options = clampResearchOptions({ breadth, iterations, maxSources });
@@ -1468,7 +1485,9 @@ export async function runResearchMode({
 			? allLearnings.map((learning) => `- ${learning}`).join("\n")
 			: "Research completed, but no structured learnings were extracted.",
 		agreement: { level: "mixed", summary: "Research synthesis fallback." },
+		differences: [],
 		caveats: [],
+		claims: [],
 		recommendedSources: combinedSources.slice(0, 4).map((source) => source.id),
 		synthesized: false,
 	};
