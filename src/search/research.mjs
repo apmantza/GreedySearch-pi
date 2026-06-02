@@ -6,10 +6,12 @@
 // no-API browser engines and source fetchers instead of Firecrawl/OpenAI.
 
 import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	buildSourceRegistry,
+	classifySourceType,
 	computeCompositeScore,
 	mergeFetchDataIntoSources,
 	normalizeUrl,
@@ -23,6 +25,33 @@ const __dir = fileURLToPath(new URL(".", import.meta.url)).replace(
 	"$1",
 );
 const SEARCH_BIN = join(__dir, "..", "..", "bin", "search.mjs");
+const DEFAULT_RESEARCH_BUNDLE_ROOT = join(
+	process.cwd(),
+	".pi",
+	"greedysearch-research",
+);
+
+function slugifyResearchName(value) {
+	const slug = String(value || "research")
+		.toLowerCase()
+		.replaceAll(/[^a-z0-9]+/g, "-")
+		.replaceAll(/^-|-$/g, "")
+		.slice(0, 60);
+	return slug || "research";
+}
+
+function uniqueStrings(items, limit = Infinity) {
+	const seen = new Set();
+	const out = [];
+	for (const item of items || []) {
+		const clean = trimText(String(item || ""), 1000);
+		if (!clean || seen.has(clean)) continue;
+		seen.add(clean);
+		out.push(clean);
+		if (out.length >= limit) break;
+	}
+	return out;
+}
 
 async function fetchMultipleResearchSources(...args) {
 	const { fetchMultipleSources } = await import("./fetch-source.mjs");
@@ -327,22 +356,28 @@ export function buildFallbackQueriesFromGaps(
 ) {
 	const fallbacks = [];
 	const angles = [
-		{ template: (g) => `${g} official documentation`, label: "official docs" },
 		{
-			template: (g) => `${g} GitHub issues discussions`,
+			template: (gap) => `${gap} official documentation`,
+			label: "official docs",
+		},
+		{
+			template: (gap) => `${gap} GitHub issues discussions`,
 			label: "community signals",
 		},
 		{
-			template: (g) => `${g} benchmarks performance comparison`,
+			template: (gap) => `${gap} benchmarks performance comparison`,
 			label: "benchmarks",
 		},
-		{ template: (g) => `${g} limitations risks caveats`, label: "limitations" },
 		{
-			template: (g) => `${g} production deployment experience`,
+			template: (gap) => `${gap} limitations risks caveats`,
+			label: "limitations",
+		},
+		{
+			template: (gap) => `${gap} production deployment experience`,
 			label: "production usage",
 		},
 		{
-			template: (g) => `${originalQuery} ${g} counter evidence`,
+			template: (gap) => `${originalQuery} ${gap} counter evidence`,
 			label: "counter-evidence",
 		},
 	];
@@ -350,7 +385,7 @@ export function buildFallbackQueriesFromGaps(
 	for (let i = 0; i < gaps.length && fallbacks.length < nextBreadth; i++) {
 		const gap = gaps[i];
 		const angle = angles[i % angles.length];
-		const candidate = angle.template(originalQuery, gap);
+		const candidate = angle.template(gap);
 		if (!isDuplicateQuery(candidate, usedQueries, { roundIndex })) {
 			fallbacks.push({
 				query: candidate,
@@ -598,9 +633,10 @@ async function executeResearchAction(
 				engines: ["fetch"],
 				engineCount: 1,
 				perEngine: {},
-				sourceType: classifySourceTypeFromDomain(
+				sourceType: classifySourceType(
 					domain,
 					fetchResult.title || "",
+					fetchResult.finalUrl || normalizedUrl,
 				),
 				isOfficial: false,
 				smartScore: 0,
@@ -737,30 +773,6 @@ function getDomainFromUrl(rawUrl) {
 	}
 }
 
-function classifySourceTypeFromDomain(domain, title = "") {
-	const { matchesDomain, SOCIAL_HOSTS, COMMUNITY_HOSTS, NEWS_HOSTS } =
-		require("./sources.mjs");
-	const lowerTitle = title.toLowerCase();
-
-	if (domain === "github.com" || domain === "gitlab.com") return "repo";
-	if (matchesDomain(domain, SOCIAL_HOSTS)) return "social";
-	if (matchesDomain(domain, COMMUNITY_HOSTS)) return "community";
-	if (matchesDomain(domain, NEWS_HOSTS)) return "news";
-	if (
-		domain.startsWith("docs.") ||
-		domain.startsWith("developer.") ||
-		domain.startsWith("developers.") ||
-		domain.startsWith("api.") ||
-		lowerTitle.includes("documentation") ||
-		lowerTitle.includes("docs") ||
-		lowerTitle.includes("reference")
-	) {
-		return "official-docs";
-	}
-	if (domain.startsWith("blog.")) return "maintainer-blog";
-	return "website";
-}
-
 /**
  * Normalize a GitHub root/tree URL into specific fetchable pages.
  * Expands github.com/owner/repo into [README, CONTRIBUTING, CHANGELOG, key files].
@@ -860,6 +872,7 @@ function buildLearningPrompt(
 	roundQueries,
 	searchSummaries,
 	fetchedSources,
+	questions = [],
 ) {
 	const sourceSnippets = fetchedSources
 		.filter((source) => source?.content || source?.snippet)
@@ -878,6 +891,7 @@ function buildLearningPrompt(
 		"",
 		`Original research question: ${originalQuery}`,
 		`Round queries: ${JSON.stringify(roundQueries, null, 2)}`,
+		`Question ledger: ${JSON.stringify(questions, null, 2)}`,
 		`Engine summaries: ${JSON.stringify(searchSummaries, null, 2)}`,
 		`Fetched source snippets: ${JSON.stringify(sourceSnippets, null, 2)}`,
 		"",
@@ -886,6 +900,14 @@ function buildLearningPrompt(
 		JSON.stringify(
 			{
 				learnings: ["concise, information-dense learning"],
+				answeredQuestions: [
+					{
+						id: "Q1",
+						evidence: "brief evidence that closes this question",
+						sourceIds: ["S1"],
+					},
+				],
+				newQuestions: ["new sub-question discovered from the evidence"],
 				followUpQueries: ["specific next search query"],
 				gaps: ["important uncertainty or missing evidence"],
 			},
@@ -896,7 +918,12 @@ function buildLearningPrompt(
 	].join("\n");
 }
 
-function buildFinalReportPrompt(originalQuery, rounds, sources) {
+function buildFinalReportPrompt(
+	originalQuery,
+	rounds,
+	sources,
+	questions = [],
+) {
 	const learnings = rounds.flatMap((round) => round.learnings || []);
 	const gaps = rounds.flatMap((round) => round.gaps || []);
 	const sourceRegistry = sources.slice(0, 12).map((source) => ({
@@ -932,6 +959,7 @@ function buildFinalReportPrompt(originalQuery, rounds, sources) {
 		`Original research question: ${originalQuery}`,
 		`Learnings: ${JSON.stringify(learnings, null, 2)}`,
 		`Known gaps/caveats: ${JSON.stringify(gaps, null, 2)}`,
+		`Question ledger: ${JSON.stringify(questions, null, 2)}`,
 		`Source registry: ${JSON.stringify(sourceRegistry, null, 2)}`,
 		"",
 		"Respond ONLY with JSON wrapped in BEGIN_JSON / END_JSON markers:",
@@ -1141,6 +1169,394 @@ export function auditCitations(answer, sources) {
 	};
 }
 
+export function computeResearchFloor({
+	sources = [],
+	fetchedSources = [],
+	synthesis = {},
+	citationAudit = null,
+	gaps = [],
+	questions = [],
+	rounds = [],
+	qualityScore = 0,
+	qualityThreshold = 8.5,
+	maxSources = 8,
+	requireCitations = true,
+	requireQuestions = true,
+} = {}) {
+	const fetchedOk = fetchedSources.filter(
+		(source) =>
+			source?.fetch?.ok ||
+			(source?.contentChars || 0) > 100 ||
+			String(source?.content || "").length > 100,
+	);
+	const primarySources = sources.filter((source) =>
+		["official-docs", "repo", "maintainer-blog"].includes(
+			String(source?.sourceType || ""),
+		),
+	);
+	const claims = Array.isArray(synthesis?.claims) ? synthesis.claims : [];
+	const citedCount = citationAudit ? citationAudit.cited?.length || 0 : 0;
+	const questionStats = questionProgress(questions);
+	const minFetched = Math.min(4, Math.max(2, Number(maxSources) || 8));
+	const checks = {
+		roundsRun: rounds.length >= 1,
+		fetchedSources: fetchedOk.length >= minFetched,
+		primarySources: primarySources.length >= 1,
+		qualityScore: qualityScore >= Math.min(qualityThreshold, 8),
+		claimsExtracted: !requireCitations || claims.length > 0,
+		citationsPresent: !requireCitations || citedCount > 0,
+		citationsValid: !requireCitations || citationAudit?.ok === true,
+		unfetchedCitations:
+			!requireCitations || (citationAudit?.unfetched || []).length === 0,
+		questionsClosed: !requireQuestions || questionStats.open === 0,
+	};
+	return {
+		floorMet: Object.values(checks).every(Boolean),
+		checks,
+		metrics: {
+			fetchedOk: fetchedOk.length,
+			primarySources: primarySources.length,
+			claims: claims.length,
+			cited: citedCount,
+			gaps: gaps.length,
+			openQuestions: questionStats.open,
+			closedQuestions: questionStats.closed,
+			totalQuestions: questionStats.total,
+			qualityScore,
+			minFetched,
+		},
+	};
+}
+
+function annotateFetchedSourcesWithIds(fetchedSources, sources) {
+	const byUrl = new Map();
+	for (const source of sources || []) {
+		const key = normalizeUrl(
+			source?.canonicalUrl || source?.finalUrl || source?.url,
+		);
+		if (key && source?.id) byUrl.set(key, source.id);
+	}
+	return (fetchedSources || []).map((source, index) => {
+		const key = normalizeUrl(
+			source?.finalUrl || source?.canonicalUrl || source?.url,
+		);
+		return {
+			...source,
+			id: source?.id || byUrl.get(key) || `F${index + 1}`,
+		};
+	});
+}
+
+export function createQuestionLedger(query) {
+	return [
+		{
+			id: "Q1",
+			question: trimText(sanitizeResearchQuery(query), 320),
+			status: "open",
+			reason: "Original research question",
+			evidence: [],
+			sourceIds: [],
+		},
+	];
+}
+
+function nextQuestionId(questions) {
+	let max = 0;
+	for (const q of questions || []) {
+		const n = Number.parseInt(String(q.id || "").replace(/^Q/i, ""), 10);
+		if (Number.isFinite(n)) max = Math.max(max, n);
+	}
+	return `Q${max + 1}`;
+}
+
+function findSimilarQuestion(questions, question) {
+	const normalized = sanitizeResearchQuery(question).toLowerCase();
+	return (questions || []).find(
+		(q) =>
+			q.question?.toLowerCase() === normalized ||
+			jaccardSimilarity(q.question || "", normalized) >= 0.82,
+	);
+}
+
+function addQuestion(questions, question, { reason = "", round = null } = {}) {
+	const clean = trimText(sanitizeResearchQuery(question), 320);
+	if (!clean) return null;
+	const existing = findSimilarQuestion(questions, clean);
+	if (existing) return existing;
+	const item = {
+		id: nextQuestionId(questions),
+		question: clean,
+		status: "open",
+		reason: trimText(reason, 240),
+		createdRound: round,
+		evidence: [],
+		sourceIds: [],
+	};
+	questions.push(item);
+	return item;
+}
+
+function closeQuestion(
+	questions,
+	idOrQuestion,
+	{ evidence = "", sourceIds = [], round = null } = {},
+) {
+	const target =
+		questions.find((q) => q.id === idOrQuestion) ||
+		findSimilarQuestion(questions, idOrQuestion);
+	if (!target) return null;
+	target.status = "closed";
+	target.closedRound = target.closedRound || round;
+	if (evidence)
+		target.evidence = uniqueStrings([...(target.evidence || []), evidence], 4);
+	if (Array.isArray(sourceIds)) {
+		target.sourceIds = uniqueStrings(
+			[...(target.sourceIds || []), ...sourceIds],
+			8,
+		);
+	}
+	return target;
+}
+
+function questionProgress(questions) {
+	const total = questions.length;
+	const closed = questions.filter((q) => q.status === "closed").length;
+	return { total, closed, open: Math.max(0, total - closed) };
+}
+
+export function updateQuestionLedger(
+	questions,
+	{ roundNumber, actions = [], learningPayload = {}, gaps = [] } = {},
+) {
+	for (const run of actions) {
+		const action = run?.action || run;
+		const goal =
+			action?.researchGoal && action.researchGoal !== "Original user query"
+				? action.researchGoal
+				: action?.query || action?.url || "";
+		if (goal) {
+			addQuestion(questions, goal, {
+				reason: "Planned research action",
+				round: roundNumber,
+			});
+		}
+	}
+
+	const answered = Array.isArray(learningPayload.answeredQuestions)
+		? learningPayload.answeredQuestions
+		: [];
+	for (const item of answered) {
+		if (typeof item === "string") {
+			closeQuestion(questions, item, { round: roundNumber });
+			continue;
+		}
+		const id = item?.id || item?.question;
+		if (!id && item?.question) {
+			const added = addQuestion(questions, item.question, {
+				reason: "Answered during learning extraction",
+				round: roundNumber,
+			});
+			if (added) closeQuestion(questions, added.id, { round: roundNumber });
+			continue;
+		}
+		closeQuestion(questions, id, {
+			evidence: item?.evidence || item?.answer || "",
+			sourceIds: Array.isArray(item?.sourceIds) ? item.sourceIds : [],
+			round: roundNumber,
+		});
+	}
+
+	const newQuestions = [
+		...(Array.isArray(learningPayload.newQuestions)
+			? learningPayload.newQuestions
+			: []),
+		...(Array.isArray(learningPayload.followUpQueries)
+			? learningPayload.followUpQueries
+			: []),
+		...gaps,
+	];
+	for (const question of newQuestions) {
+		addQuestion(questions, question, {
+			reason: "Discovered gap/follow-up",
+			round: roundNumber,
+		});
+	}
+
+	return questions;
+}
+
+function renderQuestionStatus(questions) {
+	if (!questions.length) return "No tracked questions.";
+	return questions
+		.map((q) => {
+			const ids = q.sourceIds?.length ? ` (${q.sourceIds.join(", ")})` : "";
+			return `- [${q.status === "closed" ? "x" : " "}] ${q.id}: ${q.question}${ids}`;
+		})
+		.join("\n");
+}
+
+function markdownList(items, fallback = "None recorded.") {
+	const unique = uniqueStrings(items);
+	return unique.length
+		? unique.map((item) => `- ${item}`).join("\n")
+		: fallback;
+}
+
+async function writeResearchBundle({
+	query,
+	rounds,
+	sources,
+	fetchedSources,
+	synthesis,
+	citationAudit,
+	floor,
+	manifest,
+	allGaps = [],
+	questions = [],
+	outDir = null,
+}) {
+	const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-").slice(0, 19);
+	const dir =
+		outDir ||
+		join(
+			DEFAULT_RESEARCH_BUNDLE_ROOT,
+			`${stamp}_${slugifyResearchName(query)}`,
+		);
+	const reportsDir = join(dir, "reports");
+	const sourcesDir = join(dir, "sources");
+	const dataDir = join(dir, "data");
+	mkdirSync(reportsDir, { recursive: true });
+	mkdirSync(sourcesDir, { recursive: true });
+	mkdirSync(dataDir, { recursive: true });
+
+	const sourceFiles = await writeResearchSourcesToFiles(
+		fetchedSources,
+		sourcesDir,
+	);
+	const gaps = uniqueStrings([
+		...allGaps,
+		...rounds.flatMap((round) => round.gaps || []),
+	]);
+	writeFileSync(
+		join(dir, "STATUS.md"),
+		[
+			floor.floorMet ? "STATUS: DONE" : "STATUS: PARTIAL",
+			"",
+			`Query: ${query}`,
+			`Stop reason: ${manifest.terminationReason || "max_rounds"}`,
+			"",
+			"## Deterministic floor checks",
+			...Object.entries(floor.checks).map(
+				([name, ok]) => `- [${ok ? "x" : " "}] ${name}`,
+			),
+			"",
+			"## Questions",
+			renderQuestionStatus(questions),
+			"",
+			"## Open gaps",
+			markdownList(gaps),
+			"",
+		].join("\n"),
+		"utf8",
+	);
+	writeFileSync(
+		join(dir, "OUTLINE.md"),
+		[
+			"# Research bundle outline",
+			"",
+			"- `reports/SUMMARY.md` — final cited report",
+			"- `reports/CLAIMS.md` — extracted claims with support/source IDs",
+			"- `reports/GAPS.md` — remaining caveats and uncertainties",
+			"- `sources/` — fetched source markdown files",
+			"- `data/manifest.json` — machine-readable run metadata",
+			"- `data/rounds.json` — per-round actions/learnings/gaps",
+			"- `data/sources.json` — ranked source registry",
+			"- `data/questions.json` — open/closed question ledger",
+			"",
+		].join("\n"),
+		"utf8",
+	);
+	writeFileSync(
+		join(reportsDir, "SUMMARY.md"),
+		String(synthesis.answer || ""),
+		"utf8",
+	);
+	writeFileSync(
+		join(reportsDir, "CLAIMS.md"),
+		[
+			"# Key claims",
+			"",
+			...(Array.isArray(synthesis.claims) && synthesis.claims.length
+				? synthesis.claims.map((claim) => {
+						const ids = Array.isArray(claim.sourceIds)
+							? claim.sourceIds.join(", ")
+							: "";
+						return `- ${claim.claim || ""} (${claim.support || "support unknown"}${ids ? `; ${ids}` : ""})`;
+					})
+				: ["No structured claims were extracted."]),
+			"",
+		].join("\n"),
+		"utf8",
+	);
+	writeFileSync(
+		join(reportsDir, "GAPS.md"),
+		[
+			"# Gaps and caveats",
+			"",
+			"## Caveats",
+			markdownList(synthesis.caveats || []),
+			"",
+			"## Research gaps",
+			markdownList(gaps),
+			"",
+		].join("\n"),
+		"utf8",
+	);
+	writeFileSync(
+		join(dataDir, "manifest.json"),
+		JSON.stringify({ ...manifest, floor, citationAudit }, null, 2),
+		"utf8",
+	);
+	writeFileSync(
+		join(dataDir, "rounds.json"),
+		JSON.stringify(rounds, null, 2),
+		"utf8",
+	);
+	writeFileSync(
+		join(dataDir, "sources.json"),
+		JSON.stringify(sources, null, 2),
+		"utf8",
+	);
+	writeFileSync(
+		join(dataDir, "questions.json"),
+		JSON.stringify(questions, null, 2),
+		"utf8",
+	);
+	writeFileSync(
+		join(sourcesDir, "index.md"),
+		[
+			"# Source index",
+			"",
+			...sourceFiles.map((source) => {
+				const label = source.title || source.url;
+				const url = source.finalUrl || source.url;
+				const path = source.contentPath ? ` — ${source.contentPath}` : "";
+				return `- ${source.id || "?"}: [${label}](${url})${path}`;
+			}),
+			"",
+		].join("\n"),
+		"utf8",
+	);
+	return {
+		dir,
+		statusPath: join(dir, "STATUS.md"),
+		summaryPath: join(reportsDir, "SUMMARY.md"),
+		manifestPath: join(dataDir, "manifest.json"),
+		sourceCount: sourceFiles.length,
+		sourceFiles,
+	};
+}
+
 export async function runResearchMode({
 	query,
 	breadth = 3,
@@ -1149,11 +1565,14 @@ export async function runResearchMode({
 	locale = null,
 	short = false,
 	qualityThreshold = 8.5,
+	writeBundle = process.env.GREEDY_RESEARCH_BUNDLE !== "0",
+	researchOutDir = null,
 } = {}) {
 	const options = clampResearchOptions({ breadth, iterations, maxSources });
 	const rounds = [];
 	let allLearnings = [];
 	let allGaps = [];
+	const questions = createQuestionLedger(query);
 	let activeActions = null;
 	let combinedSources = [];
 	let fetchedSources = [];
@@ -1292,6 +1711,7 @@ export async function runResearchMode({
 		const fetchActionRuns = actionRuns.filter(
 			(r) => r.action.type === "fetchUrl",
 		);
+		updateQuestionLedger(questions, { roundNumber, actions: actionRuns });
 
 		combinedSources = dedupeSources([
 			combinedSources,
@@ -1351,6 +1771,7 @@ export async function runResearchMode({
 						engines: summarizeEngineAnswers(run.result),
 					})),
 					fetchedSources,
+					questions,
 				),
 				{ timeoutMs: 120000 },
 			);
@@ -1377,8 +1798,14 @@ export async function runResearchMode({
 					.filter(Boolean)
 					.slice(0, 6)
 			: [];
-		allLearnings = [...new Set([...allLearnings, ...learnings])];
-		allGaps = [...new Set([...allGaps, ...gaps])];
+		allLearnings = uniqueStrings([...allLearnings, ...learnings]);
+		allGaps = uniqueStrings([...allGaps, ...gaps]);
+		updateQuestionLedger(questions, {
+			roundNumber,
+			actions: [],
+			learningPayload,
+			gaps,
+		});
 		rounds.push({
 			round: roundNumber,
 			actions: actionRuns.map((run) => ({
@@ -1404,19 +1831,38 @@ export async function runResearchMode({
 			qualityHistory,
 		);
 		qualityHistory.push(evaluation.score);
+		allGaps = uniqueStrings([...allGaps, ...(evaluation.knowledgeGaps || [])]);
+		updateQuestionLedger(questions, {
+			roundNumber,
+			gaps: evaluation.knowledgeGaps || [],
+		});
+		const preliminaryFloor = computeResearchFloor({
+			sources: combinedSources,
+			fetchedSources,
+			gaps: allGaps,
+			questions,
+			rounds,
+			qualityScore: evaluation.score,
+			qualityThreshold,
+			maxSources: options.maxSources,
+			requireCitations: false,
+			requireQuestions: false,
+		});
 		process.stderr.write(
-			`[greedysearch] Quality score round ${roundNumber}: ${evaluation.score.toFixed(1)} (shouldContinue: ${evaluation.shouldContinue})\n`,
+			`[greedysearch] Quality score round ${roundNumber}: ${evaluation.score.toFixed(1)} (shouldContinue: ${evaluation.shouldContinue}, floor: ${preliminaryFloor.floorMet})\n`,
 		);
 
-		// Early termination
+		// Early termination is outcome-first: Gemini quality alone is not enough.
+		// Stop early only when the score is high AND deterministic source/floor checks pass.
 		if (
 			evaluation.score >= qualityThreshold &&
+			preliminaryFloor.floorMet &&
 			(!evaluation.shouldContinue ||
 				evaluation.terminationReason === "quality_threshold")
 		) {
 			terminationReason = evaluation.terminationReason || "quality_threshold";
 			process.stderr.write(
-				`[greedysearch] Quality threshold ${qualityThreshold} reached (score: ${evaluation.score.toFixed(1)}). Terminating early.\n`,
+				`[greedysearch] Research floor reached (score: ${evaluation.score.toFixed(1)}). Terminating early.\n`,
 			);
 			break;
 		}
@@ -1490,7 +1936,7 @@ export async function runResearchMode({
 	};
 	try {
 		const rawReport = await runGeminiPrompt(
-			buildFinalReportPrompt(query, rounds, combinedSources),
+			buildFinalReportPrompt(query, rounds, combinedSources, questions),
 			{ timeoutMs: 180000 },
 		);
 		const parsed = parseGeminiJson(rawReport, {});
@@ -1508,13 +1954,75 @@ export async function runResearchMode({
 		synthesis.error = error.message;
 	}
 
-	const fetchedFiles = await writeResearchSourcesToFiles(fetchedSources);
 	const finishedAt = new Date().toISOString();
 	const durationMs = Date.now() - startMs;
+	const qualityScore = qualityHistory.at(-1) || 0;
+	fetchedSources = annotateFetchedSourcesWithIds(
+		fetchedSources,
+		combinedSources,
+	);
 
-	// Citation audit
+	// Citation audit + deterministic completion floor
 	process.stderr.write("PROGRESS:research:audit-citations\n");
 	const citationAudit = auditCitations(synthesis.answer || "", combinedSources);
+	const floor = computeResearchFloor({
+		sources: combinedSources,
+		fetchedSources,
+		synthesis,
+		citationAudit,
+		gaps: allGaps,
+		questions,
+		rounds,
+		qualityScore,
+		qualityThreshold,
+		maxSources: options.maxSources,
+	});
+	if (floor.floorMet && terminationReason === "max_rounds") {
+		terminationReason = "done_floor_met";
+	} else if (!floor.floorMet && terminationReason === "quality_threshold") {
+		terminationReason = "max_rounds_floor_unmet";
+	}
+
+	const manifest = {
+		startedAt,
+		finishedAt,
+		durationMs,
+		rounds: rounds.length,
+		actionsRun: totalActionsRun,
+		searches: totalSearches,
+		fetches: totalFetches,
+		sourcesFetched: fetchedSources.filter((s) => s?.contentChars > 100).length,
+		engineFailures,
+		terminationReason,
+		floorMet: floor.floorMet,
+	};
+	let bundle = null;
+	let fetchedFiles;
+	if (writeBundle) {
+		process.stderr.write("PROGRESS:research:bundle\n");
+		try {
+			bundle = await writeResearchBundle({
+				query,
+				rounds,
+				sources: combinedSources,
+				fetchedSources,
+				synthesis,
+				citationAudit,
+				floor,
+				manifest,
+				allGaps,
+				questions,
+				outDir: researchOutDir,
+			});
+			fetchedFiles = bundle.sourceFiles;
+			delete bundle.sourceFiles;
+		} catch (error) {
+			bundle = { error: error.message || String(error) };
+			fetchedFiles = await writeResearchSourcesToFiles(fetchedSources);
+		}
+	} else {
+		fetchedFiles = await writeResearchSourcesToFiles(fetchedSources);
+	}
 
 	process.stderr.write("PROGRESS:research:done\n");
 
@@ -1527,21 +2035,15 @@ export async function runResearchMode({
 			maxSources: options.maxSources,
 			rounds,
 			learnings: allLearnings,
+			gaps: allGaps,
+			questions,
+			questionProgress: questionProgress(questions),
 			qualityHistory,
 			terminationReason,
 			qualityThreshold,
-			manifest: {
-				startedAt,
-				finishedAt,
-				durationMs,
-				rounds: rounds.length,
-				actionsRun: totalActionsRun,
-				searches: totalSearches,
-				fetches: totalFetches,
-				sourcesFetched: fetchedSources.filter((s) => s?.contentChars > 100)
-					.length,
-				engineFailures,
-			},
+			floor,
+			bundle,
+			manifest,
 		},
 		_citationAudit: citationAudit,
 		_sources: combinedSources,
@@ -1559,23 +2061,43 @@ export async function runResearchMode({
 						)
 					: 0,
 			agreementLevel: synthesis.agreement?.level || "mixed",
+			floorMet: floor.floorMet,
 		},
 	};
 }
 
 function dedupeFetchedSources(sources) {
-	const seen = new Map();
+	const byUrl = new Map();
 	for (const source of sources) {
 		const key =
 			source?.id || normalizeUrl(source?.finalUrl || source?.url || "");
 		if (!key) continue;
-		const existing = seen.get(key);
+		const existing = byUrl.get(key);
 		if (
 			!existing ||
 			(source.contentChars || 0) > (existing.contentChars || 0)
 		) {
-			seen.set(key, source);
+			byUrl.set(key, source);
 		}
 	}
-	return Array.from(seen.values());
+
+	const out = [];
+	for (const source of byUrl.values()) {
+		const content = String(source.content || source.snippet || "");
+		const duplicateIndex = out.findIndex((existing) => {
+			const other = String(existing.content || existing.snippet || "");
+			if (content.length < 400 || other.length < 400) return false;
+			return (
+				jaccardSimilarity(content.slice(0, 4000), other.slice(0, 4000)) >= 0.9
+			);
+		});
+		if (duplicateIndex === -1) {
+			out.push(source);
+			continue;
+		}
+		if ((source.contentChars || 0) > (out[duplicateIndex].contentChars || 0)) {
+			out[duplicateIndex] = source;
+		}
+	}
+	return out;
 }

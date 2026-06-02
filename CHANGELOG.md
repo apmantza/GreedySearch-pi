@@ -4,7 +4,13 @@
 
 ### Added
 
+- **Research mode promoted to structured dataroom-style output** (`src/search/research.mjs`, `bin/search.mjs`, `src/tools/greedy-search-handler.ts`) — `depth: "research"` now writes a bundle by default under `.pi/greedysearch-research/<timestamp>_<query>/` with `STATUS.md`, `OUTLINE.md`, `reports/SUMMARY.md`, `reports/CLAIMS.md`, `reports/GAPS.md`, fetched `sources/`, and machine-readable `data/manifest.json` / `rounds.json` / `sources.json`. Added `--research-out-dir`, `--no-research-bundle`, and matching tool parameters `researchOutDir` / `writeResearchBundle`.
+
+- **Research completion floor, question ledger, and citation audit metadata** (`src/search/research.mjs`, `src/formatters/results.ts`) — Research runs now maintain a STATUS-style open/closed question ledger, ask Gemini to mark answered questions and propose new ones, and compute deterministic floor checks around question closure, fetched source count, primary-source coverage, quality score, structured claims, citations, and unfetched citations. The formatted tool result surfaces floor status, stop reason, evidence counts, question progress, and bundle path.
+
 ### Fixed
+
+- **Research direct-URL fetch actions work in ESM** (`src/search/research.mjs`) — Replaced a CommonJS `require("./sources.mjs")` in the direct `fetchUrl` path with normal ESM imports, avoiding runtime failures when Gemini plans a direct primary-source fetch.
 
 ### Changed
 

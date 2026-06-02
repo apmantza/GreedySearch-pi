@@ -6,6 +6,7 @@ Multi-engine AI web search for Pi via browser automation.
 
 - No API keys
 - Real browser results (Perplexity, Bing Copilot, Google AI)
+- Research mode as the centerpiece: iterative planning, source fetching, citation audit, and structured bundles
 - Optional Gemini synthesis with source grounding
 - Chrome runs headless by default — no window, purely background
 
@@ -42,7 +43,9 @@ greedy_search({
   depth: "research",
   breadth: 3,
   iterations: 2,
+  maxSources: 8,
 });
+// Research mode writes a dataroom-style bundle under .pi/greedysearch-research/ by default.
 // Headless is the default — no window. To force visible Chrome:
 greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 ```
@@ -55,6 +58,8 @@ greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 - `breadth`: research mode query breadth, 1-5 (default 3)
 - `iterations`: research mode rounds, 1-3 (default 2)
 - `maxSources`: research mode fetched source cap, 3-12
+- `researchOutDir`: optional directory for the research bundle
+- `writeResearchBundle`: write the research bundle to disk (default true for research mode)
 - `fullAnswer`: return full single-engine output instead of preview
 - `headless`: set to `false` to show Chrome window (default: `true`)
 - `visible` / `alwaysVisible`: set to `true` to always use visible Chrome for this search
@@ -74,7 +79,32 @@ greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 - `fast` - quickest, no synthesis/source fetching
 - `standard` - balanced default for `engine: "all"` (synthesis + fetched sources)
 - `deep` - strongest grounding and confidence metadata
-- `research` - slowest; iterative query planning, fast multi-engine searches, source fetching, learning extraction, and a final cited report
+- `research` - centerpiece mode; iterative action planning, direct URL fetches, fast multi-engine searches, source fetching, learning extraction, deterministic floor checks, citation audit, a final cited report, and a structured on-disk bundle
+
+Research bundles are written by default to `.pi/greedysearch-research/<timestamp>_<query>/` and include:
+
+```text
+STATUS.md              # floor status, open/closed question ledger, and gaps
+OUTLINE.md             # bundle table of contents
+reports/SUMMARY.md     # final cited report
+reports/CLAIMS.md      # extracted claims mapped to source IDs
+reports/GAPS.md        # caveats and remaining uncertainties
+sources/               # fetched source markdown files
+data/manifest.json     # run metadata, stop reason, floor checks, citation audit
+data/rounds.json       # per-round actions/learnings/gaps
+data/sources.json      # ranked source registry
+data/questions.json    # STATUS-style question ledger with evidence/source IDs
+```
+
+CLI controls:
+
+```bash
+node bin/search.mjs all --inline --stdin --depth research --breadth 3 --iterations 2 --max-sources 8 <<'EOF'
+Evaluate browser automation options for AI agents
+EOF
+node bin/search.mjs all "topic" --depth research --research-out-dir ./research-topic
+node bin/search.mjs all "topic" --depth research --no-research-bundle
+```
 
 ## Runtime commands
 

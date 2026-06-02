@@ -36,6 +36,7 @@ function formatAllEnginesResult(
 	const needsHuman = data._needsHumanVerification as
 		| Record<string, unknown>
 		| undefined;
+	const research = data._research as Record<string, unknown> | undefined;
 
 	if (needsHuman) {
 		const engines = Array.isArray(needsHuman.engines)
@@ -54,8 +55,13 @@ function formatAllEnginesResult(
 
 	// If we have a synthesis answer, render it
 	if (synthesis?.answer) {
+		if (research?.mode === "iterative") renderResearchHeader(lines, research);
 		renderSynthesis(lines, synthesis, dedupedSources || [], 6);
-		lines.push("*Synthesized from Perplexity, Bing Copilot, and Google AI*\n");
+		lines.push(
+			research?.mode === "iterative"
+				? "*Research mode: iterative planning, source fetching, citation audit, and bundle output*\n"
+				: "*Synthesized from Perplexity, Bing Copilot, and Google AI*\n",
+		);
 		return lines.join("\n").trim();
 	}
 
@@ -67,6 +73,32 @@ function formatAllEnginesResult(
 	}
 
 	return lines.join("\n").trim();
+}
+
+function renderResearchHeader(
+	lines: string[],
+	research: Record<string, unknown>,
+): void {
+	const floor = research.floor as Record<string, unknown> | undefined;
+	const metrics = floor?.metrics as Record<string, unknown> | undefined;
+	const bundle = research.bundle as Record<string, unknown> | undefined;
+	const manifest = research.manifest as Record<string, unknown> | undefined;
+	lines.push("## Research Run");
+	lines.push(
+		`- Status: ${floor?.floorMet ? "floor met" : "partial / floor unmet"}`,
+	);
+	if (manifest?.terminationReason)
+		lines.push(`- Stop reason: ${String(manifest.terminationReason)}`);
+	if (metrics) {
+		lines.push(
+			`- Evidence: ${metrics.fetchedOk || 0} fetched sources, ${metrics.primarySources || 0} primary/official, ${metrics.claims || 0} claims, ${metrics.cited || 0} citations`,
+		);
+		lines.push(
+			`- Questions: ${metrics.closedQuestions || 0}/${metrics.totalQuestions || 0} closed${metrics.openQuestions ? `, ${metrics.openQuestions} open` : ""}`,
+		);
+	}
+	if (bundle?.dir) lines.push(`- Bundle: ${String(bundle.dir)}`);
+	lines.push("");
 }
 
 /**

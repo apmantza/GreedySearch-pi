@@ -99,6 +99,8 @@ async function main() {
 				"  --breadth <n>       Research mode query breadth, 1-5 (default: 3)",
 				"  --iterations <n>    Research mode rounds, 1-3 (default: 2)",
 				"  --max-sources <n>   Research mode fetched source cap, 3-12",
+				"  --research-out-dir <dir>  Write research bundle to a specific directory",
+				"  --no-research-bundle     Disable the default .pi/greedysearch-research bundle",
 				"  --fetch-top-source  Fetch content from top source",
 				"  --inline            Output JSON to stdout (for piping)",
 				"  --locale <lang>     Force results language (en, de, fr, etc.)",
@@ -183,6 +185,10 @@ async function main() {
 		iterationsIdx === -1 ? undefined : args[iterationsIdx + 1];
 	const researchMaxSources =
 		maxSourcesIdx === -1 ? undefined : args[maxSourcesIdx + 1];
+	const researchOutDirIdx = args.indexOf("--research-out-dir");
+	const researchOutDir =
+		researchOutDirIdx === -1 ? undefined : args[researchOutDirIdx + 1];
+	const writeResearchBundle = !args.includes("--no-research-bundle");
 	// Headless is the default — only disable if GREEDY_SEARCH_VISIBLE=1
 	if (process.env.GREEDY_SEARCH_VISIBLE !== "1")
 		process.env.GREEDY_SEARCH_HEADLESS = "1";
@@ -223,13 +229,16 @@ async function main() {
 			a !== "--breadth" &&
 			a !== "--iterations" &&
 			a !== "--max-sources" &&
+			a !== "--research-out-dir" &&
+			a !== "--no-research-bundle" &&
 			a !== "--help" &&
 			(depthIdx === -1 || i !== depthIdx + 1) &&
 			(outIdx === -1 || i !== outIdx + 1) &&
 			(localeIdx === -1 || i !== localeIdx + 1) &&
 			(breadthIdx === -1 || i !== breadthIdx + 1) &&
 			(iterationsIdx === -1 || i !== iterationsIdx + 1) &&
-			(maxSourcesIdx === -1 || i !== maxSourcesIdx + 1),
+			(maxSourcesIdx === -1 || i !== maxSourcesIdx + 1) &&
+			(researchOutDirIdx === -1 || i !== researchOutDirIdx + 1),
 	);
 	const engine = rest[0]?.toLowerCase();
 	// Read query from stdin when --stdin flag is set (avoids leaking query in process table)
@@ -254,6 +263,8 @@ async function main() {
 			maxSources: researchMaxSources,
 			locale,
 			short,
+			writeBundle: writeResearchBundle,
+			researchOutDir,
 		});
 		writeOutput(out, outFile, {
 			inline,

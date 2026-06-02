@@ -53,7 +53,8 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 		label: "Greedy Search",
 		description:
 			"WEB SEARCH ONLY — searches live web via Perplexity, Bing Copilot, and Google AI in parallel. " +
-			"Optionally synthesizes results with Gemini, deduplicates sources by consensus. " +
+			"Research mode is the centerpiece: it plans follow-up actions, fetches sources, audits citations, " +
+			"and writes a structured research bundle on disk. " +
 			"Use for: library docs, recent framework changes, error messages, best practices, current events. " +
 			"Reports streaming progress as each engine completes.",
 		promptSnippet: "Multi-engine AI web search with streaming progress",
@@ -87,6 +88,19 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				Type.Number({
 					description:
 						'Only for depth="research": maximum fetched sources for the final report, 3-12.',
+				}),
+			),
+			researchOutDir: Type.Optional(
+				Type.String({
+					description:
+						'Only for depth="research": optional directory for the structured research bundle. Defaults to .pi/greedysearch-research/<timestamp>_<query>.',
+				}),
+			),
+			writeResearchBundle: Type.Optional(
+				Type.Boolean({
+					description:
+						'Only for depth="research": write the structured research bundle to disk (default true).',
+					default: true,
 				}),
 			),
 			fullAnswer: Type.Optional(
@@ -126,6 +140,8 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				breadth?: number;
 				iterations?: number;
 				maxSources?: number;
+				researchOutDir?: string;
+				writeResearchBundle?: boolean;
 				fullAnswer?: boolean;
 				headless?: boolean;
 				visible?: boolean;
@@ -156,6 +172,10 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 					flags.push("--iterations", String((params as any).iterations));
 				if (typeof (params as any).maxSources === "number")
 					flags.push("--max-sources", String((params as any).maxSources));
+				if (typeof (params as any).researchOutDir === "string")
+					flags.push("--research-out-dir", (params as any).researchOutDir);
+				if ((params as any).writeResearchBundle === false)
+					flags.push("--no-research-bundle");
 			} else if (depth === "deep") flags.push("--depth", "deep");
 			else if (depth === "fast") flags.push("--fast");
 			else if (depth === "standard" && engine === "all")

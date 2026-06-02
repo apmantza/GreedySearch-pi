@@ -689,6 +689,76 @@ END_JSON`,
 	} else {
 		failMsg("citation audit: S2 should be flagged as unfetched");
 	}
+
+	subsection("Research Floor and Question Ledger");
+	const { computeResearchFloor, createQuestionLedger, updateQuestionLedger } =
+		await import("./src/search/research.mjs");
+	const floorOk = computeResearchFloor({
+		sources: [
+			{ id: "S1", sourceType: "official-docs" },
+			{ id: "S2", sourceType: "community" },
+		],
+		fetchedSources: [
+			{ id: "S1", contentChars: 500 },
+			{ id: "S2", contentChars: 500 },
+			{ id: "S3", contentChars: 500 },
+		],
+		synthesis: {
+			claims: [{ claim: "React has docs", sourceIds: ["S1"] }],
+		},
+		citationAudit: { ok: true, cited: ["S1"], unfetched: [] },
+		rounds: [{ round: 1 }],
+		qualityScore: 8.2,
+		maxSources: 3,
+	});
+	if (floorOk.floorMet)
+		passMsg("research floor: passes with evidence and citations");
+	else failMsg(`research floor: expected pass, got ${JSON.stringify(floorOk)}`);
+
+	const floorMissingCitation = computeResearchFloor({
+		sources: [{ id: "S1", sourceType: "official-docs" }],
+		fetchedSources: [{ id: "S1", contentChars: 500 }],
+		synthesis: { claims: [] },
+		citationAudit: { ok: true, cited: [], unfetched: [] },
+		rounds: [{ round: 1 }],
+		qualityScore: 9,
+		maxSources: 1,
+	});
+	if (
+		!floorMissingCitation.floorMet &&
+		!floorMissingCitation.checks.citationsPresent
+	) {
+		passMsg("research floor: rejects missing citations");
+	} else {
+		failMsg("research floor: missing citations should fail");
+	}
+
+	const ledger = createQuestionLedger("What is React 19?");
+	updateQuestionLedger(ledger, {
+		roundNumber: 1,
+		actions: [
+			{
+				type: "search",
+				query: "React 19 actions",
+				researchGoal: "Find React 19 feature list",
+			},
+		],
+		learningPayload: {
+			answeredQuestions: [
+				{ id: "Q1", evidence: "React 19 is documented", sourceIds: ["S1"] },
+			],
+			newQuestions: ["Which React 19 features are stable?"],
+		},
+	});
+	const closedQ1 = ledger.find((q) => q.id === "Q1")?.status === "closed";
+	const addedOpen = ledger.some(
+		(q) => q.question.includes("stable") && q.status === "open",
+	);
+	if (closedQ1 && addedOpen) {
+		passMsg("question ledger: closes answered questions and adds follow-ups");
+	} else {
+		failMsg(`question ledger: unexpected ${JSON.stringify(ledger)}`);
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
