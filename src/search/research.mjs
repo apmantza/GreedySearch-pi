@@ -1141,6 +1141,81 @@ function buildFinalReportPrompt(
 	].join("\n");
 }
 
+/**
+ * Build a synthesis prompt that derives the final report directly from
+ * previously extracted evidence (no per-round learnings required). This is
+ * used as a fallback when the regular final-report path returns no
+ * structured learnings (for example when Gemini's input field rejected the
+ * per-round learning prompt but the goal-based extraction step succeeded).
+ */
+function buildSynthesisFromEvidencePrompt(
+	originalQuery,
+	sources = [],
+	questions = [],
+	evidenceItems = [],
+) {
+	const sourceRegistry = sources.slice(0, 12).map((source) => ({
+		id: source.id,
+		title: source.title,
+		domain: source.domain,
+		url: source.canonicalUrl,
+		type: source.sourceType,
+		engines: source.engines,
+	}));
+	const evidenceSlice = evidenceItems.slice(-20);
+	const answerableQuestionIds = new Set();
+	for (const item of evidenceSlice) {
+		for (const ans of item.answers || []) {
+			if (ans?.id) answerableQuestionIds.add(ans.id);
+		}
+	}
+	const openQuestionSummary = (questions || [])
+		.filter((q) => q.status !== "closed")
+		.map((q) => ({ id: q.id, question: q.question }));
+
+	return [
+		"You are writing the final research report from goal-based extracted evidence.",
+		"Per-round learnings were not produced, but the per-source evidence extraction step succeeded.",
+		"Synthesize a thorough markdown report using ONLY the evidence below. Every substantive claim MUST be backed by an [S1] citation.",
+		"",
+		"Report structure:",
+		"1. ## Summary — A 2-4 sentence executive summary of findings",
+		"2. ## Key Findings — The main findings, organized by theme or question, each with inline citations",
+		"3. ## Limitations & Caveats — Important qualifiers, gaps, or uncertainties",
+		"",
+		`Original research question: ${originalQuery}`,
+		`Per-source extracted evidence: ${JSON.stringify(evidenceSlice, null, 2)}`,
+		`Source registry: ${JSON.stringify(sourceRegistry, null, 2)}`,
+		`Questions already answered by the evidence: ${JSON.stringify(Array.from(answerableQuestionIds))}`,
+		`Questions still open after this evidence: ${JSON.stringify(openQuestionSummary)}`,
+		"",
+		"Respond ONLY with JSON wrapped in BEGIN_JSON / END_JSON markers:",
+		"BEGIN_JSON",
+		JSON.stringify(
+			{
+				answer: "markdown report with sections and inline [S1] citations",
+				agreement: {
+					level: "high|medium|low|mixed|conflicting",
+					summary: "one-sentence confidence summary",
+				},
+				differences: ["notable disagreement or conflict between sources"],
+				caveats: ["important caveat or qualification"],
+				claims: [
+					{
+						claim: "specific factual statement supported by the evidence",
+						support: "strong|moderate|weak|conflicting",
+						sourceIds: ["S1", "S2"],
+					},
+				],
+				recommendedSources: ["S1", "S2"],
+			},
+			null,
+			2,
+		),
+		"END_JSON",
+	].join("\n");
+}
+
 async function runFastAllSearch(query, { locale = null, short = true } = {}) {
 	const args = [SEARCH_BIN, "all", "--inline", "--stdin", "--fast"];
 	if (!short) args.push("--full");
@@ -2203,18 +2278,63 @@ export async function runResearchMode({
 			{ timeoutMs: 180000 },
 		);
 		const parsed = parseGeminiJson(rawReport, {});
+		const hasClaims = Array.isArray(parsed?.claims) && parsed.claims.length > 0;
 		synthesis = {
 			...synthesis,
 			...parsed,
 			rawAnswer: rawReport.answer || "",
 			geminiSources: rawReport.sources || [],
-			synthesized: true,
+			// Only mark as synthesized if Gemini actually returned structured
+			// claims. An empty/minimal response should not block the evidence
+			// fallback from running.
+			synthesized: hasClaims,
 		};
 	} catch (error) {
 		process.stderr.write(
 			`[greedysearch] Final report failed: ${error.message}\n`,
 		);
 		synthesis.error = error.message;
+	}
+
+	// Fallback: when no structured learnings were produced but per-source
+	// evidence was extracted successfully, ask Gemini to synthesize a final
+	// report directly from the evidence. This rescues runs whose per-round
+	// learning prompt failed (e.g. transient Gemini input field rejection)
+	// but whose evidence extraction step still captured real data.
+	const hasStructuredSynthesis =
+		synthesis.synthesized === true &&
+		Array.isArray(synthesis.claims) &&
+		synthesis.claims.length > 0;
+	if (!hasStructuredSynthesis && evidenceItems.length > 0) {
+		process.stderr.write(
+			"[greedysearch] Falling back to evidence-based synthesis (no per-round learnings).\n",
+		);
+		try {
+			const evidencePrompt = buildSynthesisFromEvidencePrompt(
+				query,
+				combinedSources,
+				questions,
+				evidenceItems,
+			);
+			const rawEvidenceReport = await runGeminiPrompt(evidencePrompt, {
+				timeoutMs: 180000,
+			});
+			const parsedEvidence = parseGeminiJson(rawEvidenceReport, {});
+			synthesis = {
+				...synthesis,
+				...parsedEvidence,
+				rawAnswer: rawEvidenceReport.answer || synthesis.answer || "",
+				geminiSources:
+					rawEvidenceReport.sources || synthesis.geminiSources || [],
+				synthesized: true,
+				synthesisMode: "evidence_fallback",
+			};
+		} catch (error) {
+			process.stderr.write(
+				`[greedysearch] Evidence-based synthesis failed: ${error.message}\n`,
+			);
+			synthesis.evidenceFallbackError = error.message;
+		}
 	}
 
 	const finishedAt = new Date().toISOString();

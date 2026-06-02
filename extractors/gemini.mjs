@@ -26,6 +26,7 @@ import {
 	waitForSelector,
 	waitForStreamComplete,
 } from "./common.mjs";
+import { ensureChrome } from "../src/search/chrome.mjs";
 import { dismissConsent, handleVerification } from "./consent.mjs";
 import { SELECTORS } from "./selectors.mjs";
 
@@ -153,6 +154,22 @@ async function main() {
 	validateQuery(args, USAGE);
 
 	const { query, tabPrefix, short } = parseArgs(args);
+
+	// Default to headless unless the caller explicitly set GREEDY_SEARCH_VISIBLE=1.
+	// This prevents a stale visible-mode env in the parent process from making
+	// Gemini run visible when research synthesis/learning/planning expects headless.
+	if (
+		process.env.GREEDY_SEARCH_VISIBLE !== "1" &&
+		process.env.GREEDY_SEARCH_ALWAYS_VISIBLE !== "1"
+	) {
+		process.env.GREEDY_SEARCH_HEADLESS = "1";
+	}
+
+	// Ensure Chrome is in the requested mode (headless by default). If a prior
+	// session left a visible Chrome running on port 9222, ensureChrome detects
+	// the mismatch, kills it, and relaunches headless before the gemini tab
+	// opens.
+	await ensureChrome();
 
 	try {
 		await cdp(["list"]);

@@ -17,10 +17,25 @@ const __dir =
 
 export async function runGeminiPrompt(
 	prompt,
-	{ tabPrefix = null, timeoutMs = 180000 } = {},
+	{ tabPrefix = null, timeoutMs = 180000, visible = null } = {},
 ) {
 	return new Promise((resolve, reject) => {
 		const extraArgs = tabPrefix ? ["--tab", String(tabPrefix)] : [];
+		// Strip inherited visible-mode flags so a stale GREEDY_SEARCH_VISIBLE=1
+		// in the parent process doesn't make Gemini fall back to visible
+		// Chrome. Callers that genuinely want visible Gemini should pass
+		// visible: true explicitly.
+		const childEnv = {
+			...process.env,
+			CDP_PROFILE_DIR: GREEDY_PROFILE_DIR,
+		};
+		if (visible !== true) {
+			delete childEnv.GREEDY_SEARCH_VISIBLE;
+			delete childEnv.GREEDY_SEARCH_ALWAYS_VISIBLE;
+		} else {
+			childEnv.GREEDY_SEARCH_VISIBLE = "1";
+			childEnv.GREEDY_SEARCH_ALWAYS_VISIBLE = "1";
+		}
 		const proc = spawn(
 			process.execPath,
 			[
@@ -30,7 +45,7 @@ export async function runGeminiPrompt(
 			],
 			{
 				stdio: ["pipe", "pipe", "pipe"],
-				env: { ...process.env, CDP_PROFILE_DIR: GREEDY_PROFILE_DIR },
+				env: childEnv,
 			},
 		);
 		// Pipe prompts via stdin to avoid leaking them in process tables.
