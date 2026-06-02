@@ -867,12 +867,161 @@ export function queriesToActions(queries) {
 		.filter((a) => a.query);
 }
 
+function sourceKey(source) {
+	return (
+		normalizeUrl(
+			source?.finalUrl || source?.canonicalUrl || source?.url || "",
+		) ||
+		source?.id ||
+		""
+	);
+}
+
+function buildEvidenceExtractionPrompt(
+	originalQuery,
+	questions,
+	fetchedSources,
+	alreadyExtracted = new Set(),
+) {
+	const openQuestions = (questions || [])
+		.filter((q) => q.status !== "closed")
+		.slice(0, 12)
+		.map((q) => ({ id: q.id, question: q.question }));
+	const sourceSnippets = (fetchedSources || [])
+		.filter((source) => source?.content || source?.snippet)
+		.filter((source) => !alreadyExtracted.has(sourceKey(source)))
+		.slice(0, 6)
+		.map((source, index) => ({
+			id: source.id || `F${index + 1}`,
+			title: source.title || "",
+			url: source.finalUrl || source.url || source.canonicalUrl || "",
+			content: trimText(source.content || source.snippet || "", 5000),
+		}));
+
+	return [
+		"You are doing goal-based evidence extraction for an iterative research run.",
+		"For each source, extract only information that helps answer the open questions.",
+		"Use original wording/details where useful. Do not invent answers; leave questions open if evidence is insufficient.",
+		"If a source answers one or more tracked questions, identify those question IDs explicitly.",
+		"Also propose genuinely new sub-questions discovered from the evidence.",
+		"",
+		`Original research question: ${originalQuery}`,
+		`Open question ledger: ${JSON.stringify(openQuestions, null, 2)}`,
+		`Fetched sources: ${JSON.stringify(sourceSnippets, null, 2)}`,
+		"",
+		"Respond ONLY with JSON wrapped in BEGIN_JSON / END_JSON markers:",
+		"BEGIN_JSON",
+		JSON.stringify(
+			{
+				extractions: [
+					{
+						sourceId: "S1",
+						url: "https://example.com/source",
+						rational: "why this source matters for the goal",
+						evidence:
+							"specific quoted/paraphrased evidence with numbers, dates, caveats",
+						summary: "concise contribution to the research question",
+						answers: [
+							{
+								id: "Q1",
+								evidence: "brief evidence that closes the question",
+							},
+						],
+						newQuestions: ["new sub-question raised by this source"],
+					},
+				],
+			},
+			null,
+			2,
+		),
+		"END_JSON",
+	].join("\n");
+}
+
+function normalizeEvidenceExtractions(payload, fetchedSources) {
+	const raw = Array.isArray(payload?.extractions) ? payload.extractions : [];
+	const byUrl = new Map();
+	const byId = new Map();
+	for (const source of fetchedSources || []) {
+		if (source?.id) byId.set(String(source.id), source);
+		const key = sourceKey(source);
+		if (key) byUrl.set(key, source);
+	}
+	return raw
+		.map((item) => {
+			const source =
+				byId.get(String(item?.sourceId || "")) ||
+				byUrl.get(normalizeUrl(item?.url || "") || "");
+			const sourceId = String(item?.sourceId || source?.id || "");
+			const url = normalizeUrl(
+				item?.url || source?.finalUrl || source?.url || "",
+			);
+			const answers = Array.isArray(item?.answers)
+				? item.answers
+						.map((answer) => ({
+							id: String(answer?.id || ""),
+							evidence: trimText(answer?.evidence || "", 500),
+							sourceIds: [sourceId].filter(Boolean),
+						}))
+						.filter((answer) => answer.id)
+				: [];
+			return {
+				sourceId,
+				url,
+				title: source?.title || item?.title || "",
+				rational: trimText(item?.rational || "", 700),
+				evidence: trimText(item?.evidence || "", 1600),
+				summary: trimText(item?.summary || "", 700),
+				answers,
+				newQuestions: uniqueStrings(item?.newQuestions || [], 6),
+			};
+		})
+		.filter(
+			(item) => item.sourceId || item.url || item.summary || item.evidence,
+		);
+}
+
+async function extractEvidenceFromSources({
+	query,
+	questions,
+	fetchedSources,
+	extractedSourceKeys,
+}) {
+	const pending = (fetchedSources || []).filter(
+		(source) =>
+			(source?.content || source?.snippet) &&
+			!extractedSourceKeys.has(sourceKey(source)),
+	);
+	if (pending.length === 0) return { evidence: [], error: "" };
+	try {
+		const raw = await runGeminiPrompt(
+			buildEvidenceExtractionPrompt(
+				query,
+				questions,
+				pending,
+				extractedSourceKeys,
+			),
+			{ timeoutMs: 120000 },
+		);
+		const parsed = parseGeminiJson(raw, { extractions: [] });
+		const evidence = normalizeEvidenceExtractions(parsed, pending);
+		for (const source of pending) {
+			const key = sourceKey(source);
+			if (key) extractedSourceKeys.add(key);
+		}
+		return { evidence, error: "" };
+	} catch (error) {
+		return { evidence: [], error: error.message || String(error) };
+	}
+}
+
 function buildLearningPrompt(
 	originalQuery,
 	roundQueries,
 	searchSummaries,
 	fetchedSources,
 	questions = [],
+	evidenceItems = [],
 ) {
 	const sourceSnippets = fetchedSources
 		.filter((source) => source?.content || source?.snippet)
@@ -892,6 +1041,7 @@ function buildLearningPrompt(
 		`Original research question: ${originalQuery}`,
 		`Round queries: ${JSON.stringify(roundQueries, null, 2)}`,
 		`Question ledger: ${JSON.stringify(questions, null, 2)}`,
+		`Extracted source evidence: ${JSON.stringify(evidenceItems.slice(-12), null, 2)}`,
 		`Engine summaries: ${JSON.stringify(searchSummaries, null, 2)}`,
 		`Fetched source snippets: ${JSON.stringify(sourceSnippets, null, 2)}`,
 		"",
@@ -923,6 +1073,7 @@ function buildFinalReportPrompt(
 	rounds,
 	sources,
 	questions = [],
+	evidenceItems = [],
 ) {
 	const learnings = rounds.flatMap((round) => round.learnings || []);
 	const gaps = rounds.flatMap((round) => round.gaps || []);
@@ -960,6 +1111,7 @@ function buildFinalReportPrompt(
 		`Learnings: ${JSON.stringify(learnings, null, 2)}`,
 		`Known gaps/caveats: ${JSON.stringify(gaps, null, 2)}`,
 		`Question ledger: ${JSON.stringify(questions, null, 2)}`,
+		`Goal-based extracted evidence: ${JSON.stringify(evidenceItems.slice(-20), null, 2)}`,
 		`Source registry: ${JSON.stringify(sourceRegistry, null, 2)}`,
 		"",
 		"Respond ONLY with JSON wrapped in BEGIN_JSON / END_JSON markers:",
@@ -1197,6 +1349,14 @@ export function computeResearchFloor({
 	const claims = Array.isArray(synthesis?.claims) ? synthesis.claims : [];
 	const citedCount = citationAudit ? citationAudit.cited?.length || 0 : 0;
 	const questionStats = questionProgress(questions);
+	// Follow-up questions discovered during a run are useful handoff gaps, not a
+	// reason to fail a short research run forever. The deterministic floor only
+	// requires the original/root questions to close; newly-created questions stay
+	// visible in STATUS.md and `gaps` for deeper follow-up rounds.
+	const requiredQuestions = (questions || []).filter(
+		(q) => !q.createdRound || q.reason === "Original research question",
+	);
+	const requiredQuestionStats = questionProgress(requiredQuestions);
 	const minFetched = Math.min(4, Math.max(2, Number(maxSources) || 8));
 	const checks = {
 		roundsRun: rounds.length >= 1,
@@ -1208,7 +1368,8 @@ export function computeResearchFloor({
 		citationsValid: !requireCitations || citationAudit?.ok === true,
 		unfetchedCitations:
 			!requireCitations || (citationAudit?.unfetched || []).length === 0,
-		questionsClosed: !requireQuestions || questionStats.open === 0,
+		requiredQuestionsClosed:
+			!requireQuestions || requiredQuestionStats.open === 0,
 	};
 	return {
 		floorMet: Object.values(checks).every(Boolean),
@@ -1222,6 +1383,9 @@ export function computeResearchFloor({
 			openQuestions: questionStats.open,
 			closedQuestions: questionStats.closed,
 			totalQuestions: questionStats.total,
+			openRequiredQuestions: requiredQuestionStats.open,
+			closedRequiredQuestions: requiredQuestionStats.closed,
+			totalRequiredQuestions: requiredQuestionStats.total,
 			qualityScore,
 			minFetched,
 		},
@@ -1326,7 +1490,7 @@ function questionProgress(questions) {
 
 export function updateQuestionLedger(
 	questions,
-	{ roundNumber, actions = [], learningPayload = {}, gaps = [] } = {},
+	{ roundNumber, actions = [], learningPayload = {} } = {},
 ) {
 	for (const run of actions) {
 		const action = run?.action || run;
@@ -1366,15 +1530,12 @@ export function updateQuestionLedger(
 		});
 	}
 
-	const newQuestions = [
-		...(Array.isArray(learningPayload.newQuestions)
-			? learningPayload.newQuestions
-			: []),
-		...(Array.isArray(learningPayload.followUpQueries)
-			? learningPayload.followUpQueries
-			: []),
-		...gaps,
-	];
+	// Keep STATUS.md as a true question ledger, not a dump of every search query
+	// or caveat. Follow-up queries and raw gaps stay in their own fields; only
+	// explicit newQuestions become open ledger items.
+	const newQuestions = Array.isArray(learningPayload.newQuestions)
+		? learningPayload.newQuestions
+		: [];
 	for (const question of newQuestions) {
 		addQuestion(questions, question, {
 			reason: "Discovered gap/follow-up",
@@ -1382,6 +1543,40 @@ export function updateQuestionLedger(
 		});
 	}
 
+	return questions;
+}
+
+function reconcileQuestionsFromSynthesis(questions, synthesis, citationAudit) {
+	if (!synthesis?.answer || citationAudit?.ok !== true) return questions;
+	const claims = Array.isArray(synthesis.claims) ? synthesis.claims : [];
+	const citedIds = Array.isArray(citationAudit.cited)
+		? citationAudit.cited
+		: [];
+	if (claims.length === 0 || citedIds.length === 0) return questions;
+
+	for (const question of questions) {
+		if (question.status === "closed") continue;
+		let bestClaim = null;
+		let bestScore = 0;
+		for (const claim of claims) {
+			const score = jaccardSimilarity(
+				question.question || "",
+				claim.claim || "",
+			);
+			if (score > bestScore) {
+				bestScore = score;
+				bestClaim = claim;
+			}
+		}
+		if (question.id === "Q1" || bestScore >= 0.18) {
+			closeQuestion(questions, question.id, {
+				evidence: bestClaim?.claim || "Answered in final cited synthesis",
+				sourceIds: Array.isArray(bestClaim?.sourceIds)
+					? bestClaim.sourceIds
+					: citedIds.slice(0, 4),
+			});
+		}
+	}
 	return questions;
 }
 
@@ -1407,6 +1602,7 @@ async function writeResearchBundle({
 	rounds,
 	sources,
 	fetchedSources,
+	evidenceItems = [],
 	synthesis,
 	citationAudit,
 	floor,
@@ -1466,6 +1662,7 @@ async function writeResearchBundle({
 			"",
 			"- `reports/SUMMARY.md` — final cited report",
 			"- `reports/CLAIMS.md` — extracted claims with support/source IDs",
+			"- `reports/EVIDENCE.md` — goal-based source evidence",
 			"- `reports/GAPS.md` — remaining caveats and uncertainties",
 			"- `sources/` — fetched source markdown files",
 			"- `data/manifest.json` — machine-readable run metadata",
@@ -1494,6 +1691,29 @@ async function writeResearchBundle({
 						return `- ${claim.claim || ""} (${claim.support || "support unknown"}${ids ? `; ${ids}` : ""})`;
 					})
 				: ["No structured claims were extracted."]),
+			"",
+		].join("\n"),
+		"utf8",
+	);
+	writeFileSync(
+		join(reportsDir, "EVIDENCE.md"),
+		[
+			"# Extracted evidence",
+			"",
+			...(evidenceItems.length
+				? evidenceItems.map((item) =>
+						[
+							`## ${item.sourceId || item.url || "Source"}`,
+							item.url ? `<${item.url}>` : "",
+							item.rational ? `**Rational:** ${item.rational}` : "",
+							item.evidence ? `**Evidence:** ${item.evidence}` : "",
+							item.summary ? `**Summary:** ${item.summary}` : "",
+							"",
+						]
+							.filter(Boolean)
+							.join("\n"),
+					)
+				: ["No goal-based evidence was extracted."]),
 			"",
 		].join("\n"),
 		"utf8",
@@ -1530,6 +1750,11 @@ async function writeResearchBundle({
 	writeFileSync(
 		join(dataDir, "questions.json"),
 		JSON.stringify(questions, null, 2),
+		"utf8",
+	);
+	writeFileSync(
+		join(dataDir, "evidence.json"),
+		JSON.stringify(evidenceItems, null, 2),
 		"utf8",
 	);
 	writeFileSync(
@@ -1576,6 +1801,8 @@ export async function runResearchMode({
 	let activeActions = null;
 	let combinedSources = [];
 	let fetchedSources = [];
+	let evidenceItems = [];
+	const extractedSourceKeys = new Set();
 	const usedQueries = new Set();
 	const usedUrls = new Set();
 	const qualityHistory = [];
@@ -1749,6 +1976,33 @@ export async function runResearchMode({
 				fetchedSources,
 			);
 		}
+		fetchedSources = annotateFetchedSourcesWithIds(
+			fetchedSources,
+			combinedSources,
+		);
+
+		process.stderr.write(`PROGRESS:research:round-${roundNumber}:evidence\n`);
+		const evidenceRun = await extractEvidenceFromSources({
+			query,
+			questions,
+			fetchedSources,
+			extractedSourceKeys,
+		});
+		if (evidenceRun.error) {
+			process.stderr.write(
+				`[greedysearch] Evidence extraction failed: ${evidenceRun.error}\n`,
+			);
+		}
+		evidenceItems = [...evidenceItems, ...evidenceRun.evidence];
+		for (const evidence of evidenceRun.evidence) {
+			updateQuestionLedger(questions, {
+				roundNumber,
+				learningPayload: {
+					answeredQuestions: evidence.answers || [],
+					newQuestions: evidence.newQuestions || [],
+				},
+			});
+		}
 
 		// Build round query summary for learning extraction
 		const roundQueries = actionRuns.map((run) => ({
@@ -1772,6 +2026,7 @@ export async function runResearchMode({
 					})),
 					fetchedSources,
 					questions,
+					evidenceItems,
 				),
 				{ timeoutMs: 120000 },
 			);
@@ -1818,6 +2073,8 @@ export async function runResearchMode({
 			})),
 			learnings,
 			gaps,
+			evidence: evidenceRun.evidence,
+			evidenceError: evidenceRun.error,
 			learningError,
 		});
 
@@ -1936,7 +2193,13 @@ export async function runResearchMode({
 	};
 	try {
 		const rawReport = await runGeminiPrompt(
-			buildFinalReportPrompt(query, rounds, combinedSources, questions),
+			buildFinalReportPrompt(
+				query,
+				rounds,
+				combinedSources,
+				questions,
+				evidenceItems,
+			),
 			{ timeoutMs: 180000 },
 		);
 		const parsed = parseGeminiJson(rawReport, {});
@@ -1962,9 +2225,10 @@ export async function runResearchMode({
 		combinedSources,
 	);
 
-	// Citation audit + deterministic completion floor
+	// Citation audit + final question reconciliation + deterministic completion floor
 	process.stderr.write("PROGRESS:research:audit-citations\n");
 	const citationAudit = auditCitations(synthesis.answer || "", combinedSources);
+	reconcileQuestionsFromSynthesis(questions, synthesis, citationAudit);
 	const floor = computeResearchFloor({
 		sources: combinedSources,
 		fetchedSources,
@@ -2006,6 +2270,7 @@ export async function runResearchMode({
 				rounds,
 				sources: combinedSources,
 				fetchedSources,
+				evidenceItems,
 				synthesis,
 				citationAudit,
 				floor,
@@ -2036,6 +2301,7 @@ export async function runResearchMode({
 			rounds,
 			learnings: allLearnings,
 			gaps: allGaps,
+			evidence: evidenceItems,
 			questions,
 			questionProgress: questionProgress(questions),
 			qualityHistory,

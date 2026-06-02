@@ -20,10 +20,18 @@ const CDP = join(__dir, "..", "bin", "cdp.mjs");
  * @returns {Promise<string>} Command output
  */
 export function cdp(args, timeoutMs = 30000) {
+	return cdpWithInput(args, null, timeoutMs);
+}
+
+export function cdpWithInput(args, input = null, timeoutMs = 30000) {
 	return new Promise((resolve, reject) => {
 		const proc = spawn(process.execPath, [CDP, ...args], {
-			stdio: ["ignore", "pipe", "pipe"],
+			stdio: [input == null ? "ignore" : "pipe", "pipe", "pipe"],
 		});
+		if (input != null) {
+			proc.stdin.write(input);
+			proc.stdin.end();
+		}
 		let out = "";
 		let err = "";
 		proc.stdout.on("data", (d) => (out += d));

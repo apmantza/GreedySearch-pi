@@ -131,6 +131,11 @@ async function main() {
 		process.env.GREEDY_SEARCH_VISIBLE = "1";
 		process.env.GREEDY_SEARCH_ALWAYS_VISIBLE = "1";
 		delete process.env.GREEDY_SEARCH_HEADLESS;
+	} else if (process.env.GREEDY_SEARCH_VISIBLE !== "1") {
+		// Establish the desired mode BEFORE ensureChrome() so a stale visible
+		// recovery browser is switched back to headless before research planning
+		// and Gemini synthesis tabs are opened.
+		process.env.GREEDY_SEARCH_HEADLESS = "1";
 	}
 
 	await ensureChrome();
@@ -189,9 +194,6 @@ async function main() {
 	const researchOutDir =
 		researchOutDirIdx === -1 ? undefined : args[researchOutDirIdx + 1];
 	const writeResearchBundle = !args.includes("--no-research-bundle");
-	// Headless is the default — only disable if GREEDY_SEARCH_VISIBLE=1
-	if (process.env.GREEDY_SEARCH_VISIBLE !== "1")
-		process.env.GREEDY_SEARCH_HEADLESS = "1";
 	const outIdx = args.indexOf("--out");
 	const outFile = outIdx === -1 ? null : args[outIdx + 1];
 

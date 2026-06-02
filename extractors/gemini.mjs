@@ -11,6 +11,7 @@
 
 import {
 	cdp,
+	cdpWithInput,
 	formatAnswer,
 	getOrOpenTab,
 	handleError,
@@ -40,8 +41,10 @@ async function typeIntoGemini(tab, text) {
 	await cdp(["click", tab, S.input]);
 	await new Promise((r) => setTimeout(r, jitter(200)));
 
-	// 2. Type using CDP Input.insertText (more reliable than document.execCommand)
-	await cdp(["type", tab, text]);
+	// 2. Type using CDP Input.insertText (more reliable than document.execCommand).
+	// Pass long research prompts through stdin so Windows does not reject the
+	// cdp.mjs process spawn with ENAMETOOLONG.
+	await cdpWithInput(["type", tab, "--stdin"], text);
 	await new Promise((r) => setTimeout(r, jitter(300)));
 
 	// 3. Verify the text was actually inserted
@@ -157,11 +160,14 @@ async function main() {
 
 		// Skip navigation if tab was pre-seeded to Gemini (e.g. by search.mjs
 		// opening the tab in parallel with source fetch to save ~4s nav time).
-		const currentUrl = await cdp(["eval", tab, "document.location.href"]).catch(() => "");
+		const currentUrl = await cdp(["eval", tab, "document.location.href"]).catch(
+			() => "",
+		);
 		let onGemini = false;
 		try {
 			const host = new URL(currentUrl).hostname.toLowerCase();
-			onGemini = host === "gemini.google.com" || host.endsWith(".gemini.google.com");
+			onGemini =
+				host === "gemini.google.com" || host.endsWith(".gemini.google.com");
 		} catch {}
 
 		if (!onGemini) {

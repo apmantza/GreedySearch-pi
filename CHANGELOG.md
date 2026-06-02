@@ -6,9 +6,13 @@
 
 - **Research mode promoted to structured dataroom-style output** (`src/search/research.mjs`, `bin/search.mjs`, `src/tools/greedy-search-handler.ts`) — `depth: "research"` now writes a bundle by default under `.pi/greedysearch-research/<timestamp>_<query>/` with `STATUS.md`, `OUTLINE.md`, `reports/SUMMARY.md`, `reports/CLAIMS.md`, `reports/GAPS.md`, fetched `sources/`, and machine-readable `data/manifest.json` / `rounds.json` / `sources.json`. Added `--research-out-dir`, `--no-research-bundle`, and matching tool parameters `researchOutDir` / `writeResearchBundle`.
 
-- **Research completion floor, question ledger, and citation audit metadata** (`src/search/research.mjs`, `src/formatters/results.ts`) — Research runs now maintain a STATUS-style open/closed question ledger, ask Gemini to mark answered questions and propose new ones, and compute deterministic floor checks around question closure, fetched source count, primary-source coverage, quality score, structured claims, citations, and unfetched citations. The formatted tool result surfaces floor status, stop reason, evidence counts, question progress, and bundle path.
+- **Research completion floor, question ledger, source evidence extraction, and citation audit metadata** (`src/search/research.mjs`, `src/formatters/results.ts`) — Research runs now maintain a STATUS-style open/closed question ledger, run goal-based evidence extraction over fetched sources, ask Gemini to mark answered questions and propose new ones, and compute deterministic floor checks around required/root question closure, fetched source count, primary-source coverage, quality score, structured claims, citations, and unfetched citations. Newly discovered follow-up questions remain visible handoff gaps instead of making every short run partial. The formatted tool result surfaces floor status, stop reason, evidence counts, question progress, and bundle path.
 
 ### Fixed
+
+- **Research Gemini prompts no longer hit Windows `ENAMETOOLONG`** (`bin/cdp.mjs`, `extractors/common.mjs`, `extractors/gemini.mjs`) — Long research planning/learning prompts are now passed from the Gemini extractor to `cdp.mjs type` through stdin instead of command-line arguments.
+
+- **Research starts Chrome in the intended mode before opening tabs** (`bin/search.mjs`) — `search.mjs` now establishes the headless/visible environment before `ensureChrome()`, preventing stale visible recovery browsers from making Gemini planning/synthesis appear visible on subsequent default-headless research runs.
 
 - **Research direct-URL fetch actions work in ESM** (`src/search/research.mjs`) — Replaced a CommonJS `require("./sources.mjs")` in the direct `fetchUrl` path with normal ESM imports, avoiding runtime failures when Gemini plans a direct primary-source fetch.
 

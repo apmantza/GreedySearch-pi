@@ -6,6 +6,34 @@
 import { ALL_ENGINES } from "./constants.mjs";
 import { trimText } from "./sources.mjs";
 
+function escapeControlCharsInsideJsonStrings(text) {
+	let out = "";
+	let inString = false;
+	let escaped = false;
+	for (const char of String(text)) {
+		if (escaped) {
+			out += char;
+			escaped = false;
+			continue;
+		}
+		if (char === "\\") {
+			out += char;
+			escaped = true;
+			continue;
+		}
+		if (char === '"') {
+			inString = !inString;
+			out += char;
+			continue;
+		}
+		if (inString && char === "\n") out += "\\n";
+		else if (inString && char === "\r") out += "\\r";
+		else if (inString && char === "\t") out += "\\t";
+		else out += char;
+	}
+	return out;
+}
+
 export function parseStructuredJson(text) {
 	if (!text) return null;
 	let trimmed = String(text).trim();
@@ -37,6 +65,11 @@ export function parseStructuredJson(text) {
 	const lastBrace = trimmed.lastIndexOf("}");
 	if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
 		candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+	}
+
+	for (const candidate of [...candidates]) {
+		const repaired = escapeControlCharsInsideJsonStrings(candidate);
+		if (repaired !== candidate) candidates.push(repaired);
 	}
 
 	for (const candidate of candidates) {
@@ -195,13 +228,20 @@ export function buildSynthesisPrompt(
 		"Respond ONLY with a JSON object wrapped in BEGIN_JSON / END_JSON markers:",
 		"",
 		"BEGIN_JSON",
-		JSON.stringify({
-			answer: "<your markdown answer here>",
-			agreement: { level: "high|medium|mixed|conflicting", summary: "<one sentence>" },
-			differences: ["<notable difference between engines, if any>"],
-			caveats: ["<important caveat or limitation>"],
-			recommendedSources: ["S1", "S2"],
-		}, null, 2),
+		JSON.stringify(
+			{
+				answer: "<your markdown answer here>",
+				agreement: {
+					level: "high|medium|mixed|conflicting",
+					summary: "<one sentence>",
+				},
+				differences: ["<notable difference between engines, if any>"],
+				caveats: ["<important caveat or limitation>"],
+				recommendedSources: ["S1", "S2"],
+			},
+			null,
+			2,
+		),
 		"END_JSON",
 	].join("\n");
 }

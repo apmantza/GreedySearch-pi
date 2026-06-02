@@ -759,6 +759,21 @@ END_JSON`,
 	} else {
 		failMsg(`question ledger: unexpected ${JSON.stringify(ledger)}`);
 	}
+
+	subsection("Structured JSON parser");
+	const { parseStructuredJson } = await import("./src/search/synthesis.mjs");
+	const parsedLooseJson = parseStructuredJson(`BEGIN_JSON
+{"answer":"line one
+line two","claims":[{"claim":"x"}]}
+END_JSON
+trailing note`);
+	if (parsedLooseJson?.answer?.includes("line two")) {
+		passMsg("structured JSON: repairs raw newlines inside strings");
+	} else {
+		failMsg(
+			`structured JSON: failed to repair ${JSON.stringify(parsedLooseJson)}`,
+		);
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

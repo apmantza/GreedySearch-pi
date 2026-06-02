@@ -379,7 +379,8 @@ async function captureMainContext(cdp, sid) {
 	);
 	// Prefer the context whose frameId matches the root frame
 	const main =
-		(rootFrameId && defaults.find((ctx) => ctx.auxData?.frameId === rootFrameId)) ||
+		(rootFrameId &&
+			defaults.find((ctx) => ctx.auxData?.frameId === rootFrameId)) ||
 		defaults[0] ||
 		null;
 	return main?.id ?? null;
@@ -964,7 +965,7 @@ Usage: cdp <command> [args]
   net   <target>                    Network performance entries
   click   <target> <selector>       Click an element by CSS selector
   clickxy <target> <x> <y>          Click at CSS pixel coordinates
-  type    <target> <text>           Type text at current focus
+  type    <target> <text|--stdin>   Type text at current focus
   loadall <target> <selector> [ms]  Repeatedly click a "load more" button
   evalraw <target> <method> [json]  Send a raw CDP command; returns JSON result
   stop  [target]                    Stop daemon(s)
@@ -1073,7 +1074,16 @@ async function main() {
 		}
 		cmdArgs[0] = expr;
 	} else if (cmd === "type") {
-		const text = cmdArgs.join(" ");
+		let text = cmdArgs.join(" ");
+		if (cmdArgs[0] === "--stdin") {
+			text = await new Promise((resolve) => {
+				let data = "";
+				process.stdin.setEncoding("utf8");
+				process.stdin.on("data", (chunk) => (data += chunk));
+				process.stdin.on("end", () => resolve(data));
+				if (process.stdin.isTTY) resolve("");
+			});
+		}
 		if (!text) {
 			console.error("Error: text required");
 			process.exit(1);

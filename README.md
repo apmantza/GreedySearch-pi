@@ -88,12 +88,14 @@ STATUS.md              # floor status, open/closed question ledger, and gaps
 OUTLINE.md             # bundle table of contents
 reports/SUMMARY.md     # final cited report
 reports/CLAIMS.md      # extracted claims mapped to source IDs
+reports/EVIDENCE.md    # goal-based evidence extracted from fetched sources
 reports/GAPS.md        # caveats and remaining uncertainties
 sources/               # fetched source markdown files
 data/manifest.json     # run metadata, stop reason, floor checks, citation audit
 data/rounds.json       # per-round actions/learnings/gaps
 data/sources.json      # ranked source registry
 data/questions.json    # STATUS-style question ledger with evidence/source IDs
+data/evidence.json     # structured rational/evidence/summary per useful source
 ```
 
 CLI controls:
