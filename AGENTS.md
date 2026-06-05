@@ -222,6 +222,56 @@ node bin/launch.mjs --kill
 - Do not add Google to visible recovery unless explicitly requested.
 - Do not reintroduce stale `coding_task` / `deep_research` tool docs; those were folded into `greedy_search`.
 
+## Creating a new extractor
+
+When adding a new engine (e.g. `extractors/chatgpt.mjs`), follow these patterns proven across Perplexity, Bing, Gemini, and ChatGPT:
+
+### 1. Reuse `common.mjs` utilities
+
+Import `cdp`, `getOrOpenTab`, `injectClipboardInterceptor`, `waitForSelector`, `waitForStreamComplete`, `buildEnvelope`, `handleError`, `formatAnswer`, `outputJson`, `parseArgs`, `prepareArgs`, `validateQuery` from `./common.mjs`. Do **not** write raw CDP spawn logic.
+
+### 2. Use clipboard interception for source extraction
+
+Inject `navigator.clipboard.writeText` via `injectClipboardInterceptor(tab, GLOBAL_VAR)`, click the engine's copy button, then read `window.GLOBAL_VAR`. This captures the engine's native markdown output including source links. Add a reference-style link parser (`parseSourcesFromMarkdownRefStyle`) if the engine uses `[text][1]` + `[1]: url "title"` format.
+
+### 3. Single-eval stream wait (critical for `all` mode)
+
+**Never** poll the DOM from Node.js with `while (Date.now() < deadline) { await cdp(["eval", ...]); await sleep(800) }`. Under CDP contention from 3+ parallel extractors, your 800ms poll becomes 5-10s real-time and you timeout.
+
+Instead, fire **one** `Runtime.evaluate` with `awaitPromise: true` that contains the entire polling loop inside the browser. Examples:
+
+- `waitForStreamComplete(tab, { selector: "document.body" })` — monitors text length stability
+- Custom single-eval promise that polls copy-button count and resolves when stable
+
+This is the difference between ChatGPT timing out at 60s (Node polling) and finishing in 16s (single-eval).
+
+### 4. Language-agnostic selectors
+
+Never match on English text (`innerText.includes("Sign in")`). Use:
+- Data attributes (`data-testid`, `data-mat-icon-name`)
+- DOM structure (`div.ProseMirror`, `textarea[name="prompt-textarea"]`)
+- OAuth endpoint URLs in `href` (`login.microsoftonline.com`)
+
+### 5. Register in two places
+
+1. `src/search/constants.mjs` — add to `ENGINES` (with aliases) and `ENGINE_DOMAINS`
+2. `bin/search.mjs` — add to `ENGINE_START_URLS` if it should be pre-seeded in `all` mode
+
+### 6. Headless fast-fail for anti-bot
+
+If the engine is Cloudflare-protected, add a snap/accessibility-tree check at the top of `extractAnswer` when `GREEDY_SEARCH_HEADLESS === "1"`. Fast-fail immediately (return error) so `search.mjs` can trigger visible recovery instead of burning the full timeout.
+
+### 7. Add to `HEADLESS_RECOVERY_ENGINES` if needed
+
+If the engine blocks headless and benefits from visible cookie caching, add it to `HEADLESS_RECOVERY_ENGINES` in `src/search/recovery.mjs`.
+
+### 8. Update docs
+
+- `README.md` — engine list
+- `skills/greedy-search/skill.md` — skill description
+- `src/tools/greedy-search-handler.ts` — tool `description` and `engine` parameter schema
+- `CHANGELOG.md` — under `[Unreleased]`
+
 ## Extractor timeout budgets
 
 All extractors share these timeouts (kept tight — solo runs complete in 9-16s):
