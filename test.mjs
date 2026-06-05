@@ -9,6 +9,7 @@
 //   node test.mjs flags          # flag/option tests only
 //   node test.mjs edge           # edge case tests only
 //   node test.mjs unit           # fast unit tests only (no Chrome needed)
+//   node test.mjs synth          # synthesis config smoke (gemini + chatgpt)
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -93,7 +94,7 @@ function checkJson(file, checkFn) {
 // Unit Tests (no Chrome required)
 // ─────────────────────────────────────────────────────────────────────────────
 
-if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
+if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	section("🧪 Unit Tests");
 
 	subsection("stripQuotes — param double-escaping workaround (issue #2)");
@@ -558,6 +559,111 @@ if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 	);
 	if (gapTargets) passMsg("fallback queries: targets identified gaps");
 	else failMsg("fallback queries: gaps not targeted");
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// Synthesis routing — config-driven live smoke
+	//
+	// Verifies the `synthesizer` field in ~/.pi/greedyconfig is honored by
+	// `engine: "all" --synthesize`. Runs both the default (gemini) and an
+	// override (chatgpt). Backups the user's config and restores it after.
+	//
+	// Mode gating: only runs in "", "all", or "synth". Skipped in unit/quick/
+	// smoke because it requires Chrome + network and takes several minutes.
+	// ─────────────────────────────────────────────────────────────────────────
+	if (["", "all", "synth"].includes(mode)) {
+		subsection(
+			"Synthesis routing — config-driven live smoke (gemini + chatgpt)",
+		);
+		const { existsSync, copyFileSync, writeFileSync, unlinkSync } =
+			await import("node:fs");
+		const { homedir } = await import("node:os");
+		const { join } = await import("node:path");
+		const cfgDir = join(homedir(), ".pi");
+		const cfgFile = join(cfgDir, "greedyconfig");
+		const backup = join(cfgDir, "greedyconfig.test-backup");
+		const hadOriginal = existsSync(cfgFile);
+		if (hadOriginal) copyFileSync(cfgFile, backup);
+
+		const meaningfulQuery = "Who is Apostolos Mantzaris?";
+		const engines = ["perplexity", "google", "chatgpt", "gemini"];
+		const results = {};
+
+		const runSynth = async (synthesizer) => {
+			mkdirSync(cfgDir, { recursive: true });
+			writeFileSync(
+				cfgFile,
+				JSON.stringify({ engines, synthesizer }, null, 2) + "\n",
+				"utf8",
+			);
+			const outFile = join(resultsDir, `synth_${synthesizer}.json`);
+			const script = `
+import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+const proc = spawn(process.execPath, [
+  '${join(__dir, "bin", "search.mjs").replace(/\\/g, "\\\\")}',
+  'all', '--inline', '--stdin', '--headless', '--synthesize'
+], { stdio: ['pipe', 'pipe', 'pipe'] });
+let out = '', err = '';
+proc.stdout.on('data', d => out += d);
+proc.stderr.on('data', d => err += d);
+proc.stdin.end(${JSON.stringify(meaningfulQuery)});
+proc.on('close', code => {
+  writeFileSync(${JSON.stringify(outFile.replace(/\\/g, "\\\\"))}, JSON.stringify({
+    code, out, err,
+  }, null, 2));
+});
+`;
+			const tmp = join(resultsDir, `_synth_${synthesizer}.mjs`);
+			writeFileSync(tmp, script, "utf8");
+			await runNode([tmp], 240);
+			const data = JSON.parse(readFileSync(outFile, "utf8"));
+			let parsed = null;
+			try {
+				parsed = JSON.parse(data.out);
+			} catch (e) {
+				return { synthesized: false, synthesizedBy: null, parseError: e.message, rawOut: data.out.slice(0, 200) };
+			}
+			return {
+				synthesized: parsed._synthesis?.synthesized === true,
+				synthesizedBy: parsed._synthesis?.synthesizedBy || null,
+				engines: Object.keys(parsed).filter((k) => !k.startsWith("_")),
+				answerPreview: String(parsed._synthesis?.answer || "").slice(0, 120),
+			};
+		};
+
+		try {
+			results.gemini = await runSynth("gemini");
+			if (
+				results.gemini.synthesized &&
+				results.gemini.synthesizedBy === "gemini"
+			) {
+				passMsg("synth=gemini: synthesizedBy === gemini");
+			} else {
+				failMsg(
+					`synth=gemini: expected synthesizedBy=gemini, got ${JSON.stringify(results.gemini)}`,
+				);
+			}
+
+			results.chatgpt = await runSynth("chatgpt");
+			if (
+				results.chatgpt.synthesized &&
+				results.chatgpt.synthesizedBy === "chatgpt"
+			) {
+				passMsg("synth=chatgpt: synthesizedBy === chatgpt");
+			} else {
+				failMsg(
+					`synth=chatgpt: expected synthesizedBy=chatgpt, got ${JSON.stringify(results.chatgpt)}`,
+				);
+			}
+		} finally {
+			if (hadOriginal) {
+				copyFileSync(backup, cfgFile);
+				try { unlinkSync(backup); } catch {}
+			} else {
+				try { unlinkSync(cfgFile); } catch {}
+			}
+		}
+	}
 
 	// ─── Phase 3: Action Planner ──────────────────────────────────────────
 

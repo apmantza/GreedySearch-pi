@@ -339,7 +339,19 @@ async function main() {
 				if (r.status === "fulfilled") {
 					out[r.value.engine] = r.value;
 				} else {
-					out[ALL_ENGINES[i]] = { error: r.reason?.message || "unknown error" };
+					const err = r.reason;
+					const msg = err?.message || "unknown error";
+					out[ALL_ENGINES[i]] = { error: msg };
+					if (err?.lastStage) {
+						process.stderr.write(
+							`[greedysearch] ${ALL_ENGINES[i]} failed at stage '${err.lastStage}': ${msg}\n`,
+						);
+					}
+					if (err?.partialErr) {
+						process.stderr.write(
+							`[greedysearch] ${ALL_ENGINES[i]} tail stderr:\n${err.partialErr}\n`,
+						);
+					}
 				}
 			}
 

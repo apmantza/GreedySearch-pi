@@ -721,6 +721,26 @@ export function outputJson(data) {
 }
 
 /**
+ * Record the current extractor stage for debugging and timeout diagnostics.
+ * Writes `[engine] stage: <name> (+<ms>)` to stderr and updates `env.lastStage`
+ * / `env.stages` so the envelope carries the last known phase on any outcome
+ * (success, error, timeout, kill).
+ *
+ * @param {object} env - The mutable env object the extractor is filling in.
+ * @param {string} stage - Short, snake_case stage name (e.g. "nav", "type", "stream").
+ * @param {number} [startTime] - Optional extractor start time for elapsed-ms logging.
+ */
+export function logStage(env, stage, startTime = null) {
+	if (!env || typeof env !== "object") return;
+	const elapsed = startTime ? ` (+${Date.now() - startTime}ms)` : "";
+	env.lastStage = stage;
+	if (!Array.isArray(env.stages)) env.stages = [];
+	env.stages.push({ stage, at: Date.now() });
+	const engine = env.engine || "extractor";
+	console.error(`[${engine}] stage: ${stage}${elapsed}`);
+}
+
+/**
  * Build a lightweight result envelope from data already collected during extraction.
  * Zero additional CDP calls — everything here is already known.
  * @param {object} fields
@@ -735,6 +755,8 @@ export function buildEnvelope({
 	verificationResult = null,
 	inputReady = null,
 	durationMs = null,
+	lastStage = null,
+	stages = null,
 } = {}) {
 	return {
 		engine,
@@ -745,6 +767,8 @@ export function buildEnvelope({
 		verificationResult,
 		inputReady,
 		durationMs,
+		lastStage,
+		stages,
 	};
 }
 

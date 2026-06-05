@@ -18,6 +18,7 @@ import {
 	handleError,
 	injectClipboardInterceptor,
 	jitter,
+	logStage,
 	outputJson,
 	parseArgs,
 	parseSourcesFromMarkdown,
@@ -230,12 +231,16 @@ async function main() {
 		} catch {}
 
 		if (!onChatGPT) {
+			logStage(env, "nav", startTime);
 			await cdp(["nav", tab, "https://chatgpt.com"], 20000);
 			await new Promise((r) => setTimeout(r, 600));
 		}
+		logStage(env, "consent", startTime);
 		await dismissConsent(tab, cdp);
+		logStage(env, "verification", startTime);
 		await handleVerification(tab, cdp, 10000);
 
+		logStage(env, "input-wait", startTime);
 		const inputReady = await waitForSelector(tab, PROSE_SELECTOR, 8000, 400);
 		env.inputReady = inputReady;
 		if (!inputReady) {
@@ -258,18 +263,24 @@ async function main() {
 			);
 		}
 
+		logStage(env, "clipboard-inject", startTime);
 		await injectClipboardInterceptor(tab, GLOBAL_VAR);
+		logStage(env, "type-and-submit", startTime);
 		await typeAndSubmit(tab, query);
 
+		logStage(env, "stream-wait", startTime);
 		// SINGLE eval stream wait — no CDP polling contention
 		const copyBtnCount = await waitForResponse(tab, 60000);
+		env.copyBtnCount = copyBtnCount;
 		if (copyBtnCount < 2) {
 			console.error(
 				"[chatgpt] Warning: assistant response may not have completed",
 			);
 		}
 
+		logStage(env, "extract", startTime);
 		const { answer, sources } = await extractAnswer(tab, env);
+		logStage(env, "done", startTime);
 		if (!answer)
 			throw new Error("No answer extracted — ChatGPT may not have responded");
 
@@ -286,6 +297,9 @@ async function main() {
 		});
 	} catch (e) {
 		env.durationMs = Date.now() - startTime;
+		console.error(
+		`[chatgpt] error during stage '${env.lastStage || "unknown"}': ${e.message}`,
+		);
 		handleError(e, buildEnvelope(env));
 	}
 }

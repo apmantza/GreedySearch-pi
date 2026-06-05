@@ -46,10 +46,42 @@ export function runExtractor(
 		let out = "";
 		let err = "";
 		proc.stdout.on("data", (d) => (out += d));
-		proc.stderr.on("data", (d) => (err += d));
+		// Forward child stderr to parent so [engine] stage: lines are visible
+		// in real time. Also retain the buffer for the timeout diagnostic path.
+		proc.stderr.on("data", (d) => {
+			err += d;
+			if (process.env.GREEDY_SEARCH_CHILD_STDERR !== "0") {
+				process.stderr.write(d);
+			}
+		});
 		const t = setTimeout(() => {
 			proc.kill();
-			reject(new Error(`${script} timed out after ${timeoutMs / 1000}s`));
+			// Surface as much diagnostic info as the killed child produced so the
+			// caller can see *which stage* the extractor was in. handleError()
+			// emits `{ _envelope, error }` JSON to stdout on graceful failure,
+			// but a hard kill discards whatever was buffered.
+			const tailLines = (s, n = 20) =>
+				s
+					.split(/\r?\n/)
+					.filter(Boolean)
+					.slice(-n)
+					.join("\n");
+			let envelope = null;
+			try {
+				const parsed = JSON.parse(out.trim());
+				if (parsed._envelope) envelope = parsed._envelope;
+			} catch {}
+			const err = new Error(
+				`${script} timed out after ${timeoutMs / 1000}s` +
+					(envelope?.lastStage
+						? ` (last stage: ${envelope.lastStage})`
+						: ""),
+			);
+			err.engineScript = script;
+			err.lastStage = envelope?.lastStage || null;
+			err.partialErr = tailLines(err);
+			err.partialOut = tailLines(out);
+			reject(err);
 		}, timeoutMs);
 		proc.on("close", (code) => {
 			clearTimeout(t);
