@@ -621,12 +621,21 @@ proc.on('close', code => {
 			try {
 				parsed = JSON.parse(data.out);
 			} catch (e) {
-				return { synthesized: false, synthesizedBy: null, parseError: e.message, rawOut: data.out.slice(0, 200) };
+				return {
+					synthesized: false,
+					synthesizedBy: null,
+					parseError: e.message,
+					rawOut: data.out.slice(0, 200),
+				};
 			}
 			return {
 				synthesized: parsed._synthesis?.synthesized === true,
 				synthesizedBy: parsed._synthesis?.synthesizedBy || null,
 				engines: Object.keys(parsed).filter((k) => !k.startsWith("_")),
+				chatgptAnswer: parsed.chatgpt?.answer || null,
+				chatgptError: parsed.chatgpt?.error || null,
+				chatgptStage: parsed.chatgpt?._envelope?.lastStage || null,
+				chatgptStages: parsed.chatgpt?._envelope?.stages || null,
 				answerPreview: String(parsed._synthesis?.answer || "").slice(0, 120),
 			};
 		};
@@ -655,12 +664,31 @@ proc.on('close', code => {
 					`synth=chatgpt: expected synthesizedBy=chatgpt, got ${JSON.stringify(results.chatgpt)}`,
 				);
 			}
+
+			// Also assert chatgpt-search succeeded under parallel load — a
+			// regression of the throttling fix or the engine budget would
+			// re-introduce the "cdp timeout: eval" failure at stream-wait.
+			// We require an actual answer (not just a synthesis routing
+			// marker) so the test catches the underlying engine problem.
+			if (results.gemini.chatgptAnswer) {
+				passMsg(
+					"chatgpt-search: produced an answer (parallel contention not blocking)",
+				);
+			} else {
+				failMsg(
+					`chatgpt-search: no answer — error=${JSON.stringify(results.gemini.chatgptError)} lastStage=${results.gemini.chatgptStage}`,
+				);
+			}
 		} finally {
 			if (hadOriginal) {
 				copyFileSync(backup, cfgFile);
-				try { unlinkSync(backup); } catch {}
+				try {
+					unlinkSync(backup);
+				} catch {}
 			} else {
-				try { unlinkSync(cfgFile); } catch {}
+				try {
+					unlinkSync(cfgFile);
+				} catch {}
 			}
 		}
 	}

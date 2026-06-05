@@ -66,15 +66,24 @@ async function typeAndSubmit(tab, query) {
 /**
  * Wait for ChatGPT's response to finish streaming.
  * Uses a SINGLE Runtime.evaluate call with in-browser polling — zero CDP
- * traffic during the wait. This avoids contention when multiple extractors
- * run in parallel under the same CDP daemon.
+ * traffic during the wait. The 30s budget is intentionally tight: when 4
+ * engines run in parallel, Chrome clamps setTimeout in background tabs to
+ * a 1Hz minimum, so a longer in-browser poll just burns the wrapper's
+ * timeout. Callers should pair this with pollForResponseNodeSide() to
+ * cover the tail of slow responses without holding the WebSocket.
+ *
+ * Signal: the *text length* of the latest assistant message, not the
+ * copy-button count. The count is an indirect proxy that fluctuates as
+ * ChatGPT's React tree re-renders. The text length is the actual answer
+ * — when it stabilises for 3 consecutive polls (>50 chars), the response
+ * is done. Returns the final text length.
  */
-async function waitForResponse(tab, timeoutMs = 60000) {
+async function waitForResponse(tab, timeoutMs = 30000) {
 	const code = String.raw`
 	new Promise((resolve, reject) => {
 		const _deadline = Date.now() + ${timeoutMs};
-		const _selector = '${COPY_SELECTOR}';
-		let _lastCount = 0;
+		const _minLen = 50;
+		let _lastLen = 0;
 		let _stableCount = 0;
 
 		function _jitter(ms) {
@@ -83,18 +92,20 @@ async function waitForResponse(tab, timeoutMs = 60000) {
 
 		function _poll() {
 			try {
-				const count = document.querySelectorAll(_selector).length;
-				if (count >= 2 && count === _lastCount) {
+				const msgs = document.querySelectorAll('[data-message-author-role="assistant"]');
+				const last = msgs[msgs.length - 1];
+				const cur = last?.innerText?.length ?? 0;
+				if (cur >= _minLen && cur === _lastLen) {
 					_stableCount++;
-					if (_stableCount >= 3) { resolve(count); return; }
+					if (_stableCount >= 3) { resolve(cur); return; }
 				} else {
-					_lastCount = count;
+					_lastLen = cur;
 					_stableCount = 0;
 				}
 				if (Date.now() < _deadline) {
 					setTimeout(_poll, _jitter(800));
 				} else {
-					resolve(_lastCount);
+					resolve(_lastLen);
 				}
 			} catch(e) { reject(e); }
 		}
@@ -104,6 +115,40 @@ async function waitForResponse(tab, timeoutMs = 60000) {
 	`;
 	const result = await cdp(["eval", tab, code], timeoutMs + 5000);
 	return parseInt(result, 10) || 0;
+}
+
+/**
+ * Node-side fallback for chatgpt stream completion.
+ * Polls the assistant message text length via short, independent
+ * Runtime.evaluate calls instead of holding the WebSocket open on a long
+ * in-browser promise. Each poll frees the WebSocket between calls, so even
+ * when Chrome is throttling the background tab, the daemon stays responsive.
+ * Returns the final text length seen within maxMs.
+ */
+async function pollForResponseNodeSide(tab, maxMs = 35000) {
+	const deadline = Date.now() + maxMs;
+	let lastLen = 0;
+	let stableRounds = 0;
+	while (Date.now() < deadline) {
+		const result = await cdp(
+			[
+				"eval",
+				tab,
+				`(document.querySelectorAll('[data-message-author-role="assistant"]')?.at(-1)?.innerText || '').length`,
+			],
+			4000,
+		).catch(() => "0");
+		const len = parseInt(result, 10) || 0;
+		if (len >= 50 && len === lastLen) {
+			stableRounds++;
+			if (stableRounds >= 3) return len;
+		} else {
+			lastLen = len;
+			stableRounds = 0;
+		}
+		await new Promise((r) => setTimeout(r, 1500));
+	}
+	return lastLen;
 }
 
 async function extractAnswerFromDom(tab) {
@@ -269,10 +314,17 @@ async function main() {
 		await typeAndSubmit(tab, query);
 
 		logStage(env, "stream-wait", startTime);
-		// SINGLE eval stream wait — no CDP polling contention
-		const copyBtnCount = await waitForResponse(tab, 60000);
-		env.copyBtnCount = copyBtnCount;
-		if (copyBtnCount < 2) {
+		// Short in-browser poll — keeps the WebSocket mostly free. If the
+		// response is still streaming past 30s (slow under tab throttling),
+		// fall back to node-side polls that release the WebSocket between
+		// each call. Together they stay within the engine's 70s outer budget.
+		let asstLen = await waitForResponse(tab, 30000);
+		if (asstLen < 50) {
+			logStage(env, "stream-poll-fallback", startTime);
+			asstLen = await pollForResponseNodeSide(tab, 35000);
+		}
+		env.assistantTextLen = asstLen;
+		if (asstLen < 50) {
 			console.error(
 				"[chatgpt] Warning: assistant response may not have completed",
 			);
@@ -298,7 +350,7 @@ async function main() {
 	} catch (e) {
 		env.durationMs = Date.now() - startTime;
 		console.error(
-		`[chatgpt] error during stage '${env.lastStage || "unknown"}': ${e.message}`,
+			`[chatgpt] error during stage '${env.lastStage || "unknown"}': ${e.message}`,
 		);
 		handleError(e, buildEnvelope(env));
 	}

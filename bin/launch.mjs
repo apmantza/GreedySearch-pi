@@ -76,6 +76,15 @@ const BASE_CHROME_FLAGS = [
 	"--window-size=1920,1080",
 	"--lang=en-US",
 	"--force-color-profile=srgb",
+	// Background-tab throttling kills parallel extractions: Chrome clamps
+	// setTimeout to ~1Hz in unfocused tabs, so a streaming response that
+	// finishes in 5s solo takes 60s+ when 4 engines share one Chrome.
+	// The trio below restores full-speed JS in every tab. Safe for our
+	// anti-bot stealth — Cloudflare detects CDP/webdriver artifacts, not
+	// timer-throttling behavior. Same flags Playwright/Puppeteer add.
+	"--disable-background-timer-throttling",
+	"--disable-renderer-backgrounding",
+	"--disable-backgrounding-occluded-windows",
 ];
 
 function getChromeVersion(chromePath) {

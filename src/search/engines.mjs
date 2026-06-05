@@ -61,7 +61,7 @@ export function runExtractor(
 			// emits `{ _envelope, error }` JSON to stdout on graceful failure,
 			// but a hard kill discards whatever was buffered.
 			const tailLines = (s, n = 20) =>
-				s
+				String(s ?? "")
 					.split(/\r?\n/)
 					.filter(Boolean)
 					.slice(-n)
@@ -71,17 +71,15 @@ export function runExtractor(
 				const parsed = JSON.parse(out.trim());
 				if (parsed._envelope) envelope = parsed._envelope;
 			} catch {}
-			const err = new Error(
+			const errObj = new Error(
 				`${script} timed out after ${timeoutMs / 1000}s` +
-					(envelope?.lastStage
-						? ` (last stage: ${envelope.lastStage})`
-						: ""),
+					(envelope?.lastStage ? ` (last stage: ${envelope.lastStage})` : ""),
 			);
-			err.engineScript = script;
-			err.lastStage = envelope?.lastStage || null;
-			err.partialErr = tailLines(err);
-			err.partialOut = tailLines(out);
-			reject(err);
+			errObj.engineScript = script;
+			errObj.lastStage = envelope?.lastStage || null;
+			errObj.partialErr = tailLines(err);
+			errObj.partialOut = tailLines(out);
+			reject(errObj);
 		}, timeoutMs);
 		proc.on("close", (code) => {
 			clearTimeout(t);

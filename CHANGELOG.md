@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **ChatGPT extraction under parallel load** (`extractors/chatgpt.mjs`, `bin/launch.mjs`, `src/search/engines.mjs`) — chatgpt-search was timing out at the orchestrator's 70s budget even when the response was actually rendered in the DOM. Three root causes, three fixes. (1) `waitForResponse` was waiting on the copy-button count as an indirect proxy — ChatGPT's React re-renders make that count fluctuate, so the "stable for 3 rounds" condition rarely fired. Rewritten to use the latest assistant message's `innerText.length` as the direct signal (text ≥50 chars stable for 3 rounds ≈ 2.4s of polling). (2) Chrome was clamping `setTimeout` to 1Hz in background tabs, so 4 parallel engines starved each other. Added `--disable-background-timer-throttling`, `--disable-renderer-backgrounding`, and `--disable-backgrounding-occluded-windows` to the GreedySearch Chrome launch flags. (3) The `stream-wait` budget was 60s — too long under any throttle and wasted the wrapper's timeout. Lowered to 30s with a 35s node-side fallback that releases the WebSocket between polls. Synth-mode tests now pass 83/83 with chatgpt-search consistently completing in ~12s.
+
+- **Engine timeout diagnostic shadowing bug** (`src/search/engines.mjs`) — the `setTimeout` callback in `runExtractor` was shadowing the outer `err` string with `const err = new Error(...)`, then calling `tailLines(err)` on the next line with the Error object. That crashed with `TypeError: s.split is not a function` and lost the partial stderr capture. Renamed the new error to `errObj` and added `String(s ?? "")` to `tailLines` so it never throws on non-strings.
+
 ### Added
 
 - **Research mode promoted to structured dataroom-style output** (`src/search/research.mjs`, `bin/search.mjs`, `src/tools/greedy-search-handler.ts`) — `depth: "research"` now writes a bundle by default under `.pi/greedysearch-research/<timestamp>_<query>/` with `STATUS.md`, `OUTLINE.md`, `reports/SUMMARY.md`, `reports/CLAIMS.md`, `reports/GAPS.md`, fetched `sources/`, and machine-readable `data/manifest.json` / `rounds.json` / `sources.json`. Added `--research-out-dir`, `--no-research-bundle`, and matching tool parameters `researchOutDir` / `writeResearchBundle`.
