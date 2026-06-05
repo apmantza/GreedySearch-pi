@@ -7,7 +7,7 @@ description: Web search via Perplexity, Google AI, ChatGPT & Gemini. Grounded al
 
 **Modes:** individual engine search · grounded `engine:"all"` search with fetched sources · optional `synthesize:true` using the configured synthesizer over all-engine results · `depth:"research"` for the iterative deep-research workflow.
 
-**Config:** `~/.pi/greedyconfig` supports `{ "engines": ["perplexity", "google", "chatgpt"], "synthesizer": "gemini" }`. Gemini can be included in `engines` too; synthesis remains controlled separately by `synthesizer`.
+**Config:** `~/.pi/greedyconfig` supports `{ "engines": ["perplexity", "google", "chatgpt", "gemini"], "synthesizer": "gemini" }`. Gemini is a normal search engine and can participate in `engine:"all"`; synthesis remains controlled separately by `synthesizer`.
 
 **Compatibility:** legacy `depth:"fast"|"standard"|"deep"` is still accepted. `fast` skips source fetching; `standard`/`deep` alias `synthesize:true`. Prefer `synthesize:true`, optional `synthesizer`, and `depth:"research"` going forward.
 
