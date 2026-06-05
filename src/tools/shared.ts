@@ -151,7 +151,7 @@ export function makeProgressTracker(
 	engines: readonly string[],
 	onUpdate: ((update: ProgressUpdate) => void) | undefined,
 	suffix: "Searching" | "Researching",
-	depth: string,
+	showSynthesis: boolean,
 ) {
 	const completed = new Map<string, "done" | "error" | "needs-human">();
 
@@ -166,10 +166,9 @@ export function makeProgressTracker(
 				parts.push(`🔓 ${e} needs manual verification`);
 			else parts.push(`⏳ ${e}`);
 		}
-		// Synthesis status: when all engines complete in non-fast mode,
-		// show synthesis progress.  Handle "skipped" status (emitted when
-		// manual verification is needed and synthesis is bypassed).
-		if (depth !== "fast" && completed.size >= 3) {
+		// Synthesis status is shown only when the caller explicitly requested
+		// Gemini synthesis for a multi-engine search.
+		if (showSynthesis && completed.size >= engines.length) {
 			const synStatus = completed.get("synthesis");
 			if (synStatus === "done") parts.push("✅ synthesized");
 			else if (synStatus === "error") parts.push("❌ synthesis failed");

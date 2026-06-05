@@ -5,7 +5,7 @@
 Multi-engine AI web search for Pi via browser automation.
 
 - No API keys
-- Real browser results (Perplexity, Google AI, ChatGPT — configurable via ~/.pi/greedyconfig)
+- Real browser results (Perplexity, Google AI, ChatGPT, Gemini — engines and synthesizer configurable via ~/.pi/greedyconfig)
 - Research mode as the centerpiece: iterative planning, source fetching, citation audit, and structured bundles
 - Optional Gemini synthesis with source grounding
 - Chrome runs headless by default — no window, purely background
@@ -31,13 +31,9 @@ pi install git:github.com/apmantza/GreedySearch-pi
 ## Quick usage
 
 ```js
-greedy_search({ query: "React 19 changes" });
-greedy_search({ query: "Prisma vs Drizzle", engine: "all", depth: "fast" });
-greedy_search({
-  query: "Best auth architecture 2026",
-  engine: "all",
-  depth: "deep",
-});
+greedy_search({ query: "React 19 changes" }); // all engines + fetched sources
+greedy_search({ query: "React 19 changes", synthesize: true }); // add configured synthesis
+greedy_search({ query: "Prisma vs Drizzle", engine: "perplexity" }); // individual engine
 greedy_search({
   query: "Evaluate browser automation options for AI agents",
   depth: "research",
@@ -54,7 +50,9 @@ greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 
 - `query` (required)
 - `engine`: `all` (default), `perplexity`, `google`, `chatgpt`, `gemini` — `bing` still works for signed-in users
-- `depth`: `standard` (default), `fast`, `deep`, `research`
+- `synthesize`: for `engine: "all"`, synthesize fetched sources with the configured synthesizer (default false)
+- `synthesizer`: override the configured synthesis engine for this call (`gemini` default, `chatgpt` supported)
+- `depth`: use `research` for deep research; legacy `fast`/`standard`/`deep` aliases are still accepted
 - `breadth`: research mode query breadth, 1-5 (default 3)
 - `iterations`: research mode rounds, 1-3 (default 2)
 - `maxSources`: research mode fetched source cap, 3-12
@@ -74,12 +72,25 @@ greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 | `GREEDY_SEARCH_LOCALE`               | `en`          | Default result language (en, de, fr, es, ja, etc.)            |
 | `CHROME_PATH`                        | auto-detected | Path to Chrome/Chromium executable                            |
 
-## Depth modes
+## Search modes
 
-- `fast` - quickest, no synthesis/source fetching
-- `standard` - balanced default for `engine: "all"` (synthesis + fetched sources)
-- `deep` - strongest grounding and confidence metadata
-- `research` - centerpiece mode; iterative action planning, direct URL fetches, fast multi-engine searches, source fetching, learning extraction, deterministic floor checks, citation audit, a final cited report, and a structured on-disk bundle
+- **Individual engine search** — `engine: "perplexity" | "google" | "chatgpt" | "gemini" | "bing"`; returns that engine's answer and sources.
+- **Grounded multi-engine search** — default `engine: "all"`; fans out to configured engines, ranks sources, fetches top source content, and reports confidence metadata.
+- **All + synthesis** — add `synthesize: true` (or CLI `--synthesize`) to ask the configured synthesizer to combine engine answers and fetched source evidence.
+- **Deep research** — `depth: "research"`; iterative action planning, direct URL fetches, fast multi-engine searches, source fetching, learning extraction, deterministic floor checks, citation audit, a final cited report, and a structured on-disk bundle.
+
+Legacy `depth: "fast" | "standard" | "deep"` values remain accepted for compatibility: `fast` skips source fetching; `standard`/`deep` request synthesis.
+
+Configure all-engine fan-out and synthesis in `~/.pi/greedyconfig`:
+
+```json
+{
+  "engines": ["perplexity", "google", "chatgpt", "gemini"],
+  "synthesizer": "gemini"
+}
+```
+
+Gemini is a normal search engine and can participate in `engine: "all"`. If `synthesize: true` and `"synthesizer": "gemini"`, Gemini runs once as a search engine and again as the synthesizer; set `"synthesizer": "chatgpt"` to separate those roles.
 
 Research bundles are written by default to `.pi/greedysearch-research/<timestamp>_<query>/` and include:
 
@@ -175,7 +186,7 @@ Headless Chrome auto-injects stealth patches before any page JavaScript runs:
 
 This bypasses casual bot detection (basic `navigator.webdriver` checks) but does not defeat commercial anti-bot services (DataDome, PerimeterX, Kasada). **Bing Copilot specifically detects headless and sandboxes responses behind Cloudflare Turnstile** — see [Known engine quirks](#known-engine-quirks) for the auto-recovery mechanism.
 
-When using `depth: "standard"` or `depth: "deep"`, source content is fetched and synthesized:
+When using `engine: "all"`, top source content is fetched by default. Add `synthesize: true` to synthesize with the configured synthesizer:
 
 - **Reddit** — Uses Reddit's public `.json` API for posts and comments (no scraping)
 - **GitHub** — Uses GitHub REST API for repos, READMEs, and file trees

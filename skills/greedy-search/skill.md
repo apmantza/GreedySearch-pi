@@ -1,11 +1,15 @@
 ---
 name: greedy-search
-description: Web search via Perplexity, Google AI, ChatGPT & Gemini. Configurable via ~/.pi/greedyconfig. Bing Copilot available for signed-in users. Current docs, recent changes, dependency choices. NOT codebase search.
+description: Web search via Perplexity, Google AI, ChatGPT & Gemini. Grounded all-engine search fetches sources by default; optional configurable synthesis; deep research as separate workflow. Configurable via ~/.pi/greedyconfig. Bing Copilot available for signed-in users. Current docs, recent changes, dependency choices. NOT codebase search.
 ---
 
-`greedy_search({ query, engine: "all"|"perplexity"|"google"|"chatgpt"|"gemini"|"bing", depth: "fast"|"standard"|"deep"|"research", breadth: 1-5, iterations: 1-3, maxSources: 3-12, researchOutDir?: string, writeResearchBundle?: bool, visible: bool })`
+`greedy_search({ query, engine: "all"|"perplexity"|"google"|"chatgpt"|"gemini"|"bing", synthesize?: bool, synthesizer?: "gemini"|"chatgpt", depth?: "research", breadth: 1-5, iterations: 1-3, maxSources: 3-12, researchOutDir?: string, writeResearchBundle?: bool, visible: bool })`
 
-**Depth:** `fast`(15-30s, no synthesis) · `standard`(30-90s, all+synthesis+sources) · `deep`(60-180s, stronger grounding) · `research`(centerpiece; iterative planning + direct URL fetches + follow-ups + deterministic floor checks + citation audit + structured bundle)
+**Modes:** individual engine search · grounded `engine:"all"` search with fetched sources · optional `synthesize:true` using the configured synthesizer over all-engine results · `depth:"research"` for the iterative deep-research workflow.
+
+**Config:** `~/.pi/greedyconfig` supports `{ "engines": ["perplexity", "google", "chatgpt"], "synthesizer": "gemini" }`. Gemini can be included in `engines` too; synthesis remains controlled separately by `synthesizer`.
+
+**Compatibility:** legacy `depth:"fast"|"standard"|"deep"` is still accepted. `fast` skips source fetching; `standard`/`deep` alias `synthesize:true`. Prefer `synthesize:true`, optional `synthesizer`, and `depth:"research"` going forward.
 
 **Research output:** `depth:"research"` writes a dataroom-style bundle by default under `.pi/greedysearch-research/<timestamp>_<query>/` with `STATUS.md`, `OUTLINE.md`, `reports/SUMMARY.md`, `reports/CLAIMS.md`, `reports/GAPS.md`, `sources/`, and `data/manifest.json`. Pass `researchOutDir` to choose the directory or `writeResearchBundle:false` to disable disk output.
 

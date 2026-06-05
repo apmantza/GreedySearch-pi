@@ -302,6 +302,20 @@ if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 		passMsg("isChromeHeadless: function exists");
 	else failMsg("isChromeHeadless: not a function");
 
+	subsection("Synthesis routing — configurable synthesizer helpers");
+	const { normalizeSynthesizer, getSynthesisStartUrl } = await import(
+		"./src/search/synthesis-runner.mjs"
+	);
+	if (normalizeSynthesizer("gem") === "gemini")
+		passMsg("synthesizer: gem alias normalizes to gemini");
+	else failMsg("synthesizer: gem alias should normalize to gemini");
+	if (normalizeSynthesizer("gpt") === "chatgpt")
+		passMsg("synthesizer: gpt alias normalizes to chatgpt");
+	else failMsg("synthesizer: gpt alias should normalize to chatgpt");
+	if (getSynthesisStartUrl("chatgpt") === "https://chatgpt.com/")
+		passMsg("synthesizer: chatgpt start URL");
+	else failMsg("synthesizer: unexpected chatgpt start URL");
+
 	subsection("Research mode option/query normalization");
 	const { clampResearchOptions, normalizeResearchQueries } = await import(
 		"./src/search/research.mjs"

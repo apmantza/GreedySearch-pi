@@ -92,25 +92,42 @@ export async function getOrOpenTab(tabPrefix) {
  */
 export async function injectClipboardInterceptor(tab, globalVar) {
 	const code = `
-    window.${globalVar} = null;
-    const _origWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
-    navigator.clipboard.writeText = function(text) {
-      window.${globalVar} = text;
-      return _origWriteText(text);
-    };
-    const _origWrite = navigator.clipboard.write.bind(navigator.clipboard);
-    navigator.clipboard.write = async function(items) {
-      try {
-        for (const item of items) {
-          if (item.types && item.types.includes('text/plain')) {
-            const blob = await item.getType('text/plain');
-            window.${globalVar} = await blob.text();
-            break;
+    (() => {
+      window.${globalVar} = null;
+      const _clipboard = navigator.clipboard;
+      if (!_clipboard) return;
+      const _origWriteText = typeof _clipboard.writeText === 'function'
+        ? _clipboard.writeText.bind(_clipboard)
+        : null;
+      const _origWrite = typeof _clipboard.write === 'function'
+        ? _clipboard.write.bind(_clipboard)
+        : null;
+
+      _clipboard.writeText = function(text) {
+        window.${globalVar} = String(text ?? '');
+        if (!_origWriteText) return Promise.resolve();
+        // The OS/browser clipboard write may be denied in automated Chrome or
+        // when the tab is not focused. We only need the captured text; returning
+        // a resolved promise prevents the page from surfacing a misleading
+        // "failed to copy" toast after our interceptor already succeeded.
+        return Promise.resolve(_origWriteText(text)).catch(() => undefined);
+      };
+
+      _clipboard.write = async function(items) {
+        try {
+          for (const item of items || []) {
+            if (item.types && item.types.includes('text/plain')) {
+              const blob = await item.getType('text/plain');
+              window.${globalVar} = await blob.text();
+              break;
+            }
           }
-        }
-      } catch(e) {}
-      return _origWrite(items);
-    };
+        } catch(e) {}
+        if (!_origWrite) return undefined;
+        try { return await _origWrite(items); }
+        catch (_) { return undefined; }
+      };
+    })();
   `;
 	await cdp(["eval", tab, code]);
 }

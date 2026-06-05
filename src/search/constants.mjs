@@ -12,13 +12,15 @@ export const PAGES_CACHE = `${tmpdir().replaceAll("\\", "/")}/cdp-pages.json`;
 export const CHROME_MODE_FILE = `${tmpdir().replaceAll("\\", "/")}/greedysearch-chrome-mode`;
 
 // ── User config: ~/.pi/greedyconfig ────────────────────────────────────────
-// Users can override which engines participate in the "all" fan-out.
-// Default: perplexity, google, chatgpt
+// Users can override which engines participate in the "all" fan-out and which
+// engine performs optional synthesis.
+// Default engines: perplexity, google, chatgpt; synthesizer: gemini
 
 const CONFIG_DIR = join(homedir(), ".pi");
 const CONFIG_FILE = join(CONFIG_DIR, "greedyconfig");
 
 const DEFAULT_ENGINES = ["perplexity", "google", "chatgpt"];
+const DEFAULT_SYNTHESIZER = "gemini";
 
 function loadUserEngines() {
 	try {
@@ -47,7 +49,11 @@ function ensureDefaultConfig() {
 		if (!existsSync(CONFIG_FILE)) {
 			writeFileSync(
 				CONFIG_FILE,
-				JSON.stringify({ engines: DEFAULT_ENGINES }, null, 2) + "\n",
+				JSON.stringify(
+					{ engines: DEFAULT_ENGINES, synthesizer: DEFAULT_SYNTHESIZER },
+					null,
+					2,
+				) + "\n",
 				"utf8",
 			);
 		}
@@ -58,8 +64,23 @@ function ensureDefaultConfig() {
 
 ensureDefaultConfig();
 
-// ALL_ENGINES drives the "all" fan-out. Edit ~/.pi/greedyconfig to customize.
-export const ALL_ENGINES = loadUserEngines();
+export const SUPPORTED_SYNTHESIZERS = ["gemini", "chatgpt"];
+
+function loadUserSynthesizer() {
+	try {
+		if (existsSync(CONFIG_FILE)) {
+			const raw = readFileSync(CONFIG_FILE, "utf8");
+			const config = JSON.parse(raw);
+			if (typeof config.synthesizer === "string") {
+				const normalized = config.synthesizer.toLowerCase();
+				if (SUPPORTED_SYNTHESIZERS.includes(normalized)) return normalized;
+			}
+		}
+	} catch {
+		// Ignore parse/read errors — fall through to default
+	}
+	return DEFAULT_SYNTHESIZER;
+}
 
 export const ENGINE_DOMAINS = {
 	perplexity: "perplexity.ai",
@@ -81,6 +102,12 @@ export const ENGINES = {
 	chatgpt: "chatgpt.mjs",
 	gpt: "chatgpt.mjs",
 };
+
+// ALL_ENGINES drives the "all" fan-out. Edit ~/.pi/greedyconfig to customize.
+export const ALL_ENGINES = loadUserEngines();
+
+// SYNTHESIZER drives optional all-search synthesis. Edit ~/.pi/greedyconfig to customize.
+export const SYNTHESIZER = loadUserSynthesizer();
 
 export const SOURCE_FETCH_CONCURRENCY = Math.max(
 	1,

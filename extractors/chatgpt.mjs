@@ -12,6 +12,7 @@
 import {
 	buildEnvelope,
 	cdp,
+	cdpWithInput,
 	formatAnswer,
 	getOrOpenTab,
 	handleError,
@@ -41,8 +42,9 @@ async function typeAndSubmit(tab, query) {
 	await cdp(["click", tab, PROSE_SELECTOR]);
 	await new Promise((r) => setTimeout(r, jitter(200)));
 
-	// Type via CDP (sends Input.insertText)
-	await cdp(["type", tab, query]);
+	// Type via CDP (sends Input.insertText). Use stdin so long synthesis
+	// prompts do not hit Windows command-line length limits.
+	await cdpWithInput(["type", tab, "--stdin"], query);
 	await new Promise((r) => setTimeout(r, jitter(300)));
 
 	// Click send button
@@ -103,6 +105,36 @@ async function waitForResponse(tab, timeoutMs = 60000) {
 	return parseInt(result, 10) || 0;
 }
 
+async function extractAnswerFromDom(tab) {
+	const raw = await cdp([
+		"eval",
+		tab,
+		String.raw`
+		(() => {
+			const assistant = Array.from(document.querySelectorAll('[data-message-author-role="assistant"]')).at(-1);
+			if (!assistant) return JSON.stringify({ answer: '', sources: [] });
+			const answer = (assistant.innerText || assistant.textContent || '').trim();
+			const seen = new Set();
+			const sources = [];
+			for (const link of assistant.querySelectorAll('a[href]')) {
+				const url = link.href;
+				if (!url || seen.has(url)) continue;
+				seen.add(url);
+				const title = (link.innerText || link.textContent || '').replace(/\s+/g, ' ').trim();
+				sources.push({ title, url });
+				if (sources.length >= 10) break;
+			}
+			return JSON.stringify({ answer, sources });
+		})()
+	`,
+	]);
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return { answer: "", sources: [] };
+	}
+}
+
 async function extractAnswer(tab, env) {
 	// Click the LAST copy button (assistant's response at the bottom)
 	await cdp([
@@ -134,14 +166,26 @@ async function extractAnswer(tab, env) {
 		env.clipboardEmpty = !answer;
 	}
 
+	let domFallback = null;
+	if (!answer) {
+		domFallback = await extractAnswerFromDom(tab);
+		answer = domFallback.answer;
+		env.fallbackUsed = answer ? "dom" : null;
+	}
+
 	if (!answer) throw new Error("Clipboard interceptor returned empty text");
 
-	// Parse sources from both inline and reference-style markdown links
+	// Parse sources from both inline/reference-style markdown links and DOM links
+	// (DOM fallback preserves sources even when native clipboard copy fails).
 	const sourcesInline = parseSourcesFromMarkdown(answer);
 	const sourcesRef = parseSourcesFromMarkdownRefStyle(answer);
 	const sourceMap = new Map();
-	for (const s of [...sourcesRef, ...sourcesInline]) {
-		if (!sourceMap.has(s.url)) sourceMap.set(s.url, s);
+	for (const s of [
+		...(domFallback?.sources || []),
+		...sourcesRef,
+		...sourcesInline,
+	]) {
+		if (s?.url && !sourceMap.has(s.url)) sourceMap.set(s.url, s);
 	}
 	const sources = Array.from(sourceMap.values()).slice(0, 10);
 

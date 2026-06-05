@@ -33,7 +33,7 @@ import {
 	openNewTab,
 	touchActivity,
 } from "../src/search/chrome.mjs";
-import { ALL_ENGINES, ENGINES } from "../src/search/constants.mjs";
+import { ALL_ENGINES, ENGINES, SYNTHESIZER } from "../src/search/constants.mjs";
 import { runExtractor } from "../src/search/engines.mjs";
 import {
 	fetchMultipleSources,
@@ -51,7 +51,11 @@ import {
 	mergeFetchDataIntoSources,
 } from "../src/search/sources.mjs";
 import { buildConfidence } from "../src/search/synthesis.mjs";
-import { synthesizeWithGemini } from "../src/search/synthesis-runner.mjs";
+import {
+	getSynthesisStartUrl,
+	normalizeSynthesizer,
+	synthesizeResults,
+} from "../src/search/synthesis-runner.mjs";
 import { normalizeQuery } from "../src/search/query.mjs";
 import { runResearchMode } from "../src/search/research.mjs";
 
@@ -92,9 +96,11 @@ async function main() {
 				"Engines: perplexity (p), bing (b), google (g), gemini (gem), all",
 				"",
 				"Flags:",
-				"  --fast              Quick mode: no source fetching or synthesis",
-				"  --synthesize        Deprecated: synthesis is now default for multi-engine",
-				"  --deep-research     Deprecated: source fetching is now default",
+				"  --synthesize        For engine=all: synthesize fetched sources",
+				"  --synthesizer <engine>  Synthesis engine (default from ~/.pi/greedyconfig)",
+				"  --fast              Legacy quick mode: no source fetching or synthesis",
+				"  --depth <mode>      Legacy: fast|standard|deep aliases, or research",
+				"  --deep-research     Deprecated alias for --research",
 				"  --research          Iterative query/learnings loop (alias: --depth research)",
 				"  --breadth <n>       Research mode query breadth, 1-5 (default: 3)",
 				"  --iterations <n>    Research mode rounds, 1-3 (default: 2)",
@@ -114,10 +120,11 @@ async function main() {
 				"  GREEDY_SEARCH_LOCALE          Default locale (default: en)",
 				"",
 				"Examples:",
-				'  node search.mjs all "Node.js streams"           # Default: sources + synthesis',
-				'  node search.mjs all "quick check" --fast        # Fast: no sources/synthesis',
+				'  node search.mjs all "Node.js streams"              # Grounded: engines + fetched sources',
+				'  node search.mjs all "Node.js streams" --synthesize # Add Gemini synthesis',
+				'  node search.mjs all "quick check" --fast           # Legacy fast: no sources/synthesis',
 				'  node search.mjs all "browser automation" --research --breadth 3 --iterations 2',
-				'  node search.mjs p "what is memoization"         # Single engine: fast mode',
+				'  node search.mjs p "what is memoization"            # Single engine search',
 			].join("\n")}\n`,
 		);
 		process.exit(1);
@@ -143,40 +150,43 @@ async function main() {
 	// Track activity for headless idle timeout
 	touchActivity();
 
-	// Depth modes: fast (no synthesis/fetch), standard (synthesis+fetch 5 sources)
 	const depthIdx = args.indexOf("--depth");
-	let depth = "standard"; // DEFAULT: synthesis + source fetch
-
-	if (depthIdx !== -1 && args[depthIdx + 1]) {
-		depth = args[depthIdx + 1];
-	} else if (args.includes("--fast")) {
-		depth = "fast"; // Explicit fast mode requested
-	}
-
-	// For single engine (not "all"), default to fast unless explicit
+	const legacyDepth =
+		depthIdx !== -1 && args[depthIdx + 1]
+			? args[depthIdx + 1].toLowerCase()
+			: null;
 	const engineArg = args.find((a) => !a.startsWith("--"))?.toLowerCase();
-	if (engineArg !== "all" && depthIdx === -1 && !args.includes("--fast")) {
-		depth = "fast";
+	const researchMode =
+		args.includes("--research") ||
+		args.includes("--deep-research") ||
+		legacyDepth === "research";
+	const legacyFast = args.includes("--fast") || legacyDepth === "fast";
+	const legacySynthesisDepth =
+		legacyDepth === "standard" ||
+		legacyDepth === "deep" ||
+		args.includes("--deep");
+	const shouldFetchSources = engineArg === "all" && !legacyFast;
+	const shouldSynthesize =
+		engineArg === "all" &&
+		!legacyFast &&
+		(args.includes("--synthesize") || legacySynthesisDepth);
+	const groundedSynthesis = legacyDepth === "deep" || args.includes("--deep");
+
+	if (args.includes("--deep-research")) {
+		process.stderr.write(
+			"[greedysearch] --deep-research is deprecated; use --research or --depth research\n",
+		);
+	}
+	if (legacySynthesisDepth) {
+		process.stderr.write(
+			"[greedysearch] depth fast|standard|deep is deprecated; use default grounded search plus --synthesize when needed\n",
+		);
 	}
 
-	// --deep-research / --deep flags map to deep mode (backward compat)
-	if (args.includes("--deep-research")) {
-		depth = "standard";
-		process.stderr.write(
-			"[greedysearch] --deep-research is deprecated; use --depth standard (now default)\n",
-		);
-	}
-	if (args.includes("--deep")) {
-		depth = "deep";
-	}
-	if (args.includes("--research")) {
-		depth = "research";
-	}
-	if (args.includes("--synthesize")) {
-		process.stderr.write(
-			"[greedysearch] --synthesize is deprecated; synthesis is now default for multi-engine\n",
-		);
-	}
+	const synthesizerIdx = args.indexOf("--synthesizer");
+	const synthesizer = normalizeSynthesizer(
+		synthesizerIdx === -1 ? SYNTHESIZER : args[synthesizerIdx + 1],
+	);
 
 	const full = args.includes("--full");
 	const short = !full;
@@ -226,6 +236,7 @@ async function main() {
 			a !== "--visible" &&
 			a !== "--always-visible" &&
 			a !== "--depth" &&
+			a !== "--synthesizer" &&
 			a !== "--out" &&
 			a !== "--locale" &&
 			a !== "--breadth" &&
@@ -235,6 +246,7 @@ async function main() {
 			a !== "--no-research-bundle" &&
 			a !== "--help" &&
 			(depthIdx === -1 || i !== depthIdx + 1) &&
+			(synthesizerIdx === -1 || i !== synthesizerIdx + 1) &&
 			(outIdx === -1 || i !== outIdx + 1) &&
 			(localeIdx === -1 || i !== localeIdx + 1) &&
 			(breadthIdx === -1 || i !== breadthIdx + 1) &&
@@ -252,7 +264,7 @@ async function main() {
 		query = rest.slice(1).join(" ");
 	}
 
-	if (depth === "research") {
+	if (researchMode) {
 		if (engine !== "all") {
 			process.stderr.write(
 				`[greedysearch] Research mode uses all engines; ignoring engine "${engine}".\n`,
@@ -293,7 +305,7 @@ async function main() {
 
 		// Time-bounded per-engine extraction so slow engines don't stall the batch.
 		const engineTimeoutFor = (engineName) => {
-			if (depth !== "fast") return 70000;
+			if (!legacyFast) return 70000;
 			// ChatGPT needs ~25-30s solo; under CDP contention needs more headroom
 			return engineName === "chatgpt" ? 60000 : 35000;
 		};
@@ -501,7 +513,7 @@ async function main() {
 
 			// Source fetching: default for all "all" searches
 			// Fetch all sources in a single batch (concurrency = source count).
-			if (depth !== "fast" && out._sources.length > 0) {
+			if (shouldFetchSources && out._sources.length > 0) {
 				process.stderr.write("PROGRESS:source-fetch:start\n");
 				const fetchedSources = await fetchMultipleSources(
 					out._sources,
@@ -514,34 +526,41 @@ async function main() {
 				process.stderr.write("PROGRESS:source-fetch:done\n");
 			}
 
-			// Synthesize with Gemini for all non-fast modes.
-			// Open the Gemini tab HERE (after source fetch) instead of pre-opening
-			// before source fetch. Pre-opening was fragile: Chrome could be killed
-			// during visible recovery or idle-timeout between source fetch and
-			// synthesis, leaving a stale tab ID that causes "No target matching prefix".
-			if (depth !== "fast") {
+			// Optional engine-agnostic synthesis for multi-engine searches.
+			// Open the synthesizer tab HERE (after source fetch) instead of
+			// pre-opening before source fetch. Pre-opening was fragile: Chrome could
+			// be killed during visible recovery or idle-timeout between source fetch
+			// and synthesis, leaving a stale tab ID that causes "No target matching prefix".
+			if (shouldSynthesize) {
 				process.stderr.write("PROGRESS:synthesis:start\n");
 				process.stderr.write(
-					"[greedysearch] Synthesizing results with Gemini...\n",
+					`[greedysearch] Synthesizing results with ${synthesizer}...\n`,
 				);
+				let synthesisTab = null;
 				try {
-					const geminiTab = await openNewTab("https://gemini.google.com/app");
-					const synthesis = await synthesizeWithGemini(query, out, {
-						grounded: depth === "deep",
-						tabPrefix: geminiTab,
+					synthesisTab = await openNewTab(getSynthesisStartUrl(synthesizer));
+					const synthesis = await synthesizeResults(query, out, {
+						grounded: groundedSynthesis,
+						tabPrefix: synthesisTab,
 						visible: process.env.GREEDY_SEARCH_VISIBLE === "1",
+						synthesizer,
 					});
 					out._synthesis = {
 						...synthesis,
 						synthesized: true,
 					};
-					await closeTab(geminiTab);
 					process.stderr.write("PROGRESS:synthesis:done\n");
 				} catch (e) {
 					process.stderr.write(
 						`[greedysearch] Synthesis failed: ${e.message}\n`,
 					);
-					out._synthesis = { error: e.message, synthesized: false };
+					out._synthesis = {
+						error: e.message,
+						synthesized: false,
+						synthesizedBy: synthesizer,
+					};
+				} finally {
+					if (synthesisTab) await closeTab(synthesisTab);
 				}
 			}
 
@@ -551,12 +570,12 @@ async function main() {
 					out._topSource = await fetchTopSource(top.canonicalUrl || top.url);
 			}
 
-			// Always include confidence metrics for non-fast searches
-			if (depth !== "fast") out._confidence = buildConfidence(out);
+			// Include confidence metrics for grounded multi-engine searches.
+			if (!legacyFast) out._confidence = buildConfidence(out);
 
 			writeOutput(out, outFile, {
 				inline,
-				synthesize: depth !== "fast",
+				synthesize: shouldSynthesize,
 				query,
 			});
 			return;

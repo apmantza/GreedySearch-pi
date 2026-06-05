@@ -57,10 +57,13 @@ function formatAllEnginesResult(
 	if (synthesis?.answer) {
 		if (research?.mode === "iterative") renderResearchHeader(lines, research);
 		renderSynthesis(lines, synthesis, dedupedSources || [], 6);
+		const synthesizedBy = String(
+			synthesis.synthesizedBy || "configured synthesizer",
+		);
 		lines.push(
 			research?.mode === "iterative"
 				? "*Research mode: iterative planning, source fetching, citation audit, and bundle output*\n"
-				: "*Synthesized from Perplexity, Bing Copilot, and Google AI*\n",
+				: `*Synthesized by ${synthesizedBy} from multi-engine results and fetched sources*\n`,
 		);
 		return lines.join("\n").trim();
 	}

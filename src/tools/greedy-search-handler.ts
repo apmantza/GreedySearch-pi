@@ -52,7 +52,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 		name: "greedy_search",
 		label: "Greedy Search",
 		description:
-			"WEB SEARCH ONLY — searches live web via Perplexity, Google AI, and ChatGPT in parallel. " +
+			"WEB SEARCH ONLY — searches live web via Perplexity, Google AI, ChatGPT, and Gemini. " +
 			"Research mode is the centerpiece: it plans follow-up actions, fetches sources, audits citations, " +
 			"and writes a structured research bundle on disk. " +
 			"Use for: library docs, recent framework changes, error messages, best practices, current events. " +
@@ -62,14 +62,28 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			query: Type.String({ description: "The search query" }),
 			engine: Type.String({
 				description:
-					'Engine to use: "all" (default), "perplexity", "google", "chatgpt", "gemini", "gem". "all" fans out to Perplexity, Google, and ChatGPT in parallel. Customize via ~/.pi/greedyconfig. Bing Copilot is still available as "bing" for signed-in users.',
+					'Engine to use: "all" (default), "perplexity", "google", "chatgpt", "gemini", "gem". "all" fans out to the configured engines and fetches top sources. Customize via ~/.pi/greedyconfig. Bing Copilot is still available as "bing" for signed-in users.',
 				default: "all",
 			}),
-			depth: Type.String({
-				description:
-					'Search depth: "fast" (no synthesis/source fetch, ~15-30s), "standard" (synthesis + sources, ~30-90s), "deep" (stronger grounding, ~60-180s), "research" (iterative query/learnings loop; slowest). Default: "standard". Note: single-engine searches default to fast unless depth is "research".',
-				default: "standard",
-			}),
+			synthesize: Type.Optional(
+				Type.Boolean({
+					description:
+						'Only for engine="all": synthesize the multi-engine results and fetched sources. Default: false.',
+					default: false,
+				}),
+			),
+			synthesizer: Type.Optional(
+				Type.String({
+					description:
+						'Synthesis engine for synthesize=true. Defaults to ~/.pi/greedyconfig synthesizer (currently "gemini" by default). Supported: "gemini", "chatgpt".',
+				}),
+			),
+			depth: Type.Optional(
+				Type.String({
+					description:
+						'Deprecated except "research". Use depth="research" for the iterative research workflow. Legacy values: "fast" skips source fetching; "standard"/"deep" alias synthesize=true.',
+				}),
+			),
 			breadth: Type.Optional(
 				Type.Number({
 					description:
@@ -136,6 +150,8 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			const { query, fullAnswer: fullAnswerParam } = params as {
 				query: string;
 				engine: string;
+				synthesize?: boolean;
+				synthesizer?: string;
 				depth?: "fast" | "standard" | "deep" | "research";
 				breadth?: number;
 				iterations?: number;
@@ -148,9 +164,21 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				alwaysVisible?: boolean;
 			};
 			const engine = stripQuotes((params as any).engine ?? "all") || "all";
-			const depth = (stripQuotes((params as any).depth ?? "standard") ||
-				"standard") as "fast" | "standard" | "deep" | "research";
-			const effectiveEngine = depth === "research" ? "all" : engine;
+			const depthRaw = stripQuotes((params as any).depth ?? "") as
+				| "fast"
+				| "standard"
+				| "deep"
+				| "research"
+				| "";
+			const researchMode = depthRaw === "research";
+			const legacyFast = depthRaw === "fast";
+			const legacySynthesisDepth =
+				depthRaw === "standard" || depthRaw === "deep";
+			const synthesize =
+				engine === "all" &&
+				!legacyFast &&
+				((params as any).synthesize === true || legacySynthesisDepth);
+			const effectiveEngine = researchMode ? "all" : engine;
 			const visible =
 				(params as any).visible === true ||
 				(params as any).alwaysVisible === true ||
@@ -164,7 +192,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			const flags: string[] = [];
 			const fullAnswer = fullAnswerParam ?? effectiveEngine !== "all";
 			if (fullAnswer) flags.push("--full");
-			if (depth === "research") {
+			if (researchMode) {
 				flags.push("--depth", "research");
 				if (typeof (params as any).breadth === "number")
 					flags.push("--breadth", String((params as any).breadth));
@@ -176,18 +204,20 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 					flags.push("--research-out-dir", (params as any).researchOutDir);
 				if ((params as any).writeResearchBundle === false)
 					flags.push("--no-research-bundle");
-			} else if (depth === "deep") flags.push("--depth", "deep");
-			else if (depth === "fast") flags.push("--fast");
-			else if (depth === "standard" && engine === "all")
-				flags.push("--synthesize");
+			} else if (legacyFast) flags.push("--fast");
+			else if (depthRaw === "deep") flags.push("--depth", "deep");
+			else if (synthesize) flags.push("--synthesize");
+			if (synthesize && typeof (params as any).synthesizer === "string") {
+				flags.push("--synthesizer", (params as any).synthesizer);
+			}
 
 			const onProgress =
 				effectiveEngine === "all"
 					? makeProgressTracker(
 							ALL_ENGINES,
 							onUpdate,
-							depth === "research" ? "Researching" : "Searching",
-							depth,
+							researchMode ? "Researching" : "Searching",
+							synthesize,
 						)
 					: undefined;
 
