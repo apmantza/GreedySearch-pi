@@ -318,7 +318,8 @@ function buildSourcesFromApi(respData) {
 		const badges = p.badges || {};
 		if (badges.study_type === "rct") tags.push("RCT");
 		else if (badges.study_type === "meta_analysis") tags.push("META-ANALYSIS");
-		else if (badges.study_type === "systematic_review") tags.push("SYSTEMATIC REVIEW");
+		else if (badges.study_type === "systematic_review")
+			tags.push("SYSTEMATIC REVIEW");
 		else if (badges.study_type) tags.push(badges.study_type.toUpperCase());
 		if (badges.rigorous_journal) tags.push("RIGOROUS JOURNAL");
 		if (badges.very_rigorous_journal) tags.push("VERY RIGOROUS JOURNAL");
@@ -434,8 +435,7 @@ async function main() {
 		let onConsensus = false;
 		try {
 			const host = new URL(currentUrl).hostname.toLowerCase();
-			onConsensus =
-				host === "consensus.app" || host.endsWith(".consensus.app");
+			onConsensus = host === "consensus.app" || host.endsWith(".consensus.app");
 		} catch {}
 
 		if (!onConsensus) {
@@ -533,9 +533,7 @@ async function main() {
 		logStage(env, "extract", startTime);
 		const answer = await extractAnswer(tab);
 		if (!answer) {
-			throw new Error(
-				"No answer extracted — Consensus may not have responded",
-			);
+			throw new Error("No answer extracted — Consensus may not have responded");
 		}
 
 		// DOM fallback: if the API interception didn't yield sources (or
