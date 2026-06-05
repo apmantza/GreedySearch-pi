@@ -199,10 +199,15 @@ async function extractFromAccessibilityTree(tab, query = "") {
 		const snap = await cdp(["snap", tab]).catch(() => "");
 		if (!snap || (await detectVerificationChallenge(tab, cdp))) return "";
 
-		const articleLines = snap
-			.split("\n")
-			.map((line) => line.match(/^\s*\[article\]\s+(.+)$/i)?.[1])
-			.filter(Boolean);
+		// Linear article extraction — no regex. Avoids the ReDoS-prone
+		// /^\s*\[article\]\s+(.+)$/i pattern (SonarCloud hotspot js:S5852).
+		const articleLines = [];
+		for (const line of snap.split("\n")) {
+			const trimmed = line.trimStart();
+			if (!trimmed.toLowerCase().startsWith("[article]")) continue;
+			const after = trimmed.slice("[article]".length).trimStart();
+			if (after) articleLines.push(after);
+		}
 		if (articleLines.length === 0) return "";
 
 		const answer = pickAnswerArticle(articleLines, query);

@@ -417,6 +417,23 @@ export function parseSourcesFromMarkdown(text) {
 }
 
 /**
+ * Linear-time "is this a non-empty digit string?" check.
+ * Equivalent to /^\d+$/ without the regex — used to keep the
+ * parseSourcesFromMarkdownRefStyle inline scan free of any regex
+ * (SonarCloud hotspot js:S5852).
+ * @param {string} s
+ * @returns {boolean}
+ */
+function isAllDigits(s) {
+	if (!s) return false;
+	for (let k = 0; k < s.length; k++) {
+		const c = s.charCodeAt(k);
+		if (c < 48 || c > 57) return false;
+	}
+	return true;
+}
+
+/**
  * Parse reference-style markdown links: [text][num] with [num]: url "title" at bottom.
  * ChatGPT uses this format for its inline citations.
  * @param {string} text - Markdown text
@@ -437,17 +454,36 @@ export function parseSourcesFromMarkdownRefStyle(text) {
 		refMap.set(num, { url, title });
 	}
 
-	// Find inline references: [text][num] or [num]
-	const inlineRegex = /\[([^\]]*)\]\[(\d+)\]/g;
-	while ((m = inlineRegex.exec(text)) !== null) {
-		const num = m[2];
-		const ref = refMap.get(num);
-		if (ref) {
-			const title = m[1].trim() || ref.title || "";
-			if (!results.some((r) => r.url === ref.url)) {
-				results.push({ title, url: ref.url });
+	// Find inline references: [text][num] or [num]. Linear scan via
+	// indexOf — avoids the ReDoS-prone /\[([^\]]*)\]\[(\d+)\]/g pattern
+	// (SonarCloud hotspot js:S5852). The original `[^\]]*` allowed `[`
+	// inside, which caused quadratic backtracking on inputs like
+	// `[a[[[[[[[[[[[1]`.
+	let cursor = 0;
+	while (cursor < text.length) {
+		const open = text.indexOf("[", cursor);
+		if (open === -1) break;
+		const close = text.indexOf("]", open + 1);
+		if (close === -1) break;
+		if (text[close + 1] !== "[") {
+			cursor = open + 1;
+			continue;
+		}
+		const close2 = text.indexOf("]", close + 2);
+		if (close2 === -1) break;
+
+		const inner = text.slice(open + 1, close);
+		const numStr = text.slice(close + 2, close2);
+		if (isAllDigits(numStr)) {
+			const ref = refMap.get(numStr);
+			if (ref && !results.some((r) => r.url === ref.url)) {
+				results.push({
+					title: inner.trim() || ref.title || "",
+					url: ref.url,
+				});
 			}
 		}
+		cursor = close2 + 1;
 	}
 
 	return results;
