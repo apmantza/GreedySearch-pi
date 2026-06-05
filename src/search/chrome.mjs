@@ -10,7 +10,7 @@
 // (default 60) because restarting it wastes the user's investment in solving captchas.
 // Set either to 0 to disable idle cleanup for that mode.
 
-import { spawn, execSync } from "node:child_process";
+import { spawn, execFileSync, execSync } from "node:child_process";
 import {
 	existsSync,
 	readFileSync,
@@ -64,8 +64,41 @@ const VISIBLE_IDLE_TIMEOUT_MINUTES =
 		10,
 	) || 60;
 
+export function detectHeadlessFromChromeCommandLine(
+	cmdLine,
+	debugPort = GREEDY_PORT,
+) {
+	const normalized = String(cmdLine || "").toLowerCase();
+	if (
+		!normalized.includes(`--remote-debugging-port=${debugPort}`) ||
+		normalized.includes("--type=")
+	) {
+		return null;
+	}
+	return normalized.includes("--headless");
+}
+
 /** Check if the running Chrome was launched in headless mode */
 export function isChromeHeadless() {
+	// Prefer the live Chrome command line over the mode marker. The marker can be
+	// stale after cross-process relaunches; using it as authoritative made Gemini
+	// synthesis kill a visible Chrome immediately after opening its tab.
+	try {
+		const portPid = getPortPid();
+		const cmdLine = portPid ? getProcessCommandLine(portPid) : null;
+		const headless = detectHeadlessFromChromeCommandLine(cmdLine);
+		if (headless !== null) {
+			try {
+				writeFileSync(
+					CHROME_MODE_FILE,
+					headless ? "headless" : "visible",
+					"utf8",
+				);
+			} catch {}
+			return headless;
+		}
+	} catch {}
+
 	try {
 		if (!existsSync(CHROME_MODE_FILE)) return true; // default: headless
 		return readFileSync(CHROME_MODE_FILE, "utf8").trim() === "headless";
@@ -84,6 +117,32 @@ export function touchActivity() {
 		const md = readMetadata();
 		if (md) touchActivityBL(md);
 	} catch {}
+}
+
+function getProcessCommandLine(pid) {
+	try {
+		if (platform() === "win32") {
+			const output = execFileSync(
+				resolveSystemCmd("powershell"),
+				[
+					"-NoProfile",
+					"-NonInteractive",
+					"-Command",
+					`(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`,
+				],
+				{ encoding: "utf8", windowsHide: true, timeout: 5000 },
+			);
+			return output.trim() || null;
+		}
+		const output = execFileSync(
+			resolveSystemCmd("ps"),
+			["-p", String(pid), "-o", "command="],
+			{ encoding: "utf8", timeout: 5000 },
+		);
+		return output.trim() || null;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -506,13 +565,17 @@ export async function ensureChrome() {
 	cleanupStaleSessions();
 	const wasKilled = await checkAndKillIdle();
 
-	const ready = wasKilled ? false : await probeGreedyChrome();
+	let ready = wasKilled ? false : await probeGreedyChrome();
+	if (!ready && !wasKilled) {
+		await new Promise((r) => setTimeout(r, 500));
+		ready = await probeGreedyChrome();
+	}
+
 	// If Chrome is running but in wrong mode, kill it so we relaunch in the correct mode.
 	let forceRelaunch = false;
 	if (ready) {
 		const headless = isChromeHeadless();
 		const wantsVisible = process.env.GREEDY_SEARCH_VISIBLE === "1";
-
 		if (!wantsVisible && !headless) {
 			// Headless requested (default) but visible Chrome is running — switch back
 			process.stderr.write(

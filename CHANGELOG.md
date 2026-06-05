@@ -26,6 +26,8 @@
 
 - **Research direct-URL fetch actions work in ESM** (`src/search/research.mjs`) — Replaced a CommonJS `require("./sources.mjs")` in the direct `fetchUrl` path with normal ESM imports, avoiding runtime failures when Gemini plans a direct primary-source fetch.
 
+- **Gemini synthesis no longer kills Chrome after opening its tab** (`src/search/browser-lifecycle.mjs`, `src/search/chrome.mjs`, `src/search/synthesis-runner.mjs`, `bin/search.mjs`) — Fixed two Chrome lifecycle regressions that produced `No target matching prefix` during multi-engine synthesis. Child-process stale-session cleanup now verifies GreedySearch Chrome command lines with path-separator-insensitive profile matching, so Windows backslash/forward-slash differences do not make a live Chrome look like a ghost process. Mode detection now prefers the live Chrome command line over the stale mode marker file, preventing visible-mode synthesis from killing visible Chrome immediately after opening the Gemini tab. Added unit coverage for both cases.
+
 ### Changed
 
 ### Removed

@@ -245,12 +245,61 @@ if (["", "all", "unit", "quick", "smoke"].includes(mode)) {
 			failMsg(`pplxPattern: ${label} — expected ${expected}, got ${matched}`);
 	}
 
-	subsection("mode marker file — isChromeHeadless detection");
-	const { isChromeHeadless: isHeadlessCheck } = await import(
-		"./src/search/chrome.mjs"
+	subsection("Chrome lifecycle — visible/headless mode detection");
+	const { detectHeadlessFromChromeCommandLine, isChromeHeadless } =
+		await import("./src/search/chrome.mjs");
+	const { commandLineMatchesGreedyChrome } = await import(
+		"./src/search/browser-lifecycle.mjs"
 	);
-	const headlessResult = typeof isHeadlessCheck === "function";
-	if (headlessResult) passMsg("isChromeHeadless: function exists");
+
+	const visibleCmd =
+		'"C:/Program Files/Google/Chrome/Application/chrome.exe" --remote-debugging-port=9222 --user-data-dir=C:\\Users\\me\\AppData\\Local\\Temp\\greedysearch-chrome-profile about:blank';
+	const headlessCmd = `${visibleCmd} --headless=new`;
+	const rendererCmd = `${visibleCmd} --type=renderer`;
+
+	if (detectHeadlessFromChromeCommandLine(visibleCmd) === false) {
+		passMsg("chrome mode: live visible command line overrides stale marker");
+	} else {
+		failMsg("chrome mode: visible command line should detect non-headless");
+	}
+	if (detectHeadlessFromChromeCommandLine(headlessCmd) === true) {
+		passMsg("chrome mode: live headless command line detected");
+	} else {
+		failMsg("chrome mode: headless command line should detect headless");
+	}
+	if (detectHeadlessFromChromeCommandLine(rendererCmd) === null) {
+		passMsg("chrome mode: ignores child renderer processes");
+	} else {
+		failMsg("chrome mode: renderer command line should be ignored");
+	}
+	if (
+		commandLineMatchesGreedyChrome(
+			visibleCmd,
+			"C:/Users/me/AppData/Local/Temp/greedysearch-chrome-profile",
+		)
+	) {
+		passMsg(
+			"stale cleanup: Windows backslash profile path verifies as GreedySearch Chrome",
+		);
+	} else {
+		failMsg(
+			"stale cleanup: should accept equivalent slash/backslash profile paths",
+		);
+	}
+	if (
+		!commandLineMatchesGreedyChrome(
+			rendererCmd,
+			"C:/Users/me/AppData/Local/Temp/greedysearch-chrome-profile",
+		)
+	) {
+		passMsg("stale cleanup: renderer child is not treated as browser process");
+	} else {
+		failMsg(
+			"stale cleanup: renderer child should not verify as browser process",
+		);
+	}
+	if (typeof isChromeHeadless === "function")
+		passMsg("isChromeHeadless: function exists");
 	else failMsg("isChromeHeadless: not a function");
 
 	subsection("Research mode option/query normalization");

@@ -116,13 +116,35 @@ function getProcessCommandLine(pid) {
  * @param {number} debugPort - expected debug port
  * @returns {boolean}
  */
-export function verifyBrowserProcess(pid, tempDir, debugPort = GREEDY_PORT) {
-	const cmdLine = getProcessCommandLine(pid);
+export function commandLineMatchesGreedyChrome(
+	cmdLine,
+	tempDir,
+	debugPort = GREEDY_PORT,
+) {
 	if (!cmdLine) return false;
+	// Windows may report Chrome command lines with backslashes while the shared
+	// GREEDY_PROFILE_DIR constant is normalized to forward slashes. Compare a
+	// normalized form so child processes do not misclassify a live GreedySearch
+	// Chrome as a ghost and kill it during cleanupStaleSessions().
+	const normalize = (value) =>
+		String(value || "")
+			.replaceAll("\\", "/")
+			.toLowerCase();
+	const normalizedCmdLine = normalize(cmdLine);
+	const normalizedTempDir = normalize(tempDir);
+
 	return (
-		cmdLine.includes(tempDir) &&
-		cmdLine.includes(`--remote-debugging-port=${debugPort}`) &&
-		!cmdLine.includes("--type=")
+		normalizedCmdLine.includes(normalizedTempDir) &&
+		normalizedCmdLine.includes(`--remote-debugging-port=${debugPort}`) &&
+		!normalizedCmdLine.includes("--type=")
+	);
+}
+
+export function verifyBrowserProcess(pid, tempDir, debugPort = GREEDY_PORT) {
+	return commandLineMatchesGreedyChrome(
+		getProcessCommandLine(pid),
+		tempDir,
+		debugPort,
 	);
 }
 

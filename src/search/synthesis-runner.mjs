@@ -77,14 +77,18 @@ export async function runGeminiPrompt(
 export async function synthesizeWithGemini(
 	query,
 	results,
-	{ grounded = false, tabPrefix = null } = {},
+	{ grounded = false, tabPrefix = null, visible = null } = {},
 ) {
 	const sources = Array.isArray(results._sources)
 		? results._sources
 		: buildSourceRegistry(results);
 	const prompt = buildSynthesisPrompt(query, results, sources, { grounded });
 
-	const raw = await runGeminiPrompt(prompt, { tabPrefix, timeoutMs: 180000 });
+	const raw = await runGeminiPrompt(prompt, {
+		tabPrefix,
+		timeoutMs: 180000,
+		visible,
+	});
 	let structured = parseStructuredJson(raw.answer || "");
 
 	// Detect if Gemini echoed back the engine summaries instead of a synthesis.

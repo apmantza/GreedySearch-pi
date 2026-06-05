@@ -499,15 +499,6 @@ async function main() {
 			// Build a canonical source registry across all engines
 			out._sources = buildSourceRegistry(out, query);
 
-			// Pre-navigate Gemini tab in parallel with source fetch so the page
-			// is already loaded when synthesis starts — saves ~4s of nav time.
-			let geminiTabPromise = null;
-			if (depth !== "fast") {
-				geminiTabPromise = openNewTab("https://gemini.google.com/app").catch(
-					() => null,
-				);
-			}
-
 			// Source fetching: default for all "all" searches
 			// Fetch all sources in a single batch (concurrency = source count).
 			if (depth !== "fast" && out._sources.length > 0) {
@@ -523,17 +514,22 @@ async function main() {
 				process.stderr.write("PROGRESS:source-fetch:done\n");
 			}
 
-			// Synthesize with Gemini for all non-fast modes
+			// Synthesize with Gemini for all non-fast modes.
+			// Open the Gemini tab HERE (after source fetch) instead of pre-opening
+			// before source fetch. Pre-opening was fragile: Chrome could be killed
+			// during visible recovery or idle-timeout between source fetch and
+			// synthesis, leaving a stale tab ID that causes "No target matching prefix".
 			if (depth !== "fast") {
 				process.stderr.write("PROGRESS:synthesis:start\n");
 				process.stderr.write(
 					"[greedysearch] Synthesizing results with Gemini...\n",
 				);
 				try {
-					const geminiTab = (await geminiTabPromise) ?? (await openNewTab());
+					const geminiTab = await openNewTab("https://gemini.google.com/app");
 					const synthesis = await synthesizeWithGemini(query, out, {
 						grounded: depth === "deep",
 						tabPrefix: geminiTab,
+						visible: process.env.GREEDY_SEARCH_VISIBLE === "1",
 					});
 					out._synthesis = {
 						...synthesis,
