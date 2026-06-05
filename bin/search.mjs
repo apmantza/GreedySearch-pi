@@ -293,8 +293,9 @@ async function main() {
 
 		// Time-bounded per-engine extraction so slow engines don't stall the batch.
 		const engineTimeoutFor = (engineName) => {
-			if (depth !== "fast") return 55000;
-			return 30000;
+			if (depth !== "fast") return 70000;
+			// ChatGPT needs ~25-30s solo; under CDP contention needs more headroom
+			return engineName === "chatgpt" ? 60000 : 35000;
 		};
 
 		try {

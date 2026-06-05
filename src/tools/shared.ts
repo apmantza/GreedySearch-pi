@@ -9,9 +9,9 @@ import type { ProgressUpdate, ToolResult } from "../types.js";
 
 export type { ProgressUpdate, ToolResult } from "../types.js";
 
-// Canonical source is src/search/constants.mjs — keep in sync
-const ALL_ENGINES = ["perplexity", "google"] as const;
-
+// Import and re-export ALL_ENGINES from constants.mjs so it's always in sync.
+// constants.mjs reads ~/.pi/greedyconfig for user overrides.
+import { ALL_ENGINES } from "../search/constants.mjs";
 export { ALL_ENGINES };
 
 /** Strip surrounding double-quotes that some framework versions inject into string params */
@@ -100,11 +100,12 @@ export function runSearch(
 
 		proc.stderr.on("data", (d: Buffer) => {
 			err += d;
+			// Match PROGRESS lines for any known engine (perplexity/google/chatgpt/bing/gemini)
+			const ENGINE_PROGRESS_RE =
+				/^PROGRESS:(perplexity|google|chatgpt|bing|gemini):(done|error|needs-human)$/;
 			for (const line of d.toString().split("\n")) {
-				// Engine progress: perplexity/google
-				const engineMatch = line.match(
-					/^PROGRESS:(perplexity|google):(done|error|needs-human)$/,
-				);
+				// Engine progress: any known engine
+				const engineMatch = line.match(ENGINE_PROGRESS_RE);
 				if (engineMatch && onProgress) {
 					onProgress(
 						engineMatch[1],

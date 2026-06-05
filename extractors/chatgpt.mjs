@@ -1,0 +1,249 @@
+#!/usr/bin/env node
+
+// extractors/chatgpt.mjs
+// Navigate chatgpt.com, submit query, wait for answer, extract answer + sources.
+//
+// Usage:
+//   node extractors/chatgpt.mjs "<query>" [--tab <prefix>]
+//
+// Output (stdout): JSON { answer, sources, query, url }
+// Errors go to stderr only — stdout is always clean JSON for piping.
+
+import {
+	buildEnvelope,
+	cdp,
+	formatAnswer,
+	getOrOpenTab,
+	handleError,
+	injectClipboardInterceptor,
+	jitter,
+	outputJson,
+	parseArgs,
+	parseSourcesFromMarkdown,
+	parseSourcesFromMarkdownRefStyle,
+	prepareArgs,
+	validateQuery,
+	waitForSelector,
+} from "./common.mjs";
+import { dismissConsent, handleVerification } from "./consent.mjs";
+
+const GLOBAL_VAR = "__chatgptClipboard";
+const PROSE_SELECTOR = "div.ProseMirror";
+const SEND_SELECTOR = 'button[data-testid="send-button"]';
+const COPY_SELECTOR = 'button[data-testid="copy-turn-action-button"]';
+
+// ============================================================================
+// ChatGPT-specific helpers
+// ============================================================================
+
+async function typeAndSubmit(tab, query) {
+	// Focus the ProseMirror editor
+	await cdp(["click", tab, PROSE_SELECTOR]);
+	await new Promise((r) => setTimeout(r, jitter(200)));
+
+	// Type via CDP (sends Input.insertText)
+	await cdp(["type", tab, query]);
+	await new Promise((r) => setTimeout(r, jitter(300)));
+
+	// Click send button
+	const sendCode = `
+		(() => {
+			const btn = document.querySelector('${SEND_SELECTOR}');
+			if (!btn) return 'no-send';
+			btn.click();
+			return 'ok';
+		})()
+	`;
+	const sendResult = await cdp(["eval", tab, sendCode]);
+	if (sendResult === "no-send")
+		throw new Error("ChatGPT send button not found");
+	await new Promise((r) => setTimeout(r, jitter(300)));
+}
+
+/**
+ * Wait for ChatGPT's response to finish streaming.
+ * Uses a SINGLE Runtime.evaluate call with in-browser polling — zero CDP
+ * traffic during the wait. This avoids contention when multiple extractors
+ * run in parallel under the same CDP daemon.
+ */
+async function waitForResponse(tab, timeoutMs = 60000) {
+	const code = String.raw`
+	new Promise((resolve, reject) => {
+		const _deadline = Date.now() + ${timeoutMs};
+		const _selector = '${COPY_SELECTOR}';
+		let _lastCount = 0;
+		let _stableCount = 0;
+
+		function _jitter(ms) {
+			return Math.max(50, ms + (Math.random() * ms * 0.4 - ms * 0.2));
+		}
+
+		function _poll() {
+			try {
+				const count = document.querySelectorAll(_selector).length;
+				if (count >= 2 && count === _lastCount) {
+					_stableCount++;
+					if (_stableCount >= 3) { resolve(count); return; }
+				} else {
+					_lastCount = count;
+					_stableCount = 0;
+				}
+				if (Date.now() < _deadline) {
+					setTimeout(_poll, _jitter(800));
+				} else {
+					resolve(_lastCount);
+				}
+			} catch(e) { reject(e); }
+		}
+
+		_poll();
+	})
+	`;
+	const result = await cdp(["eval", tab, code], timeoutMs + 5000);
+	return parseInt(result, 10) || 0;
+}
+
+async function extractAnswer(tab, env) {
+	// Click the LAST copy button (assistant's response at the bottom)
+	await cdp([
+		"eval",
+		tab,
+		`(() => {
+			const buttons = document.querySelectorAll('${COPY_SELECTOR}');
+			buttons[buttons.length - 1]?.click();
+		})()`,
+	]);
+	await new Promise((r) => setTimeout(r, 600));
+
+	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	env.clipboardEmpty = !answer;
+
+	// Retry once if clipboard is empty
+	if (!answer) {
+		console.error("[chatgpt] Clipboard empty, retrying in 2s...");
+		await cdp([
+			"eval",
+			tab,
+			`(() => {
+				const buttons = document.querySelectorAll('${COPY_SELECTOR}');
+				buttons[buttons.length - 1]?.click();
+			})()`,
+		]);
+		await new Promise((r) => setTimeout(r, 2000));
+		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+		env.clipboardEmpty = !answer;
+	}
+
+	if (!answer) throw new Error("Clipboard interceptor returned empty text");
+
+	// Parse sources from both inline and reference-style markdown links
+	const sourcesInline = parseSourcesFromMarkdown(answer);
+	const sourcesRef = parseSourcesFromMarkdownRefStyle(answer);
+	const sourceMap = new Map();
+	for (const s of [...sourcesRef, ...sourcesInline]) {
+		if (!sourceMap.has(s.url)) sourceMap.set(s.url, s);
+	}
+	const sources = Array.from(sourceMap.values()).slice(0, 10);
+
+	return { answer: answer.trim(), sources };
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+const USAGE = 'Usage: node extractors/chatgpt.mjs "<query>" [--tab <prefix>]\n';
+
+async function main() {
+	const args = await prepareArgs(process.argv.slice(2));
+	validateQuery(args, USAGE);
+
+	const { query, tabPrefix, short } = parseArgs(args);
+	const startTime = Date.now();
+	const mode =
+		process.env.GREEDY_SEARCH_VISIBLE === "1" ? "visible" : "headless";
+
+	const env = {
+		engine: "chatgpt",
+		mode,
+		clipboardEmpty: null,
+		fallbackUsed: null,
+		blockedBy: null,
+		verificationResult: null,
+		inputReady: null,
+	};
+
+	try {
+		if (!tabPrefix) await cdp(["list"]);
+		const tab = await getOrOpenTab(tabPrefix);
+
+		const currentUrl = await cdp(["eval", tab, "document.location.href"]).catch(
+			() => "",
+		);
+		let onChatGPT = false;
+		try {
+			onChatGPT = new URL(currentUrl).hostname.toLowerCase() === "chatgpt.com";
+		} catch {}
+
+		if (!onChatGPT) {
+			await cdp(["nav", tab, "https://chatgpt.com"], 20000);
+			await new Promise((r) => setTimeout(r, 600));
+		}
+		await dismissConsent(tab, cdp);
+		await handleVerification(tab, cdp, 10000);
+
+		const inputReady = await waitForSelector(tab, PROSE_SELECTOR, 8000, 400);
+		env.inputReady = inputReady;
+		if (!inputReady) {
+			const bodyText = await cdp([
+				"eval",
+				tab,
+				`document.body?.innerText || ''`,
+			]).catch(() => "");
+			if (
+				/sign in|log in|sign up|\u03a3\u03cd\u03bd\u03b4\u03b5\u03c3\u03b7|login/i.test(
+					bodyText,
+				)
+			) {
+				throw new Error(
+					"ChatGPT requires sign-in — please sign in in the visible browser window",
+				);
+			}
+			throw new Error(
+				"ChatGPT input not found — page may be blocked or in unexpected state",
+			);
+		}
+
+		await injectClipboardInterceptor(tab, GLOBAL_VAR);
+		await typeAndSubmit(tab, query);
+
+		// SINGLE eval stream wait — no CDP polling contention
+		const copyBtnCount = await waitForResponse(tab, 60000);
+		if (copyBtnCount < 2) {
+			console.error(
+				"[chatgpt] Warning: assistant response may not have completed",
+			);
+		}
+
+		const { answer, sources } = await extractAnswer(tab, env);
+		if (!answer)
+			throw new Error("No answer extracted — ChatGPT may not have responded");
+
+		const finalUrl = await cdp(["eval", tab, "document.location.href"]).catch(
+			() => "https://chatgpt.com",
+		);
+		env.durationMs = Date.now() - startTime;
+		outputJson({
+			query,
+			url: finalUrl,
+			answer: formatAnswer(answer, short),
+			sources,
+			_envelope: buildEnvelope(env),
+		});
+	} catch (e) {
+		env.durationMs = Date.now() - startTime;
+		handleError(e, buildEnvelope(env));
+	}
+}
+
+main();

@@ -5,7 +5,7 @@
 Multi-engine AI web search for Pi via browser automation.
 
 - No API keys
-- Real browser results (Perplexity, Google AI — Bing Copilot available for signed-in users)
+- Real browser results (Perplexity, Google AI, ChatGPT — configurable via ~/.pi/greedyconfig)
 - Research mode as the centerpiece: iterative planning, source fetching, citation audit, and structured bundles
 - Optional Gemini synthesis with source grounding
 - Chrome runs headless by default — no window, purely background
@@ -53,7 +53,7 @@ greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 ## Parameters (`greedy_search`)
 
 - `query` (required)
-- `engine`: `all` (default), `perplexity`, `google`, `gemini` — `bing` still works for signed-in users
+- `engine`: `all` (default), `perplexity`, `google`, `chatgpt`, `gemini` — `bing` still works for signed-in users
 - `depth`: `standard` (default), `fast`, `deep`, `research`
 - `breadth`: research mode query breadth, 1-5 (default 3)
 - `iterations`: research mode rounds, 1-3 (default 2)

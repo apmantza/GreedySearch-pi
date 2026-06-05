@@ -1,5 +1,8 @@
 // src/search/constants.mjs — Shared constants for GreedySearch search pipeline
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 export const GREEDY_PORT = 9222;
@@ -8,16 +11,62 @@ export const ACTIVE_PORT_FILE = `${GREEDY_PROFILE_DIR}/DevToolsActivePort`;
 export const PAGES_CACHE = `${tmpdir().replaceAll("\\", "/")}/cdp-pages.json`;
 export const CHROME_MODE_FILE = `${tmpdir().replaceAll("\\", "/")}/greedysearch-chrome-mode`;
 
-// ALL_ENGINES drives the "all" fan-out. Add engines here to include them in multi-engine searches.
-// Engines in ENGINES but not in ALL_ENGINES are available for explicit use only.
-// Bing Copilot removed from default fan-out (2026-06-05) — now requires Microsoft sign-in on fresh sessions.
-export const ALL_ENGINES = ["perplexity", "google"];
+// ── User config: ~/.pi/greedyconfig ────────────────────────────────────────
+// Users can override which engines participate in the "all" fan-out.
+// Default: perplexity, google, chatgpt
+
+const CONFIG_DIR = join(homedir(), ".pi");
+const CONFIG_FILE = join(CONFIG_DIR, "greedyconfig");
+
+const DEFAULT_ENGINES = ["perplexity", "google", "chatgpt"];
+
+function loadUserEngines() {
+	try {
+		if (existsSync(CONFIG_FILE)) {
+			const raw = readFileSync(CONFIG_FILE, "utf8");
+			const config = JSON.parse(raw);
+			if (
+				Array.isArray(config.engines) &&
+				config.engines.length > 0 &&
+				config.engines.every((e) => typeof e === "string")
+			) {
+				// Validate each engine exists in ENGINES
+				const valid = config.engines.filter((e) => ENGINES[e]);
+				if (valid.length > 0) return valid;
+			}
+		}
+	} catch {
+		// Ignore parse/read errors — fall through to default
+	}
+	return DEFAULT_ENGINES;
+}
+
+function ensureDefaultConfig() {
+	try {
+		if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
+		if (!existsSync(CONFIG_FILE)) {
+			writeFileSync(
+				CONFIG_FILE,
+				JSON.stringify({ engines: DEFAULT_ENGINES }, null, 2) + "\n",
+				"utf8",
+			);
+		}
+	} catch {
+		// Best-effort — don't crash if we can't write the config file
+	}
+}
+
+ensureDefaultConfig();
+
+// ALL_ENGINES drives the "all" fan-out. Edit ~/.pi/greedyconfig to customize.
+export const ALL_ENGINES = loadUserEngines();
 
 export const ENGINE_DOMAINS = {
 	perplexity: "perplexity.ai",
 	bing: "copilot.microsoft.com",
 	google: "google.com",
 	gemini: "gemini.google.com",
+	chatgpt: "chatgpt.com",
 };
 
 export const ENGINES = {
@@ -29,6 +78,8 @@ export const ENGINES = {
 	g: "google-ai.mjs",
 	gemini: "gemini.mjs",
 	gem: "gemini.mjs",
+	chatgpt: "chatgpt.mjs",
+	gpt: "chatgpt.mjs",
 };
 
 export const SOURCE_FETCH_CONCURRENCY = Math.max(

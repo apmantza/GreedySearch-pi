@@ -387,6 +387,43 @@ export function parseSourcesFromMarkdown(text) {
 	return results;
 }
 
+/**
+ * Parse reference-style markdown links: [text][num] with [num]: url "title" at bottom.
+ * ChatGPT uses this format for its inline citations.
+ * @param {string} text - Markdown text
+ * @returns {Array<{title: string, url: string}>} Extracted sources
+ */
+export function parseSourcesFromMarkdownRefStyle(text) {
+	if (!text) return [];
+	const results = [];
+
+	// Find all reference definitions: [num]: url "title"
+	const refMap = new Map();
+	const refRegex = /^\[(\d+)\]:\s*(https?:\/\/[^\s"]+)(?:\s+"([^"]*)")?/gm;
+	let m;
+	while ((m = refRegex.exec(text)) !== null) {
+		const num = m[1];
+		const url = m[2];
+		const title = m[3] || "";
+		refMap.set(num, { url, title });
+	}
+
+	// Find inline references: [text][num] or [num]
+	const inlineRegex = /\[([^\]]*)\]\[(\d+)\]/g;
+	while ((m = inlineRegex.exec(text)) !== null) {
+		const num = m[2];
+		const ref = refMap.get(num);
+		if (ref) {
+			const title = m[1].trim() || ref.title || "";
+			if (!results.some((r) => r.url === ref.url)) {
+				results.push({ title, url: ref.url });
+			}
+		}
+	}
+
+	return results;
+}
+
 // ============================================================================
 // Timing constants
 // ============================================================================
