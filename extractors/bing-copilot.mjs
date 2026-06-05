@@ -41,6 +41,24 @@ const GLOBAL_VAR = "__bingClipboard";
 // Bing Copilot-specific helpers
 // ============================================================================
 
+async function detectSignInWall(tab) {
+	// Language-agnostic: if the chat input is absent but the page hosts
+	// known OAuth provider endpoints, we're on the Copilot login wall.
+	const code = `(() => {
+		if (document.querySelector('#userInput')) return false;
+		const links = Array.from(document.querySelectorAll('a[href], button'));
+		const hasOAuth = links.some(el => {
+			const h = (el.href || el.getAttribute('formaction') || '').toLowerCase();
+			return h.includes('login.microsoftonline.com')
+				|| h.includes('appleid.apple.com')
+				|| h.includes('accounts.google.com');
+		});
+		return hasOAuth;
+	})()`;
+	const result = await cdp(["eval", tab, code]).catch(() => "false");
+	return result === "true";
+}
+
 async function extractAnswer(tab, env, query = "") {
 	// In headless mode: snap the accessibility tree before spending ~18s on
 	// clipboard polls. Copilot loads its input fine in headless but renders
@@ -419,12 +437,27 @@ async function main() {
 			}
 		}
 
+		// Detect sign-in wall before burning time waiting for an input that
+		// will never appear. Copilot now gates the chat behind Microsoft/Apple/Google
+		// login on fresh sessions.
+		if (await detectSignInWall(tab)) {
+			throw new Error(
+				"Copilot requires sign-in — please sign in with Microsoft, Apple, or Google in the visible browser window. Once signed in, cookies persist for future runs.",
+			);
+		}
+
 		// Wait for React app to mount input (up to 15s, longer after verification)
 		const inputReady = await waitForSelector(tab, S.input, 15000, 500);
 		env.inputReady = inputReady;
 		await new Promise((r) => setTimeout(r, jitter(300)));
 
 		if (!inputReady) {
+			// If input still missing, double-check we didn't land on the login wall
+			if (await detectSignInWall(tab)) {
+				throw new Error(
+					"Copilot requires sign-in — please sign in with Microsoft, Apple, or Google in the visible browser window. Once signed in, cookies persist for future runs.",
+				);
+			}
 			throw new Error(
 				"Copilot input not found — verification may have failed or page is in unexpected state",
 			);

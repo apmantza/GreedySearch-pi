@@ -5,10 +5,10 @@
 export const HEADLESS_RECOVERY_ENGINES = ["perplexity", "bing"];
 
 const HEADLESS_BLOCKED_PATTERN =
-	/timed out|timeout|verification|captcha|cloudflare|turnstile|input not found|ask-input|clipboard|copy button hidden/i;
+	/timed out|timeout|verification|captcha|cloudflare|turnstile|input not found|ask-input|clipboard|copy button hidden|sign.in|login required/i;
 
 const MANUAL_VERIFICATION_PATTERN =
-	/needs-human|verification required|please solve|captcha|cloudflare|turnstile|could not be completed automatically|manual intervention/i;
+	/needs-human|verification required|please solve|captcha|cloudflare|turnstile|could not be completed automatically|manual intervention|sign.in|login required/i;
 
 export function isHeadlessBlockedError(error) {
 	return HEADLESS_BLOCKED_PATTERN.test(String(error || ""));

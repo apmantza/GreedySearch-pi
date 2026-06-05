@@ -10,6 +10,10 @@
 
 ### Fixed
 
+- **Bing Copilot login wall detection** (`extractors/bing-copilot.mjs`, `src/search/recovery.mjs`) — Copilot now gates the chat behind Microsoft/Apple/Google sign-in on fresh sessions. The extractor previously timed out waiting for `#userInput` and returned a confusing "input not found" error. Added `detectSignInWall()`: language-agnostic detection that checks whether the chat input is missing **and** the page contains links to known OAuth endpoints (`login.microsoftonline.com`, `appleid.apple.com`, `accounts.google.com`). Called before the 15s input wait and again on timeout fallback, so the error now reads "Copilot requires sign-in — please sign in with Microsoft, Apple, or Google in the visible browser window. Once signed in, cookies persist for future runs." Recovery patterns now include `sign.in|login required` so the runner surfaces `_needsHumanVerification` and keeps visible Chrome open for the user.
+
+- **Gemini Material icon names changed** (`extractors/selectors.mjs`) — Google updated the icon data attributes in Gemini's UI: `content_copy` → `copy` and `send` → `arrow_upward`. The `.send-button` class was also removed. Updated selectors to match the new attributes so copy-button detection and message submission work again in both headless and visible modes.
+
 - **Research Gemini prompts no longer hit Windows `ENAMETOOLONG`** (`bin/cdp.mjs`, `extractors/common.mjs`, `extractors/gemini.mjs`) — Long research planning/learning prompts are now passed from the Gemini extractor to `cdp.mjs type` through stdin instead of command-line arguments.
 
 - **Research starts Chrome in the intended mode before opening tabs** (`bin/search.mjs`) — `search.mjs` now establishes the headless/visible environment before `ensureChrome()`, preventing stale visible recovery browsers from making Gemini planning/synthesis appear visible on subsequent default-headless research runs.

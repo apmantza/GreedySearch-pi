@@ -43,8 +43,9 @@ export const SELECTORS = {
 	gemini: {
 		input: "rich-textarea .ql-editor",
 		// Language-agnostic: use Material icon data attributes (work across locales)
-		copyButton: 'button:has(mat-icon[data-mat-icon-name="content_copy"])',
-		sendButton: 'button:has(mat-icon[data-mat-icon-name="send"]), .send-button',
+		copyButton: 'button:has(mat-icon[data-mat-icon-name="copy"])',
+		sendButton:
+			'button:has(mat-icon[data-mat-icon-name="arrow_upward"]), [data-test-id="send-button"], .send-button',
 		sourcesSidebarButton: "button.legacy-sources-sidebar-button",
 		sourcesExclude: ["gemini.google", "gstatic", "google.com/search"],
 		citationButtonPattern: 'button[aria-label*="citation from"]',
