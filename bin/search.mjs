@@ -283,7 +283,6 @@ async function main() {
 		// engine homepage so extractors can skip the initial navigation.
 		const ENGINE_START_URLS = {
 			perplexity: "https://www.perplexity.ai/",
-			bing: "https://copilot.microsoft.com/",
 			google: "https://www.google.com/",
 		};
 		const engineTabs = await Promise.all(
@@ -293,11 +292,9 @@ async function main() {
 		await cdp(["list"]);
 
 		// Time-bounded per-engine extraction so slow engines don't stall the batch.
-		// Bing can take a little longer than Google/Perplexity under CDP contention;
-		// keep fast mode bounded while avoiding most false recovery trips.
 		const engineTimeoutFor = (engineName) => {
 			if (depth !== "fast") return 55000;
-			return engineName === "bing" ? 40000 : 30000;
+			return 30000;
 		};
 
 		try {

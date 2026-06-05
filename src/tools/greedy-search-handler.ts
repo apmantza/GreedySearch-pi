@@ -52,7 +52,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 		name: "greedy_search",
 		label: "Greedy Search",
 		description:
-			"WEB SEARCH ONLY — searches live web via Perplexity, Bing Copilot, and Google AI in parallel. " +
+			"WEB SEARCH ONLY — searches live web via Perplexity and Google AI in parallel. " +
 			"Research mode is the centerpiece: it plans follow-up actions, fetches sources, audits citations, " +
 			"and writes a structured research bundle on disk. " +
 			"Use for: library docs, recent framework changes, error messages, best practices, current events. " +
@@ -62,7 +62,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			query: Type.String({ description: "The search query" }),
 			engine: Type.String({
 				description:
-					'Engine to use: "all" (default), "perplexity", "bing", "google", "gemini", "gem". "all" fans out to Perplexity, Bing, and Google in parallel.',
+					'Engine to use: "all" (default), "perplexity", "google", "gemini", "gem". "all" fans out to Perplexity and Google in parallel. Bing Copilot is still available as "bing" for signed-in users.',
 				default: "all",
 			}),
 			depth: Type.String({

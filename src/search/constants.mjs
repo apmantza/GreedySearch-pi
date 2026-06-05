@@ -10,7 +10,8 @@ export const CHROME_MODE_FILE = `${tmpdir().replaceAll("\\", "/")}/greedysearch-
 
 // ALL_ENGINES drives the "all" fan-out. Add engines here to include them in multi-engine searches.
 // Engines in ENGINES but not in ALL_ENGINES are available for explicit use only.
-export const ALL_ENGINES = ["perplexity", "bing", "google"];
+// Bing Copilot removed from default fan-out (2026-06-05) — now requires Microsoft sign-in on fresh sessions.
+export const ALL_ENGINES = ["perplexity", "google"];
 
 export const ENGINE_DOMAINS = {
 	perplexity: "perplexity.ai",

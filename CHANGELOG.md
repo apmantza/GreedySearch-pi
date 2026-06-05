@@ -14,6 +14,8 @@
 
 - **Gemini Material icon names changed** (`extractors/selectors.mjs`) — Google updated the icon data attributes in Gemini's UI: `content_copy` → `copy` and `send` → `arrow_upward`. The `.send-button` class was also removed. Updated selectors to match the new attributes so copy-button detection and message submission work again in both headless and visible modes.
 
+- **Bing Copilot deprecated from default `all` fan-out** (`src/search/constants.mjs`, `src/tools/shared.ts`, `bin/search.mjs`, `src/tools/greedy-search-handler.ts`) — Copilot now requires Microsoft/Apple/Google sign-in on fresh sessions, causing frequent failures in multi-engine searches. Removed `"bing"` from `ALL_ENGINES`. The `engine: "all"` path now fans out to Perplexity and Google only. Bing Copilot remains available as an explicit single-engine option (`engine: "bing"`) for users who have signed in. Updated tool description, README, and skill docs to reflect the change.
+
 - **Research Gemini prompts no longer hit Windows `ENAMETOOLONG`** (`bin/cdp.mjs`, `extractors/common.mjs`, `extractors/gemini.mjs`) — Long research planning/learning prompts are now passed from the Gemini extractor to `cdp.mjs type` through stdin instead of command-line arguments.
 
 - **Research starts Chrome in the intended mode before opening tabs** (`bin/search.mjs`) — `search.mjs` now establishes the headless/visible environment before `ensureChrome()`, preventing stale visible recovery browsers from making Gemini planning/synthesis appear visible on subsequent default-headless research runs.

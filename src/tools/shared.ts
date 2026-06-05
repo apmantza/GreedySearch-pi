@@ -10,7 +10,7 @@ import type { ProgressUpdate, ToolResult } from "../types.js";
 export type { ProgressUpdate, ToolResult } from "../types.js";
 
 // Canonical source is src/search/constants.mjs — keep in sync
-const ALL_ENGINES = ["perplexity", "bing", "google"] as const;
+const ALL_ENGINES = ["perplexity", "google"] as const;
 
 export { ALL_ENGINES };
 
@@ -101,9 +101,9 @@ export function runSearch(
 		proc.stderr.on("data", (d: Buffer) => {
 			err += d;
 			for (const line of d.toString().split("\n")) {
-				// Engine progress: perplexity/bing/google
+				// Engine progress: perplexity/google
 				const engineMatch = line.match(
-					/^PROGRESS:(perplexity|bing|google):(done|error|needs-human)$/,
+					/^PROGRESS:(perplexity|google):(done|error|needs-human)$/,
 				);
 				if (engineMatch && onProgress) {
 					onProgress(

@@ -1,9 +1,9 @@
 ---
 name: greedy-search
-description: Web search via Perplexity, Bing, Google AI & Gemini. Current docs, recent changes, dependency choices. NOT codebase search.
+description: Web search via Perplexity, Google AI & Gemini. Bing Copilot available for signed-in users. Current docs, recent changes, dependency choices. NOT codebase search.
 ---
 
-`greedy_search({ query, engine: "all"|"perplexity"|"bing"|"google"|"gemini", depth: "fast"|"standard"|"deep"|"research", breadth: 1-5, iterations: 1-3, maxSources: 3-12, researchOutDir?: string, writeResearchBundle?: bool, visible: bool })`
+`greedy_search({ query, engine: "all"|"perplexity"|"google"|"gemini"|"bing", depth: "fast"|"standard"|"deep"|"research", breadth: 1-5, iterations: 1-3, maxSources: 3-12, researchOutDir?: string, writeResearchBundle?: bool, visible: bool })`
 
 **Depth:** `fast`(15-30s, no synthesis) · `standard`(30-90s, all+synthesis+sources) · `deep`(60-180s, stronger grounding) · `research`(centerpiece; iterative planning + direct URL fetches + follow-ups + deterministic floor checks + citation audit + structured bundle)
 
