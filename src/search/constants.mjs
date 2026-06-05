@@ -32,9 +32,22 @@ function loadUserEngines() {
 				config.engines.length > 0 &&
 				config.engines.every((e) => typeof e === "string")
 			) {
-				// Validate each engine exists in ENGINES
+				// Validate each engine exists in ENGINES. Unknown names are
+				// silently dropped — but at least once we tell the user about
+				// it so a typo in ~/.pi/greedyconfig doesn't quietly shrink
+				// the all-search fan-out.
 				const valid = config.engines.filter((e) => ENGINES[e]);
+				const invalid = config.engines.filter((e) => !ENGINES[e]);
+				if (invalid.length > 0) {
+					process.stderr.write(
+						`[greedysearch] Warning: ignoring unknown engine(s) in ${CONFIG_FILE}: ${invalid.join(", ")}\n` +
+							`[greedysearch] Available engines: ${Object.keys(ENGINES).join(", ")}\n`,
+					);
+				}
 				if (valid.length > 0) return valid;
+				process.stderr.write(
+					`[greedysearch] Warning: no valid engines in ${CONFIG_FILE}, falling back to defaults: ${DEFAULT_ENGINES.join(", ")}\n`,
+				);
 			}
 		}
 	} catch {
@@ -74,6 +87,11 @@ function loadUserSynthesizer() {
 			if (typeof config.synthesizer === "string") {
 				const normalized = config.synthesizer.toLowerCase();
 				if (SUPPORTED_SYNTHESIZERS.includes(normalized)) return normalized;
+				process.stderr.write(
+					`[greedysearch] Warning: unknown synthesizer "${config.synthesizer}" in ${CONFIG_FILE}\n` +
+						`[greedysearch] Available synthesizers: ${SUPPORTED_SYNTHESIZERS.join(", ")}\n` +
+						`[greedysearch] Falling back to default: ${DEFAULT_SYNTHESIZER}\n`,
+				);
 			}
 		}
 	} catch {
