@@ -1,3 +1,10 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DISABLED — temporarily renamed to .disabled so GitHub Actions ignores it.
+# The sync-to-pi-webaio workflow started failing on every push with
+# "Process completed with exit code 128" (git auth/sync failure).
+# To re-enable: rename back to sync-to-webaio.yml.
+# ─────────────────────────────────────────────────────────────────────────────
+
 name: Sync shared files to pi-webaio
 
 on:
