@@ -75,8 +75,20 @@ export async function getOrOpenTab(tabPrefix) {
 	const { targetId } = JSON.parse(raw);
 	await cdp(["list"]); // refresh cache
 	const tid = targetId.slice(0, 8);
-	// Inject stealth patches for anti-detection coverage (both headless + visible)
-	injectHeadlessStealth(tid).catch(() => {});
+	// Inject stealth patches for anti-detection coverage (both headless + visible).
+	// MUST be awaited: the daemon processes commands concurrently, so a
+	// fire-and-forget registration races the next Page.navigate and the
+	// script may not be in place when the new document is created.
+	// Sites like consensus.app use this race to detect automation — the
+	// script's Navigator/webdriver overrides are absent on first paint,
+	// fingerprinting fires, and the user is bounced to a sign-up wall.
+	try {
+		await injectHeadlessStealth(tid);
+	} catch (e) {
+		process.stderr.write(
+			`[getOrOpenTab] stealth injection failed: ${e.message}\n`,
+		);
+	}
 	return tid;
 }
 

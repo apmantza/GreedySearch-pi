@@ -659,6 +659,26 @@ async function evalRawStr(cdp, sid, method, paramsJson) {
 	return JSON.stringify(result, null, 2);
 }
 
+/**
+ * Call a browser-level CDP method (no sessionId). Used for commands like
+ * Browser.setDownloadBehavior that must be sent to the browser target, not
+ * a page session. The daemon reuses the same WebSocket connection; we just
+ * omit the sessionId field.
+ */
+async function browserRawStr(cdp, method, paramsJson) {
+	if (!method) throw new Error("Browser CDP method required");
+	let params = {};
+	if (paramsJson) {
+		try {
+			params = JSON.parse(paramsJson);
+		} catch {
+			throw new Error(`Invalid JSON params: ${paramsJson}`);
+		}
+	}
+	const result = await cdp.send(method, params);
+	return JSON.stringify(result, null, 2);
+}
+
 // ---------------------------------------------------------------------------
 // Per-tab daemon
 // ---------------------------------------------------------------------------
@@ -771,6 +791,12 @@ async function runDaemon(targetId) {
 					break;
 				case "evalraw":
 					result = await evalRawStr(cdp, sessionId, args[0], args[1]);
+					break;
+				case "browse":
+				case "browserraw":
+					// Browser-level CDP method (no sessionId). Used for
+					// Browser.setDownloadBehavior, Browser.grantPermissions, etc.
+					result = await browserRawStr(cdp, args[0], args[1]);
 					break;
 				case "stop":
 					return { ok: true, result: "", stopAfter: true };
@@ -968,6 +994,7 @@ Usage: cdp <command> [args]
   type    <target> <text|--stdin>   Type text at current focus
   loadall <target> <selector> [ms]  Repeatedly click a "load more" button
   evalraw <target> <method> [json]  Send a raw CDP command; returns JSON result
+  browse  <target> <method> [json]  Send a browser-level CDP command (no session)
   stop  [target]                    Stop daemon(s)
 `;
 
@@ -987,6 +1014,8 @@ const NEEDS_TARGET = new Set([
 	"type",
 	"loadall",
 	"evalraw",
+	"browse",
+	"browserraw",
 ]);
 
 async function main() {
@@ -1092,6 +1121,12 @@ async function main() {
 	} else if (cmd === "evalraw") {
 		if (!cmdArgs[0]) {
 			console.error("Error: CDP method required");
+			process.exit(1);
+		}
+		if (cmdArgs.length > 2) cmdArgs[1] = cmdArgs.slice(1).join(" ");
+	} else if (cmd === "browse" || cmd === "browserraw") {
+		if (!cmdArgs[0]) {
+			console.error("Error: browser CDP method required");
 			process.exit(1);
 		}
 		if (cmdArgs.length > 2) cmdArgs[1] = cmdArgs.slice(1).join(" ");

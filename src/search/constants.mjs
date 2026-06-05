@@ -88,6 +88,7 @@ export const ENGINE_DOMAINS = {
 	google: "google.com",
 	gemini: "gemini.google.com",
 	chatgpt: "chatgpt.com",
+	consensus: "consensus.app",
 };
 
 export const ENGINES = {
@@ -101,6 +102,8 @@ export const ENGINES = {
 	gem: "gemini.mjs",
 	chatgpt: "chatgpt.mjs",
 	gpt: "chatgpt.mjs",
+	consensus: "consensus.mjs",
+	cns: "consensus.mjs",
 };
 
 // ALL_ENGINES drives the "all" fan-out. Edit ~/.pi/greedyconfig to customize.
