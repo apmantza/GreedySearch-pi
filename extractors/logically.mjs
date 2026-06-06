@@ -189,12 +189,30 @@ async function extractFullCitationSources(tab) {
 			}
 		}
 
+		function citationCardCount(root) {
+			return Array.from(root.querySelectorAll('div')).filter((el) => {
+				const text = (el.innerText || '').trim();
+				return /^(Academic|Web)\n\n/.test(text) && text.includes('\nView');
+			}).length;
+		}
+
+		function findFullCitationsPopover() {
+			return Array.from(document.querySelectorAll('.MuiPopover-root, .MuiModal-root, .MuiDrawer-root, [role="dialog"]'))
+				.find((el) => {
+					const text = el.innerText || '';
+					// Visible mode includes the tab header. Headless sometimes omits the
+					// header and renders only a scrollable card list in a popover with no id.
+					if (/Academic \(\d+\)|Web \(\d+\)/.test(text)) return true;
+					if (el.id?.startsWith('citation-')) return false;
+					return citationCardCount(el) > 0;
+				});
+		}
+
 		function waitForFullCitationsPopover() {
 			return new Promise((resolve) => {
 				const deadline = Date.now() + 5000;
 				function poll() {
-					const pop = Array.from(document.querySelectorAll('.MuiPopover-root'))
-						.find((el) => /Academic \(\d+\)|Web \(\d+\)/.test(el.innerText || ''));
+					const pop = findFullCitationsPopover();
 					if (pop) { resolve(pop); return; }
 					if (Date.now() < deadline) setTimeout(poll, 100);
 					else resolve(null);
@@ -264,9 +282,15 @@ async function extractFullCitationSources(tab) {
 		const btn = Array.from(document.querySelectorAll('button'))
 			.find((b) => /Citations\s*\n*\s*\(\d+\)/i.test(b.innerText || ''));
 		if (!btn) return JSON.stringify({ sources: [], summary: { expectedTotal: 0, academic: 0, web: 0, reason: 'button-not-found' } });
+		const buttonTotal = Number((btn.innerText || '').match(/\((\d+)\)/)?.[1] || '0');
+		// Inline citation popovers are independent MUI modals and can remain mounted
+		// after we click answer citations. Remove those stale id-bearing roots before
+		// opening the full Citations popover so headless mode does not keep focus in
+		// old inline popovers.
+		document.querySelectorAll('.MuiPopover-root[id^="citation-"]').forEach((el) => el.remove());
 		clickElement(btn);
 		const pop = await waitForFullCitationsPopover();
-		if (!pop) return JSON.stringify({ sources: [], summary: { expectedTotal: 0, academic: 0, web: 0, reason: 'popover-not-found' } });
+		if (!pop) return JSON.stringify({ sources: [], summary: { expectedTotal: buttonTotal, academic: 0, web: 0, reason: 'popover-not-found' } });
 
 		const header = pop.innerText || '';
 		const academicExpected = Number(header.match(/Academic \((\d+)\)/)?.[1] || '0');
@@ -287,7 +311,7 @@ async function extractFullCitationSources(tab) {
 		return JSON.stringify({
 			sources: [...academicSources, ...webSources],
 			summary: {
-				expectedTotal: academicExpected + webExpected,
+				expectedTotal: academicExpected + webExpected || buttonTotal,
 				academicExpected,
 				webExpected,
 				academicCaptured: academicSources.length,

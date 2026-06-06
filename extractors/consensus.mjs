@@ -91,7 +91,10 @@ async function detectStaleClerkSession(tab) {
 }
 
 async function clearConsensusAuthStorage(tab) {
-	for (const origin of ["https://consensus.app", "https://clerk.consensus.app"]) {
+	for (const origin of [
+		"https://consensus.app",
+		"https://clerk.consensus.app",
+	]) {
 		await cdp([
 			"evalraw",
 			tab,
