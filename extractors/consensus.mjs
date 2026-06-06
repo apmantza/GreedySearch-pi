@@ -70,6 +70,65 @@ async function detectSignUpWall(tab) {
 	return result === "true";
 }
 
+async function detectStaleClerkSession(tab) {
+	const code = `(() => {
+		const url = document.location.href || '';
+		const title = document.title || '';
+		const text = document.body?.innerText || '';
+		const stale =
+			url.includes('clerk.consensus.app') ||
+			title.includes('clerk.consensus.app') ||
+			text.includes('session-token-expired') ||
+			text.includes('refresh_request_origin_azp_mismatch') ||
+			(text.includes('HTTP ERROR 405') && text.includes('This page isn'));
+		return JSON.stringify({ stale, url, title, text: text.slice(0, 500) });
+	})()`;
+	try {
+		return JSON.parse(await cdp(["eval", tab, code], 5000));
+	} catch {
+		return { stale: false, url: "", title: "", text: "" };
+	}
+}
+
+async function clearConsensusAuthStorage(tab) {
+	for (const origin of ["https://consensus.app", "https://clerk.consensus.app"]) {
+		await cdp([
+			"evalraw",
+			tab,
+			"Storage.clearDataForOrigin",
+			JSON.stringify({ origin, storageTypes: "all" }),
+		]).catch((e) => {
+			console.error(
+				`[consensus] Warning: failed to clear stale auth storage for ${origin}: ${e.message}`,
+			);
+		});
+	}
+}
+
+async function recoverStaleClerkSession(tab, env, startTime) {
+	const before = await detectStaleClerkSession(tab);
+	if (!before.stale) return false;
+
+	logStage(env, "auth-storage-reset", startTime);
+	console.error(
+		`[consensus] Detected stale Clerk/Consensus auth state (${before.title || before.url}) — clearing per-origin storage and retrying navigation`,
+	);
+	env.fallbackUsed = "clear-stale-consensus-auth";
+	await clearConsensusAuthStorage(tab);
+	await cdp(["nav", tab, "https://consensus.app/"], 20000);
+	await new Promise((r) => setTimeout(r, 900));
+
+	const after = await detectStaleClerkSession(tab);
+	if (after.stale) {
+		env.blockedBy = "signin";
+		env.verificationResult = "needs-human";
+		throw new Error(
+			"Consensus auth session is stale — visible Chrome is open. Please sign in again, then rerun the search.",
+		);
+	}
+	return true;
+}
+
 // ============================================================================
 // Typing helper
 // ============================================================================
@@ -443,6 +502,7 @@ async function main() {
 			await cdp(["nav", tab, "https://consensus.app/"], 20000);
 			await new Promise((r) => setTimeout(r, 600));
 		}
+		await recoverStaleClerkSession(tab, env, startTime);
 		await dismissConsent(tab, cdp);
 		// Skip handleVerification: consensus.app has no Cloudflare/Turnstile
 		// challenge, but the verify detector matches "human" inside suggested-
@@ -454,9 +514,27 @@ async function main() {
 		const inputReady = await waitForSelector(tab, SELECTORS.input, 15000, 400);
 		env.inputReady = inputReady;
 		if (!inputReady) {
-			throw new Error(
-				"Consensus input not found — page may not have loaded or is in unexpected state",
-			);
+			const recovered = await recoverStaleClerkSession(tab, env, startTime);
+			if (recovered) {
+				const retryInputReady = await waitForSelector(
+					tab,
+					SELECTORS.input,
+					15000,
+					400,
+				);
+				env.inputReady = retryInputReady;
+				if (retryInputReady) {
+					await dismissConsent(tab, cdp);
+				} else {
+					throw new Error(
+						"Consensus input not found after stale auth recovery — page may not have loaded or is in unexpected state",
+					);
+				}
+			} else {
+				throw new Error(
+					"Consensus input not found — page may not have loaded or is in unexpected state",
+				);
+			}
 		}
 		await new Promise((r) => setTimeout(r, jitter(TIMING.postClick)));
 
