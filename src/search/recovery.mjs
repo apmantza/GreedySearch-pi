@@ -2,7 +2,12 @@
 
 // Only these engines use automatic headless → visible recovery. Google is
 // intentionally excluded for now; see issue #9 discussion / maintainer choice.
-export const HEADLESS_RECOVERY_ENGINES = ["perplexity", "bing", "consensus"];
+export const HEADLESS_RECOVERY_ENGINES = [
+	"perplexity",
+	"bing",
+	"consensus",
+	"logically",
+];
 
 const HEADLESS_BLOCKED_PATTERN =
 	/timed out|timeout|verification|captcha|cloudflare|turnstile|input not found|ask-input|clipboard|copy button hidden|sign.in|login required/i;

@@ -22,9 +22,14 @@ export function runExtractor(
 	locale = null,
 ) {
 	// Gemini synthesis: 70s budget (45s stream + ~25s nav/settle overhead)
+	// Logically research answers can run academic + web searches before streaming.
 	// Other engines: 60s budget
 	if (timeoutMs === null) {
-		timeoutMs = script.includes("gemini") ? 70000 : 60000;
+		timeoutMs = script.includes("logically")
+			? 120000
+			: script.includes("gemini")
+				? 70000
+				: 60000;
 	}
 	const extraArgs = [
 		...(tabPrefix ? ["--tab", tabPrefix] : []),

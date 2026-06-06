@@ -296,6 +296,7 @@ async function main() {
 		const ENGINE_START_URLS = {
 			perplexity: "https://www.perplexity.ai/",
 			google: "https://www.google.com/",
+			logically: "https://logically.app/research-assistant/",
 		};
 		const engineTabs = await Promise.all(
 			ALL_ENGINES.map((e) => openNewTab(ENGINE_START_URLS[e])),
@@ -623,7 +624,11 @@ async function main() {
 			? "bing"
 			: script.includes("perplexity")
 				? "perplexity"
-				: null;
+				: script.includes("consensus")
+					? "consensus"
+					: script.includes("logically")
+						? "logically"
+						: null;
 		const canRetryVisible =
 			recoveryEngine &&
 			process.env.GREEDY_SEARCH_VISIBLE !== "1" &&
