@@ -26,6 +26,7 @@ import {
 	prepareArgs,
 	validateQuery,
 	waitForSelector,
+	waitForStreamComplete,
 } from "./common.mjs";
 import { dismissConsent, handleVerification } from "./consent.mjs";
 
@@ -64,127 +65,77 @@ async function typeAndSubmit(tab, query) {
 }
 
 /**
- * Wait for ChatGPT's response to finish streaming.
- * Uses a SINGLE Runtime.evaluate call with in-browser polling — zero CDP
- * traffic during the wait. The 30s budget is intentionally tight: when 4
- * engines run in parallel, Chrome clamps setTimeout in background tabs to
- * a 1Hz minimum, so a longer in-browser poll just burns the wrapper's
- * timeout. Callers should pair this with pollForResponseNodeSide() to
- * cover the tail of slow responses without holding the WebSocket.
- *
- * Signal: the *text length* of the latest assistant message, not the
- * copy-button count. The count is an indirect proxy that fluctuates as
- * ChatGPT's React tree re-renders. The text length is the actual answer
- * — when it stabilises for 3 consecutive polls (>50 chars), the response
- * is done. Returns the final text length.
+ * Inline selector for waitForStreamComplete: returns the assistant message
+ * that comes AFTER the last user message, or null if none exists. This
+ * skips chatgpt.com's static pre-rendered greeting card (which is
+ * `data-turn-start-message="true"` and lives on the homepage before any
+ * conversation) so short answers like "Hello! 👋" don't get confused with
+ * the 32-char placeholder.
  */
-async function waitForResponse(tab, timeoutMs = 30000) {
-	const code = String.raw`
-	new Promise((resolve, reject) => {
-		const _deadline = Date.now() + ${timeoutMs};
-		const _minLen = 50;
-		let _lastLen = 0;
-		let _stableCount = 0;
-
-		function _jitter(ms) {
-			return Math.max(50, ms + (Math.random() * ms * 0.4 - ms * 0.2));
+const CHATGPT_RESPONSE_SELECTOR = String.raw`(() => {
+	const all = document.querySelectorAll('[data-message-author-role]');
+	let lastUserIdx = -1;
+	for (let i = 0; i < all.length; i++) {
+		if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
+	}
+	if (lastUserIdx < 0) return null;
+	let bestEl = null;
+	let bestLen = 0;
+	for (let i = lastUserIdx + 1; i < all.length; i++) {
+		if (all[i].getAttribute('data-message-author-role') === 'assistant') {
+			const len = (all[i].innerText || '').length;
+			if (len > bestLen) { bestLen = len; bestEl = all[i]; }
 		}
+	}
+	return bestEl;
+})()`;
 
-		// Find the assistant message that comes AFTER the last user message.
-		// chatgpt.com has a static pre-rendered greeting card
-		// (data-turn-start-message="true") that lives on the homepage before
-		// any conversation happens — we must skip it or the length check
-		// fires on a 32-char placeholder instead of the real response.
-		function _responseAfterLastUser() {
-			const all = document.querySelectorAll('[data-message-author-role]');
-			let lastUserIdx = -1;
-			for (let i = 0; i < all.length; i++) {
-				if (all[i].getAttribute('data-message-author-role') === 'user') {
-					lastUserIdx = i;
-				}
-			}
-			if (lastUserIdx < 0) return 0;
-			let bestLen = 0;
-			for (let i = lastUserIdx + 1; i < all.length; i++) {
-				if (all[i].getAttribute('data-message-author-role') === 'assistant') {
-					bestLen = Math.max(bestLen, (all[i].innerText || '').length);
-				}
-			}
-			return bestLen;
-		}
-
-		function _poll() {
-			try {
-				const cur = _responseAfterLastUser();
-				if (cur >= _minLen && cur === _lastLen) {
-					_stableCount++;
-					if (_stableCount >= 3) { resolve(cur); return; }
-				} else {
-					_lastLen = cur;
-					_stableCount = 0;
-				}
-				if (Date.now() < _deadline) {
-					setTimeout(_poll, _jitter(800));
-				} else {
-					resolve(_lastLen);
-				}
-			} catch(e) { reject(e); }
-		}
-
-		_poll();
-	})
-	`;
-	const result = await cdp(["eval", tab, code], timeoutMs + 5000);
-	return parseInt(result, 10) || 0;
+/**
+ * Wait for ChatGPT's response to finish streaming. Delegates to the shared
+ * waitForStreamComplete in common.mjs with a custom selector that skips the
+ * static homepage greeting card. minLength: 1 means any non-empty response
+ * is considered "started" — short answers like "Hello! 👋" (8 chars) used
+ * to burn the full 65s budget under the old 50-char threshold.
+ */
+async function waitForResponse(tab, timeoutMs = 20000) {
+	return waitForStreamComplete(tab, {
+		timeout: timeoutMs,
+		interval: 600,
+		stableRounds: 3,
+		minLength: 1,
+		selector: CHATGPT_RESPONSE_SELECTOR,
+	});
 }
 
 /**
- * Node-side fallback for chatgpt stream completion.
- * Polls the assistant message text length via short, independent
- * Runtime.evaluate calls instead of holding the WebSocket open on a long
- * in-browser promise. Each poll frees the WebSocket between calls, so even
- * when Chrome is throttling the background tab, the daemon stays responsive.
- * Returns the final text length seen within maxMs.
+ * Node-side fallback for chatgpt stream completion. Used when the in-browser
+ * poll times out (typically because Chrome throttles background tabs to 1Hz
+ * when 3+ extractors run in parallel in `all` mode). Polls the same
+ * greeting-card-skipping selector via short independent Runtime.evaluate
+ * calls so the WebSocket is free between polls.
  */
-async function pollForResponseNodeSide(tab, maxMs = 35000) {
+async function pollForResponseNodeSide(tab, maxMs = 15000) {
 	const deadline = Date.now() + maxMs;
 	let lastLen = 0;
 	let stableRounds = 0;
 	while (Date.now() < deadline) {
-		// See waitForResponse for the rationale: skip the static greeting
-		// card by finding the assistant message that comes AFTER the last
-		// user message, not the absolute last assistant element.
 		const result = await cdp(
 			[
 				"eval",
 				tab,
-				String.raw`(() => {
-					const all = document.querySelectorAll('[data-message-author-role]');
-					let lastUserIdx = -1;
-					for (let i = 0; i < all.length; i++) {
-						if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
-					}
-					if (lastUserIdx < 0) return 0;
-					let bestLen = 0;
-					for (let i = lastUserIdx + 1; i < all.length; i++) {
-						if (all[i].getAttribute('data-message-author-role') === 'assistant') {
-							bestLen = Math.max(bestLen, (all[i].innerText || '').length);
-						}
-					}
-					return bestLen;
-				})()`,
+				`${CHATGPT_RESPONSE_SELECTOR}?.innerText?.length ?? 0`,
 			],
 			4000,
 		).catch(() => "0");
 		const len = parseInt(result, 10) || 0;
-		if (len >= 50 && len === lastLen) {
+		if (len >= 1 && len === lastLen) {
 			stableRounds++;
 			if (stableRounds >= 3) return len;
 		} else {
 			lastLen = len;
 			stableRounds = 0;
 		}
-		await new Promise((r) => setTimeout(r, 1500));
+		await new Promise((r) => setTimeout(r, 1200));
 	}
 	return lastLen;
 }
@@ -253,13 +204,37 @@ async function extractAnswerFromDom(tab) {
 }
 
 async function extractAnswer(tab, env) {
-	// Click the LAST copy button (assistant's response at the bottom)
+	// Click the copy button on the assistant's response (after the last
+	// user message). The old `buttons[buttons.length - 1]` picked the
+	// absolute last copy button on the page — which is the USER message's
+	// copy button when the assistant response is still empty (0 chars) and
+	// has no copy button of its own. That copied the user's query into
+	// the clipboard interceptor and returned it as the "answer".
 	await cdp([
 		"eval",
 		tab,
 		`(() => {
+			const all = document.querySelectorAll('[data-message-author-role]');
+			let lastUserIdx = -1;
+			for (let i = 0; i < all.length; i++) {
+				if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
+			}
+			if (lastUserIdx < 0) return 'no-user';
+			// Walk forward from the last user message; find the copy
+			// button on the LAST assistant message after it.
+			let assistantCopy = null;
+			for (let i = lastUserIdx + 1; i < all.length; i++) {
+				if (all[i].getAttribute('data-message-author-role') === 'assistant') {
+					const btn = all[i].querySelector('${COPY_SELECTOR}');
+					if (btn) assistantCopy = btn;
+				}
+			}
+			if (assistantCopy) { assistantCopy.click(); return 'clicked'; }
+			// Fallback: click the last copy button on the page (the
+			// old behaviour). Better than nothing.
 			const buttons = document.querySelectorAll('${COPY_SELECTOR}');
 			buttons[buttons.length - 1]?.click();
+			return 'fallback';
 		})()`,
 	]);
 	await new Promise((r) => setTimeout(r, 600));
@@ -274,8 +249,23 @@ async function extractAnswer(tab, env) {
 			"eval",
 			tab,
 			`(() => {
+				const all = document.querySelectorAll('[data-message-author-role]');
+				let lastUserIdx = -1;
+				for (let i = 0; i < all.length; i++) {
+					if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
+				}
+				if (lastUserIdx < 0) return 'no-user';
+				let assistantCopy = null;
+				for (let i = lastUserIdx + 1; i < all.length; i++) {
+					if (all[i].getAttribute('data-message-author-role') === 'assistant') {
+						const btn = all[i].querySelector('${COPY_SELECTOR}');
+						if (btn) assistantCopy = btn;
+					}
+				}
+				if (assistantCopy) { assistantCopy.click(); return 'clicked'; }
 				const buttons = document.querySelectorAll('${COPY_SELECTOR}');
 				buttons[buttons.length - 1]?.click();
+				return 'fallback';
 			})()`,
 		]);
 		await new Promise((r) => setTimeout(r, 2000));
@@ -385,17 +375,20 @@ async function main() {
 		await typeAndSubmit(tab, query);
 
 		logStage(env, "stream-wait", startTime);
-		// Short in-browser poll — keeps the WebSocket mostly free. If the
-		// response is still streaming past 30s (slow under tab throttling),
-		// fall back to node-side polls that release the WebSocket between
-		// each call. Together they stay within the engine's 70s outer budget.
-		let asstLen = await waitForResponse(tab, 30000);
-		if (asstLen < 50) {
+		// waitForStreamComplete handles the in-browser poll in a single
+		// Runtime.evaluate call. If the response is still streaming past
+		// 20s (slow under tab throttling in `all` mode), fall back to
+		// node-side polls that release the WebSocket between each call.
+		// Together they stay well within the engine's 80s outer budget.
+		let asstLen = 0;
+		try {
+			asstLen = await waitForResponse(tab, 20000);
+		} catch (e) {
 			logStage(env, "stream-poll-fallback", startTime);
-			asstLen = await pollForResponseNodeSide(tab, 35000);
+			asstLen = await pollForResponseNodeSide(tab, 15000);
 		}
 		env.assistantTextLen = asstLen;
-		if (asstLen < 50) {
+		if (asstLen < 1) {
 			console.error(
 				"[chatgpt] Warning: assistant response may not have completed",
 			);
