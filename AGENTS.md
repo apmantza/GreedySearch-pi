@@ -4,8 +4,8 @@ GreedySearch-pi is a Pi package/extension that registers the `greedy_search` too
 
 ## Design goals
 
-- **Headless-first with visible fallback** — Headless is the default for speed and resource efficiency. When Cloudflare/Turnstile blocks an engine in headless, automatic visible recovery establishes cookies in the shared Chrome profile, then switches back to headless. Subsequent searches benefit from the cached session. Recovery only applies to Bing and Perplexity (Google intentionally excluded).
-- **Speed optimizations** — All extractors use tight timeouts: 20s navigation, 10s verification retry (Turnstile never clears in headless, so longer retries are waste), 600ms post-nav settle. Engine budgets are 30s (fast) / 55s (standard) to account for CDP contention from parallel extractors. Solo times: Google 9s, Perplexity 13s, Gemini 14s, Bing 16s.
+- **Headless-first with visible fallback** — Headless is the default for speed and resource efficiency. When Cloudflare/Turnstile blocks an engine in headless, automatic visible recovery establishes cookies in the shared Chrome profile, then switches back to headless. Subsequent searches benefit from the cached session. Recovery applies to Bing, Perplexity, and ChatGPT (Google intentionally excluded).
+- **Speed optimizations** — All extractors use tight timeouts: 20s navigation, 10s verification retry (Turnstile never clears in headless, so longer retries are waste), 600ms post-nav settle. Engine budgets are 30s (fast) / 55s (standard) to account for CDP contention from parallel extractors. Solo times: Google 9s, ChatGPT 8s, Perplexity 13s, Gemini 14s, Bing 16s.
 - **Resilient synthesis** — When one engine fails (even with manual verification), synthesis continues with the engines that succeeded. Source-fetch workers catch individual errors — a single bad URL won't crash the batch.
 - **Iterative research mode** — `depth: "research"` / `--depth research` performs a deep-research loop: plan focused queries, run fast multi-engine searches, fetch/dedupe sources, extract compact learnings/gaps/follow-ups with Gemini, and synthesize a final cited report. It should remain no-API-key and reuse GreedySearch engines/fetchers; do not reintroduce Firecrawl/OpenAI dependencies from the reference implementation.
 - **Stealth where it matters** — `Page.addScriptToEvaluateOnNewDocument` patches are awaited for Bing tabs (Copilot's Cloudflare blocks headless without them), but fire-and-forget for Perplexity/Google (Perplexity's anti-bot detects the aggressive canvas/console patches). Tabs are created blank → stealth injected → extractor navigates, ensuring stealth is active before page load. Keep Bing-oriented patches Chrome-like: `navigator.webdriver` should be `undefined`, patched functions should stringify as native code, canvas noise should be stable per page (not random per call), and navigator plugins/mimeTypes/mediaDevices/userAgentData should stay internally consistent with the launch UA.
@@ -107,7 +107,9 @@ Important behavior:
 
 - Research child searches must use `--stdin`; never leak query text in process args.
 - Child-search stderr is intentionally filtered in `runFastAllSearch()` so page CSS/HTML cannot flood Pi output. Preserve `PROGRESS:*`, `[greedysearch]`, and extractor diagnostic lines only.
-- Social/login-wall sources are low-quality citations. `src/search/sources.mjs` penalizes `facebook.com`, `linkedin.com`, `x.com`/`twitter.com`, etc. unless the query explicitly targets that platform.
+- Social/login-wall sources are low-quality citations. `src/search/sources.mjs` applies a −20 `smartScore` penalty to `SOCIAL_HOSTS` entries (facebook, linkedin, x.com, etc.) AND a hard post-sort guardrail that pins all social sources below non-social ones. The composite score formula is `smartScore*3 + engineCount*5 + priority*2 + max(0, 7-rank)`. With the −20 penalty plus the hard guardrail, a social source cannot land as S1 even if it scores highly on every other axis.
+- Academic sources (arxiv.org, semanticscholar.org, doi.org) are first-class. `pickAcademicFetchTargets()` in `src/search/research.mjs` injects a `fetchUrl` action for the top academic source when `combinedSources` contains one and no round action is already a `fetchUrl`. This forces PDF/academic content to be fetched and synthesized.
+- The open-question ledger is capped at `MAX_OPEN_FOLLOWUPS = 5` per round. Overflow "Discovered gap/follow-up" questions are auto-resolved with evidence rather than carried forward, keeping the floor check (`computeResearchFloor.requiredQuestions`) meaningful.
 - If Gemini under-plans fewer queries than requested breadth, deterministic fallback angles fill the breadth (official docs/GitHub, benchmarks/limitations, alternatives/use-cases, anti-bot/rendering caveats). Keep this so `breadth` remains meaningful.
 - Per-round learning failures should be captured in `_research.rounds[].learningError` instead of aborting the whole run.
 
@@ -156,6 +158,33 @@ Important: Perplexity's anti-bot system **detects** the aggressive stealth patch
 ### Google
 
 Google AI Mode is not currently in automatic visible recovery. Respect this unless explicitly asked to change it.
+
+### ChatGPT
+
+ChatGPT participates in headless → visible recovery because the typed query can succeed in headless while the assistant response never streams in (Cloudflare does not block, but the response just does not arrive under tab throttling). The visible-recovery path establishes a working session and caches cookies.
+
+Two subtle bugs to know about when modifying the extractor:
+
+1. **Static homepage greeting card** — chatgpt.com has a pre-rendered `[data-message-author-role="assistant"]` greeting ("Hello! How can I help you today?") with `data-turn-start-message="true"` that lives on the page before any conversation happens. All stream-wait and DOM-extract code must find the assistant message that comes AFTER the last user message in DOM order, not the absolute last assistant element. The old 50-char `_minLen` threshold was a safety margin for this card; after the greeting-card skip is in place, `waitForStreamComplete(..., { minLength: 1 })` is safe and short answers like "Hello! 👋" (8 chars) no longer burn the full timeout.
+
+2. **Copy button on the wrong target** — `document.querySelectorAll('[data-testid="copy-turn-action-button"]')[buttons.length - 1]` picks the absolute last copy button on the page. When the assistant response is still empty (0 chars) it has no copy button of its own, so the last button is the USER message's copy button — clicking it copies the user's query into the clipboard interceptor and the extractor returns it as a "successful" answer. Find the copy button on the assistant message specifically, and if none exists, click nothing (the DOM fallback handles it).
+
+`extractors/chatgpt.mjs` uses:
+- `waitForStreamComplete(tab, { minLength: 1, timeout: 20000, ... })` from `common.mjs` — the same shared helper Perplexity and Gemini use.
+- 15s node-side fallback (`pollForResponseNodeSide`) for throttled `all`-mode tabs where the in-browser poll is clamped to 1Hz.
+- A DOM fallback that reads the assistant message's innerText (skipping the static greeting card by finding the message after the last user message).
+- `extractAnswer` throws `blockedBy: "no-response"` when the assistant message never renders content.
+
+### Gemini
+
+Gemini uses a Material Design icon-based copy button (`button:has(mat-icon[data-mat-icon-name="copy"])`). The page has many copy icons (copy link, copy code, etc.), so the absolute last copy button is not always the assistant's response copy button.
+
+`extractors/gemini.mjs` therefore:
+1. Waits for the `model-response` custom element to have content > 20 chars (not just the locale-specific "Gemini said" / "Το Gemini είπε" label).
+2. Clicks the copy button on the `model-response` element specifically.
+3. Falls back to the `model-response` innerText if the clipboard contains the user's query (echoed-query detection) or is empty.
+
+The same `[data-message-author-role]`-style "find the response after the last user message" pattern used by ChatGPT would not work on Gemini because Gemini does not use `data-message-author-role` attributes — it uses custom elements `<user-query-content>` and `<model-response>`.
 
 ## Tests and smoke checks
 
@@ -243,7 +272,7 @@ Instead, fire **one** `Runtime.evaluate` with `awaitPromise: true` that contains
 - `waitForStreamComplete(tab, { selector: "document.body" })` — monitors text length stability
 - Custom single-eval promise that polls copy-button count and resolves when stable
 
-This is the difference between ChatGPT timing out at 60s (Node polling) and finishing in 16s (single-eval).
+This is the difference between ChatGPT timing out at 60s (Node polling) and finishing in 8s (single-eval + shared `waitForStreamComplete`).
 
 ### 4. Language-agnostic selectors
 
@@ -282,7 +311,7 @@ All extractors share these timeouts (kept tight — solo runs complete in 9-16s)
 | Post-nav settle     | 600ms                                      | React hydration buffer                                         |
 | Verification retry  | 10s                                        | Turnstile never clears in headless; longer = waste             |
 | Input selector wait | 8-15s                                      | In-browser polling, no CDP traffic                             |
-| Stream completion   | 60s (Bing), 20s (Perplexity), 90s (Gemini) | Single `Runtime.evaluate` with in-browser poll loop            |
+| Stream completion   | 20s (Perplexity/ChatGPT in-browser) + 15s (ChatGPT node-side fallback), 60s (Bing), 90s (Gemini) | Single `Runtime.evaluate` with in-browser poll loop. ChatGPT uses the shared `waitForStreamComplete` with `minLength: 1` (greeting-card skip lets us drop the old 50-char threshold). |
 | Engine hard kill    | 30s fast / 55s standard                    | `runExtractor` spawn timeout; accounts for CDP contention      |
 
 CDP daemon internal `TIMEOUT`: **90s** (must exceed longest `Runtime.evaluate` call).
