@@ -16,7 +16,36 @@ import {
 	makeProgressTracker,
 	runSearch,
 	stripQuotes,
+	type ProgressUpdate,
+	type ToolResult,
 } from "./shared.js";
+
+type GreedySearchParams = {
+	query: string;
+	engine?: string;
+	synthesize?: boolean;
+	synthesizer?: string;
+	depth?: "fast" | "standard" | "deep" | "research" | string;
+	breadth?: number;
+	iterations?: number;
+	maxSources?: number;
+	researchOutDir?: string;
+	writeResearchBundle?: boolean;
+	fullAnswer?: boolean;
+	headless?: boolean;
+	visible?: boolean;
+	alwaysVisible?: boolean;
+};
+
+type ToolTheme = {
+	fg(style: string, text: string): string;
+	bold(text: string): string;
+};
+
+type RenderState = {
+	expanded: boolean;
+	isPartial?: boolean;
+};
 
 class Text {
 	constructor(
@@ -146,25 +175,15 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				}),
 			),
 		}),
-		execute: async (_toolCallId, params, signal, onUpdate) => {
-			const { query, fullAnswer: fullAnswerParam } = params as {
-				query: string;
-				engine: string;
-				synthesize?: boolean;
-				synthesizer?: string;
-				depth?: "fast" | "standard" | "deep" | "research";
-				breadth?: number;
-				iterations?: number;
-				maxSources?: number;
-				researchOutDir?: string;
-				writeResearchBundle?: boolean;
-				fullAnswer?: boolean;
-				headless?: boolean;
-				visible?: boolean;
-				alwaysVisible?: boolean;
-			};
-			const engine = stripQuotes((params as any).engine ?? "all") || "all";
-			const depthRaw = stripQuotes((params as any).depth ?? "") as
+		execute: async (
+			_toolCallId: string,
+			params: GreedySearchParams,
+			signal?: AbortSignal,
+			onUpdate?: (update: ProgressUpdate) => void,
+		) => {
+			const { query, fullAnswer: fullAnswerParam } = params;
+			const engine = stripQuotes(params.engine ?? "all") || "all";
+			const depthRaw = stripQuotes(params.depth ?? "") as
 				| "fast"
 				| "standard"
 				| "deep"
@@ -177,12 +196,12 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			const synthesize =
 				engine === "all" &&
 				!legacyFast &&
-				((params as any).synthesize === true || legacySynthesisDepth);
+				(params.synthesize === true || legacySynthesisDepth);
 			const effectiveEngine = researchMode ? "all" : engine;
 			const visible =
-				(params as any).visible === true ||
-				(params as any).alwaysVisible === true ||
-				(params as any).headless === false ||
+				params.visible === true ||
+				params.alwaysVisible === true ||
+				params.headless === false ||
 				process.env.GREEDY_SEARCH_VISIBLE === "1" ||
 				process.env.GREEDY_SEARCH_ALWAYS_VISIBLE === "1";
 			const headless = !visible;
@@ -194,21 +213,21 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			if (fullAnswer) flags.push("--full");
 			if (researchMode) {
 				flags.push("--depth", "research");
-				if (typeof (params as any).breadth === "number")
-					flags.push("--breadth", String((params as any).breadth));
-				if (typeof (params as any).iterations === "number")
-					flags.push("--iterations", String((params as any).iterations));
-				if (typeof (params as any).maxSources === "number")
-					flags.push("--max-sources", String((params as any).maxSources));
-				if (typeof (params as any).researchOutDir === "string")
-					flags.push("--research-out-dir", (params as any).researchOutDir);
-				if ((params as any).writeResearchBundle === false)
+				if (typeof params.breadth === "number")
+					flags.push("--breadth", String(params.breadth));
+				if (typeof params.iterations === "number")
+					flags.push("--iterations", String(params.iterations));
+				if (typeof params.maxSources === "number")
+					flags.push("--max-sources", String(params.maxSources));
+				if (typeof params.researchOutDir === "string")
+					flags.push("--research-out-dir", params.researchOutDir);
+				if (params.writeResearchBundle === false)
 					flags.push("--no-research-bundle");
 			} else if (legacyFast) flags.push("--fast");
 			else if (depthRaw === "deep") flags.push("--depth", "deep");
 			else if (synthesize) flags.push("--synthesize");
-			if (synthesize && typeof (params as any).synthesizer === "string") {
-				flags.push("--synthesizer", (params as any).synthesizer);
+			if (synthesize && typeof params.synthesizer === "string") {
+				flags.push("--synthesizer", params.synthesizer);
 			}
 
 			const onProgress =
@@ -241,7 +260,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			}
 		},
 
-		renderCall(args, theme) {
+		renderCall(args: Partial<GreedySearchParams>, theme: ToolTheme) {
 			const q = (args.query || "").slice(0, 60);
 			const qDisplay = q.length < (args.query || "").length ? `${q}...` : q;
 			const engineDisplay =
@@ -255,11 +274,15 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			);
 		},
 
-		renderResult(result, { expanded, isPartial }, theme) {
+		renderResult(
+			result: ToolResult,
+			{ expanded, isPartial }: RenderState,
+			theme: ToolTheme,
+		) {
 			if (isPartial) {
-				const progressText = (
-					result.content.find((c) => c.type === "text") as any
-				)?.text as string | undefined;
+				const progressText = result.content.find(
+					(c) => c.type === "text",
+				)?.text;
 				const display = progressText
 					? progressText.replace(/\*\*/g, "")
 					: "Searching...";
@@ -267,9 +290,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			}
 
 			const textContent = result.content.find((c) => c.type === "text");
-			const raw = (result.details as any)?.raw as
-				| Record<string, unknown>
-				| undefined;
+			const raw = result.details?.raw as Record<string, unknown> | undefined;
 
 			// Collapsed: one-line summary only
 			if (!expanded) {
@@ -306,7 +327,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				);
 				let totalSources = 0;
 				for (const key of engineKeys) {
-					const eng = (raw as any)[key] as Record<string, unknown> | undefined;
+					const eng = raw?.[key] as Record<string, unknown> | undefined;
 					const s = eng?.sources as Array<unknown> | undefined;
 					if (Array.isArray(s)) totalSources += s.length;
 				}
@@ -322,7 +343,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				}
 
 				// No structured data — show content text as error/fallback
-				const snippet = (textContent as any)?.text as string | undefined;
+				const snippet = textContent?.text;
 				if (snippet) {
 					return new Text(
 						theme.fg("warning", ` → ${snippet.slice(0, 80)}`),
