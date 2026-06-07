@@ -1,6 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.0] — 2026-06-07
+
+Major release consolidating ~6 weeks of work since 1.9.2: two new research engines (Semantic Scholar, Logically), deep-research structured output, configurable `all`-mode engines, ChatGPT and Gemini extractor rewrites that cut solo times from 71s → 8s, and full release/CI automation.
+
+### Added
+
+- **Release workflow** (`.github/workflows/release.yml`) — automatic version → tag → GitHub release → npm publish, triggered by every push to master. Mirrors the pi-lens release pattern. Three jobs: `prepare` (detects new version via tag absence, verifies CHANGELOG entry, runs `npm publish --dry-run`), `release` (creates `vX.Y.Z` tag, pushes it, creates a GitHub release with auto-generated notes), `publish-npm` (runs `npm publish`, gated on `NPM_TOKEN` secret). The tag check is the sole release guard — no need to also require `package.json` in the diff, which breaks when the version bump and changelog land in separate commits.
+- **Dependabot** (`.github/dependabot.yml`) — weekly npm dependency updates, grouped patch/minor, capped at 5 open PRs, labeled `dependencies` + `automated`.
+- **Lint & lockfile CI gate** (`.github/workflows/ci.yml`, `scripts/lint.mjs`, `scripts/check-lockfile.mjs`) — new `lint-and-lockfile` job that runs `npm run check:lockfile` (package.json ↔ package-lock.json sync) and `npm run lint` (cross-platform `node --check` on all 46 .mjs files) before any install. Both scripts are Node-only (no `find`/`grep`) so they work identically on Windows/macOS/Linux runners.
+- **Tarball entry-point verification** (`.github/workflows/ci.yml`) — CI now verifies every entry in `pi.extensions`, `pi.skills`, and `files` exists in the published tarball (not just `package.json`). Catches typos in the whitelist that would cause "module not found" at runtime.
+- **Extension-load check** (`.github/workflows/ci.yml`) — `npx jiti ./index.ts` smoke test on the globally-installed tarball that catches missing dependencies. The `pi-coding-agent` peer-dep absence is expected and ignored.
+- **CONTRIBUTING.md** — new document with the extractor authoring guide (clipboard interception, single-eval stream wait, language-agnostic selectors, registration in two places, headless fast-fail, recovery engine list, docs to update), and recovery-policy notes. Links to AGENTS.md for architecture details.
+
 
 ### Added
 
@@ -61,10 +73,19 @@
 - **Research direct-URL fetch actions work in ESM** (`src/search/research.mjs`) — Replaced a CommonJS `require("./sources.mjs")` in the direct `fetchUrl` path with normal ESM imports, avoiding runtime failures when Gemini plans a direct primary-source fetch.
 
 - **Gemini synthesis no longer kills Chrome after opening its tab** (`src/search/browser-lifecycle.mjs`, `src/search/chrome.mjs`, `src/search/synthesis-runner.mjs`, `bin/search.mjs`) — Fixed two Chrome lifecycle regressions that produced `No target matching prefix` during multi-engine synthesis. Child-process stale-session cleanup now verifies GreedySearch Chrome command lines with path-separator-insensitive profile matching, so Windows backslash/forward-slash differences do not make a live Chrome look like a ghost process. Mode detection now prefers the live Chrome command line over the stale mode marker file, preventing visible-mode synthesis from killing visible Chrome immediately after opening the Gemini tab. Added unit coverage for both cases.
+- **Gemini copy-button targeted `model-response` specifically** (`extractors/gemini.mjs`) — the absolute last copy button on the page is not always the assistant's response copy button (the page has many Material icon copy buttons: copy link, copy code, etc.). When the `model-response` custom element was empty, `extractAnswer` was clicking the wrong copy button and the clipboard interceptor captured the user's query — the extractor then returned the query as the answer. Now the click targets the copy button inside the `model-response` element, with a DOM fallback that reads `model-response` innerText (stripping the locale-specific "Gemini said" / "Το Gemini είπε" label) when the clipboard contains the echoed query.
+- **SonarCloud dead `=== "true"` check dropped** (`extractors/gemini.mjs:152`) — the eval expression `(() => { ... })()` only ever returns a boolean (`false` when no `model-response` element, or `t.length > 20`), so `ready === "true"` was always false. Simplified to `if (ready === true)`. Resolves the SonarCloud MAJOR BUG flagged in the leak-period view.
+
+### Documentation
+
+- **AGENTS.md** updated to document the new release workflow (the `lint-and-lockfile` → `install-test` → `release` pipeline, NPM_TOKEN gating, manual `workflow_dispatch` override, versioning guidelines), the new engine notes for ChatGPT and Gemini (greeting-card skip, copy-button targeting, single-eval stream wait), the research-mode hardening details (ledger cap, academic fetch injection, social-source guardrail), and the updated extractor timeout budgets (ChatGPT 20s in-browser + 15s node-side).
+- **README.md** cleaned up (split parameters section, removed anti-detection/known-quirks sections), and the **CHANGELOG** reformatted to use the new `## [X.Y.Z] — YYYY-MM-DD` heading convention that the release workflow's `grep -q "^## \[$VERSION\]"` check expects.
 
 ### Changed
 
 - **Search modes simplified around grounded sources** (`bin/search.mjs`, `src/tools/greedy-search-handler.ts`, `README.md`, `skills/greedy-search/skill.md`) — `engine: "all"` is now the main grounded search mode: it fans out to configured engines, builds a source registry, fetches top source content, and returns confidence metadata by default. Synthesis is now an explicit opt-in via `synthesize: true` / `--synthesize` and uses the configured `synthesizer` (`gemini` default, `chatgpt` supported). Deep research remains a separate workflow via `depth: "research"`. Legacy `depth: "fast" | "standard" | "deep"` values remain accepted for compatibility (`fast` skips source fetching; `standard`/`deep` request synthesis) but are no longer the primary API.
+- **Research-mode hardening** (`src/search/research.mjs`, `src/search/sources.mjs`) — three changes to improve deep-research output quality. (1) The open-question ledger is capped at `MAX_OPEN_FOLLOWUPS = 5` per round — overflow "Discovered gap/follow-up" questions auto-resolve with evidence rather than carrying forward, keeping the floor check (`computeResearchFloor.requiredQuestions`) meaningful. (2) `pickAcademicFetchTargets()` injects a `fetchUrl` action for the top 1-2 academic sources (`arxiv.org`, `semanticscholar.org`, `doi.org`) when `combinedSources` contains one and no round action is already a `fetchUrl` — forces PDF/academic text to actually be fetched and synthesized. (3) Social-source penalty increased from −12 to −20, plus a post-sort hard guardrail: sources are split into `nonSocial` and `socialSources`, each sorted independently, then concatenated `[...nonSocial, ...socialSources]` before the top-12 slice. A social source can no longer land as S1 even with high composite scores.
+- **ChatGPT joined visible recovery** (`src/search/recovery.mjs`, `bin/search.mjs`) — the typed query can succeed in headless while the assistant response never streams in. Added ChatGPT to `HEADLESS_RECOVERY_ENGINES` so the same headless → visible fallback that helps Bing/Perplexity also fires on ChatGPT timeout/verification signals. The wrapper budget for ChatGPT was bumped to 80s so the extractor's 20s in-browser wait plus 15s node-side fallback can finish cleanly under the visible retry.
 
 ### Removed
 

@@ -236,12 +236,48 @@ node bin/cdp-visible.mjs list   # should refuse while headless
 node bin/launch.mjs --kill
 ```
 
-## Changelog and release workflow
+## Release workflow
 
-- Update `CHANGELOG.md` under `[Unreleased]` for notable changes.
-- Run at least `npm test unit` and Pi/jiti extension import before committing.
-- If Chrome behavior changed, run at least one live visible/headless smoke.
-- Commit with a concise conventional message.
+Releases are fully automated via `.github/workflows/release.yml`. The flow mirrors pi-lens's release pattern and turns a `package.json` version bump into a git tag, GitHub release, and (optionally) an npm publish with no manual steps beyond the initial commit.
+
+### Cutting a release
+
+1. **Bump version** in `package.json` (e.g. `1.9.2` → `2.0.0`).
+2. **Add a CHANGELOG entry** under `## [X.Y.Z] — YYYY-MM-DD` in `CHANGELOG.md`. Move content from the `[Unreleased]` section into the new version section (the `[Unreleased]` section should be empty after the bump). The release workflow's `prepare` job greps for `^## \[$VERSION\]` and fails the release if the entry is missing.
+3. **Run local checks** before pushing:
+   ```bash
+   npm run check:lockfile  # package.json ↔ package-lock.json sync
+   npm run lint            # node --check on all .mjs files
+   node test.mjs unit      # 86+ unit tests
+   ```
+4. **Commit and push to master** with a clear conventional message (e.g. `release: 2.0.0`).
+
+### What the CI does on push to master
+
+- **`lint-and-lockfile` job** (Ubuntu, runs first): executes `check:lockfile` + `lint`. Must pass before `install-test` runs.
+- **`install-test` job** (matrix: ubuntu/windows/macos, needs `lint-and-lockfile`): packs the tarball, verifies all `pi.extensions` / `pi.skills` / `files` entries exist in it, installs globally, runs unit tests, and runs `npx jiti ./index.ts` to catch missing dependencies. The `pi-coding-agent` peer-dep absence is expected and ignored.
+- **`release` workflow** (runs in parallel with CI, triggered by every push to master):
+  - **`prepare` job**: detects the new version by checking that the tag `vX.Y.Z` doesn't exist, verifies the CHANGELOG entry, runs `npm publish --dry-run` (if `NPM_TOKEN` is set). Outputs `should_release` and `has_npm_token` for the downstream jobs.
+  - **`release` job** (needs `prepare`, runs only if `should_release == 'true'`): creates the git tag `vX.Y.Z`, pushes it, creates a GitHub release with auto-generated notes via `softprops/action-gh-release@v3`.
+  - **`publish-npm` job** (needs `prepare` + `release`, runs only if `should_release && has_npm_token`): runs `npm publish` with `NODE_AUTH_TOKEN` from the `NPM_TOKEN` secret.
+
+### Release gating
+
+- The `release` workflow is triggered by every push to master, but only acts if the tag `vX.Y.Z` doesn't already exist. To re-run a failed release, delete the tag locally and remotely (`git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`) and re-push.
+- `NPM_TOKEN` is **optional**. Without it, the release creates a tag and GitHub release but skips `npm publish`. This is useful for testing the release flow without actually publishing, or for repos that don't publish to npm.
+- The CI must pass (`lint-and-lockfile` + `install-test`) for the release to be considered healthy, but the `release` workflow itself doesn't gate on CI status — it runs on every master push. If you push a broken commit, the release will still try; rely on the local pre-push checks to catch issues first.
+
+### Manual release
+
+You can also trigger the release workflow manually via the GitHub Actions UI (`workflow_dispatch`). This is useful for re-running a failed release or cutting a release from a non-master branch.
+
+### Versioning guidelines
+
+- **Patch** (`X.Y.Z`): bug fixes, internal refactors, CI changes, dependency updates. The release workflow's auto-generated notes work best for these.
+- **Minor** (`X.Y.0`): new features, new extractors, new research engines, new tool parameters. CHANGELOG entries should be detailed.
+- **Major** (`X.0.0`): breaking changes to the `greedy_search` tool API, major extractor rewrites, or any change that requires user action to upgrade. CHANGELOG entries should call out migration steps explicitly.
+
+The current version is in `package.json`. The release workflow prints it in the `prepare` job's logs.
 
 ## Common pitfalls
 
