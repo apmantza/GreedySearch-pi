@@ -77,38 +77,102 @@ async function scrollToBottom(tab) {
 	]);
 }
 
+/**
+ * Read the assistant response from the model-response element.
+ * Used as a fallback when the copy-button click captures the user's
+ * query text instead of the response (which happens when the response
+ * never rendered, or when the "last copy button on the page" is not
+ * the assistant's response copy button).
+ */
+async function extractAnswerFromDom(tab) {
+	const raw = await cdp([
+		"eval",
+		tab,
+		String.raw`
+		(() => {
+			// The model-response element is a custom element <model-response>.
+			// Its innerText starts with the "Gemini said" label in the
+			// current locale; strip that prefix and return the rest.
+			const resp = document.querySelector('model-response');
+			if (!resp) return JSON.stringify({ answer: '', sources: [] });
+			const text = (resp.innerText || resp.textContent || '').trim();
+			// Strip the locale-specific "Gemini said" label prefix.
+			// It varies ("Το Gemini είπε" in Greek, "Gemini said" in
+			// English, etc.) so we just look for the first newline and
+			// take what follows.
+			const idx = text.indexOf('\n');
+			const answer = idx >= 0 ? text.slice(idx + 1).trim() : text;
+			if (!answer) return JSON.stringify({ answer: '', sources: [] });
+			// Extract source links from the response.
+			const seen = new Set();
+			const sources = [];
+			for (const link of resp.querySelectorAll('a[href]')) {
+				const url = link.href;
+				if (!url || seen.has(url)) continue;
+				seen.add(url);
+				const title = (link.innerText || link.textContent || '').replace(/\s+/g, ' ').trim();
+				sources.push({ title, url });
+				if (sources.length >= 10) break;
+			}
+			return JSON.stringify({ answer, sources });
+		})()
+	`,
+	]);
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return { answer: '', sources: [] };
+	}
+}
+
 async function extractAnswer(tab, query = "") {
 	const queryNorm = query.toLowerCase().trim();
 
-	// Wait for the assistant response copy button to appear.
-	// A fresh conversation has 1 copy button (user message); after the
-	// assistant responds there are 2+.  This prevents clicking the user's
-	// copy button before React hydrates the assistant's.
-	let copyReady = false;
-	const copyDeadline = Date.now() + 12000;
-	while (Date.now() < copyDeadline) {
-		const count = await cdp([
+	// Wait for the model-response element to have content (not just the
+	// "Gemini said" label). The old approach waited for copy button
+	// count >= 2, which is unreliable: the Gemini UI has many copy
+	// icons (copy link, copy code, etc.), and the last one on the page
+	// is not always the assistant response copy button.
+	let modelReady = false;
+	const modelDeadline = Date.now() + 12000;
+	while (Date.now() < modelDeadline) {
+		const ready = await cdp([
 			"eval",
 			tab,
-			`document.querySelectorAll('${S.copyButton}').length`,
+			String.raw`(() => {
+				const r = document.querySelector('model-response');
+				if (!r) return false;
+				const t = (r.innerText || '').trim();
+				// Must have content beyond the locale-specific label
+				// ("Gemini said" / "Το Gemini είπε" / etc.) and ideally
+				// a copy button rendered on the response.
+				return t.length > 20;
+			})()`,
 		]);
-		if (parseInt(count, 10) >= 2) {
-			copyReady = true;
+		if (ready === "true" || ready === true) {
+			modelReady = true;
 			break;
 		}
 		await new Promise((r) => setTimeout(r, 800));
 	}
-	if (!copyReady) {
-		console.error("[gemini] Warning: assistant copy button did not appear");
+	if (!modelReady) {
+		console.error("[gemini] Warning: model-response did not render content");
 	}
 
-	// Click the LAST copy button (assistant's response at the bottom)
+	// Click the copy button on the model-response element specifically,
+	// not the absolute last copy button on the page. The page has many
+	// copy icons (copy link, copy code, etc.) and the last one is not
+	// always the assistant's response copy button.
 	await cdp([
 		"eval",
 		tab,
 		`(() => {
-			const buttons = document.querySelectorAll('${S.copyButton}');
-			buttons[buttons.length - 1]?.click();
+			const resp = document.querySelector('model-response');
+			if (!resp) return 'no-model-response';
+			const btn = resp.querySelector('${S.copyButton}');
+			if (!btn) return 'no-copy-button';
+			btn.click();
+			return 'clicked';
 		})()`,
 	]);
 	await new Promise((r) => setTimeout(r, 600));
@@ -129,17 +193,51 @@ async function extractAnswer(tab, query = "") {
 			"eval",
 			tab,
 			`(() => {
-				const buttons = document.querySelectorAll('${S.copyButton}');
-				buttons[buttons.length - 1]?.click();
+				const resp = document.querySelector('model-response');
+				if (!resp) return 'no-model-response';
+				const btn = resp.querySelector('${S.copyButton}');
+				if (!btn) return 'no-copy-button';
+				btn.click();
+				return 'clicked';
 			})()`,
 		]);
 		await new Promise((r) => setTimeout(r, 600));
 		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
 	}
 
-	if (!answer) throw new Error("Clipboard interceptor returned empty text");
+	// DOM fallback: if the clipboard is empty or still echoes the query,
+	// read the model-response innerText directly. This handles the case
+	// where the copy button never rendered (response never appeared) or
+	// the click didn't fire.
+	let domFallback = null;
+	if (
+		!answer ||
+		(queryNorm &&
+			(answer.toLowerCase().trim() === queryNorm ||
+				answer.trim().length < queryNorm.length))
+	) {
+		domFallback = await extractAnswerFromDom(tab);
+		if (domFallback.answer) {
+			answer = domFallback.answer;
+		}
+	}
 
-	const sources = parseSourcesFromMarkdown(answer);
+	if (!answer) {
+		throw new Error(
+			"Gemini returned no answer — model-response never rendered content",
+		);
+	}
+
+	const sourcesInline = parseSourcesFromMarkdown(answer);
+	const sourceMap = new Map();
+	for (const s of [
+		...(domFallback?.sources || []),
+		...sourcesInline,
+	]) {
+		if (s?.url && !sourceMap.has(s.url)) sourceMap.set(s.url, s);
+	}
+	const sources = Array.from(sourceMap.values()).slice(0, 10);
+
 	return { answer: answer.trim(), sources };
 }
 
