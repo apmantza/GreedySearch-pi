@@ -321,6 +321,35 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	const { clampResearchOptions, normalizeResearchQueries } = await import(
 		"./src/search/research.mjs"
 	);
+	const { ALL_ENGINES, DEFAULT_SYNTHESIZER, ENGINES, RESEARCH_ENGINES } =
+		await import("./src/search/constants.mjs");
+	if (RESEARCH_ENGINES.join(",") === ALL_ENGINES.join(",")) {
+		passMsg("research config: reuses normal all-engine fan-out");
+	} else {
+		failMsg(
+			`research config: expected ${ALL_ENGINES.join(",")}, got ${RESEARCH_ENGINES.join(",")}`,
+		);
+	}
+	if (DEFAULT_SYNTHESIZER === "gemini") {
+		passMsg("research config: default synthesizer is gemini");
+	} else {
+		failMsg(
+			`research config: expected gemini default, got ${DEFAULT_SYNTHESIZER}`,
+		);
+	}
+	if (!ENGINES.consensus && !ENGINES.cns) {
+		passMsg("research config: consensus is not a registered engine");
+	} else {
+		failMsg("research config: consensus should not be registered");
+	}
+	if (
+		ENGINES["semantic-scholar"] &&
+		ENGINES.s2 === ENGINES["semantic-scholar"]
+	) {
+		passMsg("research config: semantic-scholar is registered with s2 alias");
+	} else {
+		failMsg("research config: semantic-scholar registration missing");
+	}
 	const clamped = clampResearchOptions({
 		breadth: 99,
 		iterations: 0,
@@ -428,6 +457,31 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	} else {
 		failMsg(
 			`source ranking: unexpected order ${ranked.map((s) => s.domain).join(",")}`,
+		);
+	}
+
+	const academicRanked = buildSourceRegistry(
+		{
+			"semantic-scholar": {
+				sources: [
+					{
+						title:
+							"Chain of Thought Prompting Elicits Reasoning in Large Language Models",
+						url: "https://arxiv.org/pdf/2201.11903.pdf",
+					},
+				],
+			},
+		},
+		"large language models",
+	);
+	if (
+		academicRanked[0]?.engines.includes("semantic-scholar") &&
+		academicRanked[0]?.sourceType === "academic"
+	) {
+		passMsg("source ranking: semantic-scholar sources are indexed as academic");
+	} else {
+		failMsg(
+			`source ranking: unexpected academic source ${JSON.stringify(academicRanked[0])}`,
 		);
 	}
 

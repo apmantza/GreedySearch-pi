@@ -6,7 +6,7 @@ export const HEADLESS_RECOVERY_ENGINES = [
 	"perplexity",
 	"bing",
 	"chatgpt",
-	"consensus",
+	"semantic-scholar",
 	"logically",
 ];
 

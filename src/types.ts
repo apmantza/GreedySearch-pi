@@ -14,7 +14,13 @@
 export interface Source {
 	url: string;
 	title: string;
-	type?: "official-docs" | "maintainer-blog" | "repo" | "community" | "website";
+	type?:
+		| "official-docs"
+		| "maintainer-blog"
+		| "repo"
+		| "academic"
+		| "community"
+		| "website";
 	domain?: string;
 	snippet?: string;
 }
@@ -47,8 +53,8 @@ export interface Claim {
 
 /** Confidence metrics for a synthesis */
 export interface ConfidenceMetrics {
-	overall: number;        // 0-1
-	consensus: number;      // fraction of engines agreeing
+	overall: number; // 0-1
+	consensus: number; // fraction of engines agreeing
 	sourceCount: number;
 	engineCount: number;
 }
@@ -61,7 +67,7 @@ export interface ConfidenceMetrics {
 export interface ClassifiedSource extends Source {
 	engineOrigin: string[];
 	isOfficial: boolean;
-	consensus: number;  // fraction of engines citing this source
+	consensus: number; // fraction of engines citing this source
 }
 
 // ============================================================================

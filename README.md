@@ -49,7 +49,7 @@ greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 ## Parameters (`greedy_search`)
 
 - `query` (required)
-- `engine`: `all` (default web/search fan-out), `perplexity`, `google`, `chatgpt`, `gemini`; opt-in research engine: `logically`; `bing` still works for signed-in users
+- `engine`: `all` (default web/search fan-out), `perplexity`, `google`, `chatgpt`, `gemini`; opt-in research engines: `semantic-scholar`, `logically`; `bing` still works for signed-in users
 - `synthesize`: for `engine: "all"`, synthesize fetched sources with the configured synthesizer (default false)
 - `synthesizer`: override the configured synthesis engine for this call (`gemini` default, `chatgpt` supported)
 - `depth`: use `research` for deep research; legacy `fast`/`standard`/`deep` aliases are still accepted
@@ -74,7 +74,7 @@ greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
 
 ## Search modes
 
-- **Individual engine search/research** — `engine: "perplexity" | "google" | "chatgpt" | "gemini" | "logically" | "bing"`; returns that engine's answer and sources.
+- **Individual engine search/research** — `engine: "perplexity" | "google" | "chatgpt" | "gemini" | "semantic-scholar" | "logically" | "bing"`; returns that engine's answer and sources.
 - **Grounded multi-engine search** — default `engine: "all"`; fans out to configured engines, ranks sources, fetches top source content, and reports confidence metadata.
 - **All + synthesis** — add `synthesize: true` (or CLI `--synthesize`) to ask the configured synthesizer to combine engine answers and fetched source evidence.
 - **Deep research** — `depth: "research"`; iterative action planning, direct URL fetches, fast multi-engine searches, source fetching, learning extraction, deterministic floor checks, citation audit, a final cited report, and a structured on-disk bundle.
@@ -85,12 +85,12 @@ Configure all-engine fan-out and synthesis in `~/.pi/greedyconfig`:
 
 ```json
 {
-  "engines": ["perplexity", "google", "chatgpt", "gemini", "logically"],
+  "engines": ["perplexity", "google", "chatgpt", "gemini", "semantic-scholar", "logically"],
   "synthesizer": "gemini"
 }
 ```
 
-Gemini is a normal search engine and can participate in `engine: "all"`. Logically is an opt-in research engine; include it in `~/.pi/greedyconfig` only when you want the all-engine fan-out to include research-assistant workflows. If `synthesize: true` and `"synthesizer": "gemini"`, Gemini runs once as a search engine and again as the synthesizer; set `"synthesizer": "chatgpt"` to separate those roles.
+Gemini is a normal search engine and can participate in `engine: "all"`. Semantic Scholar and Logically are opt-in research engines; include them in `~/.pi/greedyconfig` only when you want the all-engine fan-out to include academic paper discovery or research-assistant workflows. Deep research child searches reuse the same configured `engines` list and keep query text on stdin; Gemini remains the research planner/final-report synthesizer. If `synthesize: true` and `"synthesizer": "gemini"`, Gemini runs once as a search engine and again as the synthesizer; set `"synthesizer": "chatgpt"` to separate those roles for normal all-search synthesis.
 
 Research bundles are written by default to `.pi/greedysearch-research/<timestamp>_<query>/` and include:
 

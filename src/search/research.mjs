@@ -18,6 +18,7 @@ import {
 	trimText,
 } from "./sources.mjs";
 import { parseStructuredJson } from "./synthesis.mjs";
+import { RESEARCH_ENGINES } from "./constants.mjs";
 import { runGeminiPrompt } from "./synthesis-runner.mjs";
 
 const __dir = fileURLToPath(new URL(".", import.meta.url)).replace(
@@ -473,7 +474,9 @@ async function evaluateResearchQuality(
 
 function summarizeEngineAnswers(result) {
 	const summaries = {};
-	for (const engine of ["perplexity", "bing", "google"]) {
+	for (const engine of Object.keys(result || {}).filter(
+		(key) => !key.startsWith("_"),
+	)) {
 		const value = result?.[engine];
 		if (!value) continue;
 		summaries[engine] = value.error
@@ -1301,7 +1304,9 @@ function shouldForwardChildStderr(line) {
 	return (
 		/^PROGRESS:/.test(line) ||
 		/^\[greedysearch\]/.test(line) ||
-		/^\[(bing|perplexity|google|gemini)\]/.test(line) ||
+		/^\[(bing|perplexity|google|gemini|chatgpt|logically|semantic-scholar)\]/.test(
+			line,
+		) ||
 		/^GreedySearch Chrome/.test(line) ||
 		/^Launching GreedySearch Chrome/.test(line) ||
 		/^Headless mode/.test(line) ||
@@ -1417,7 +1422,7 @@ export function computeResearchFloor({
 			String(source?.content || "").length > 100,
 	);
 	const primarySources = sources.filter((source) =>
-		["official-docs", "repo", "maintainer-blog"].includes(
+		["official-docs", "repo", "maintainer-blog", "academic"].includes(
 			String(source?.sourceType || ""),
 		),
 	);
@@ -1892,7 +1897,7 @@ export async function runResearchMode({
 	const engineFailures = [];
 
 	process.stderr.write(
-		`[greedysearch] Research mode: breadth ${options.breadth}, iterations ${options.iterations}, qualityThreshold ${qualityThreshold}\n`,
+		`[greedysearch] Research mode: breadth ${options.breadth}, iterations ${options.iterations}, qualityThreshold ${qualityThreshold}, engines ${RESEARCH_ENGINES.join(",")}, synthesizer gemini\n`,
 	);
 
 	for (let roundIndex = 0; roundIndex < options.iterations; roundIndex++) {
@@ -2371,6 +2376,8 @@ export async function runResearchMode({
 		startedAt,
 		finishedAt,
 		durationMs,
+		engines: RESEARCH_ENGINES,
+		synthesizer: "gemini",
 		rounds: rounds.length,
 		actionsRun: totalActionsRun,
 		searches: totalSearches,

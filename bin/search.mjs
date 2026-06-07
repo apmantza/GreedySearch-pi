@@ -110,7 +110,7 @@ async function main() {
 			`${[
 				'Usage: node search.mjs <engine> "<query>"',
 				"",
-				"Engines: perplexity (p), bing (b), google (g), gemini (gem), all",
+				"Engines: all, perplexity (p), google (g), chatgpt (gpt), gemini (gem), semantic-scholar (s2), logically (log), bing (b)",
 				"",
 				"Flags:",
 				"  --synthesize        For engine=all: synthesize fetched sources",
@@ -313,6 +313,9 @@ async function main() {
 		const ENGINE_START_URLS = {
 			perplexity: "https://www.perplexity.ai/",
 			google: "https://www.google.com/",
+			"semantic-scholar": "https://www.semanticscholar.org/",
+			semanticscholar: "https://www.semanticscholar.org/",
+			s2: "https://www.semanticscholar.org/",
 			logically: "https://logically.app/research-assistant/",
 		};
 		const engineTabs = await Promise.all(
@@ -674,8 +677,8 @@ async function main() {
 				? "perplexity"
 				: script.includes("chatgpt")
 					? "chatgpt"
-					: script.includes("consensus")
-						? "consensus"
+					: script.includes("semantic-scholar")
+						? "semantic-scholar"
 						: script.includes("logically")
 							? "logically"
 							: null;

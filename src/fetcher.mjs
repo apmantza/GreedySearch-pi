@@ -63,6 +63,10 @@ const PRIVATE_URL_PATTERNS = [
  * @param {string} url - URL to check
  * @returns {{blocked: boolean, reason?: string}}
  */
+export function defaultFetchHeaders(overrides = {}) {
+	return { ...DEFAULT_HEADERS, ...overrides };
+}
+
 export function isPrivateUrl(url) {
 	try {
 		const parsed = new URL(url);
@@ -594,7 +598,10 @@ export function checkContentQuality(extracted) {
 			desc: "access denied in content",
 		},
 		{
-			check: () => /^\s{0,10}sign\s{1,5}in\s{0,10}$|^\s{0,10}log\s{1,5}in\s{0,10}$/im.test(markdown),
+			check: () =>
+				/^\s{0,10}sign\s{1,5}in\s{0,10}$|^\s{0,10}log\s{1,5}in\s{0,10}$/im.test(
+					markdown,
+				),
 			desc: "login form only",
 		},
 	];

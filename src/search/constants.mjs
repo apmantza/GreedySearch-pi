@@ -20,8 +20,8 @@ export const VISIBLE_RECOVERY_LOG = `${tmpdir().replaceAll("\\", "/")}/greedysea
 const CONFIG_DIR = join(homedir(), ".pi");
 const CONFIG_FILE = join(CONFIG_DIR, "greedyconfig");
 
-const DEFAULT_ENGINES = ["perplexity", "google", "chatgpt"];
-const DEFAULT_SYNTHESIZER = "gemini";
+export const DEFAULT_ENGINES = ["perplexity", "google", "chatgpt"];
+export const DEFAULT_SYNTHESIZER = "gemini";
 
 function loadUserEngines() {
 	try {
@@ -107,7 +107,9 @@ export const ENGINE_DOMAINS = {
 	google: "google.com",
 	gemini: "gemini.google.com",
 	chatgpt: "chatgpt.com",
-	consensus: "consensus.app",
+	"semantic-scholar": "semanticscholar.org",
+	semanticscholar: "semanticscholar.org",
+	s2: "semanticscholar.org",
 	logically: "logically.app",
 };
 
@@ -122,14 +124,19 @@ export const ENGINES = {
 	gem: "gemini.mjs",
 	chatgpt: "chatgpt.mjs",
 	gpt: "chatgpt.mjs",
-	consensus: "consensus.mjs",
-	cns: "consensus.mjs",
+	"semantic-scholar": "semantic-scholar.mjs",
+	semanticscholar: "semantic-scholar.mjs",
+	s2: "semantic-scholar.mjs",
 	logically: "logically.mjs",
 	log: "logically.mjs",
 };
 
 // ALL_ENGINES drives the "all" fan-out. Edit ~/.pi/greedyconfig to customize.
 export const ALL_ENGINES = loadUserEngines();
+
+// Research child searches intentionally reuse the normal configured fan-out.
+// Gemini remains the research planner/final-report synthesizer.
+export const RESEARCH_ENGINES = ALL_ENGINES;
 
 // SYNTHESIZER drives optional all-search synthesis. Edit ~/.pi/greedyconfig to customize.
 export const SYNTHESIZER = loadUserSynthesizer();

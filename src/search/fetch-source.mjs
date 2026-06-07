@@ -9,12 +9,15 @@ import {
 	extractContent,
 	detectBotBlock,
 	checkContentQuality,
+	defaultFetchHeaders,
+	isPrivateUrl,
 } from "../fetcher.mjs";
 import { fetchGitHubContent, parseGitHubUrl } from "../github.mjs";
 import { fetchRedditContent, parseRedditUrl } from "../reddit.mjs";
 import { trimContentHeadTail } from "../utils/content.mjs";
 import { cdp, closeTab, openNewTab } from "./chrome.mjs";
 import { SOURCE_FETCH_CONCURRENCY } from "./constants.mjs";
+import { extractPdfMarkdown } from "./pdf.mjs";
 import { trimText } from "./sources.mjs";
 
 /**
@@ -154,8 +157,120 @@ async function fetchSourceViaChrome(tab, url, maxChars = 8000) {
 	}
 }
 
+function isLikelyPdfUrl(url) {
+	try {
+		const parsed = new URL(url);
+		return parsed.pathname.toLowerCase().endsWith(".pdf");
+	} catch {
+		return false;
+	}
+}
+
+async function fetchPdfSourceHttp(url, maxChars = 8000) {
+	const privateCheck = isPrivateUrl(url);
+	if (privateCheck.blocked) {
+		return {
+			url,
+			finalUrl: url,
+			status: 403,
+			error: `Blocked: ${privateCheck.reason}`,
+			source: "pdf-http",
+		};
+	}
+
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), 20000);
+	const start = Date.now();
+	try {
+		const response = await fetch(url, {
+			method: "GET",
+			redirect: "follow",
+			signal: controller.signal,
+			headers: defaultFetchHeaders({
+				accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.5",
+			}),
+		});
+		clearTimeout(timeoutId);
+
+		const contentType = response.headers.get("content-type") || "";
+		const finalUrl = response.url || url;
+		const contentLength = Number.parseInt(
+			response.headers.get("content-length") || "0",
+			10,
+		);
+		if (response.status >= 400) {
+			return {
+				url,
+				finalUrl,
+				status: response.status,
+				error: `HTTP ${response.status}`,
+				source: "pdf-http",
+				duration: Date.now() - start,
+			};
+		}
+		if (
+			!contentType.toLowerCase().includes("application/pdf") &&
+			!isLikelyPdfUrl(finalUrl)
+		) {
+			return null;
+		}
+		if (contentLength > 30 * 1024 * 1024) {
+			return {
+				url,
+				finalUrl,
+				status: response.status,
+				error: `PDF too large: ${contentLength} bytes`,
+				source: "pdf-http",
+				duration: Date.now() - start,
+			};
+		}
+
+		const buffer = Buffer.from(await response.arrayBuffer());
+		const pdf = await extractPdfMarkdown(buffer, finalUrl);
+		if (!pdf || pdf.error) {
+			return {
+				url,
+				finalUrl,
+				status: response.status,
+				error: pdf?.error || "PDF text extraction failed",
+				source: "pdf-http",
+				duration: Date.now() - start,
+			};
+		}
+		const content = trimContentHeadTail(pdf.content, maxChars);
+		return {
+			url,
+			finalUrl,
+			status: response.status,
+			contentType: "application/pdf",
+			lastModified: response.headers.get("last-modified") || "",
+			title: pdf.title,
+			snippet: trimText(content, 320),
+			content,
+			contentChars: content.length,
+			pages: pdf.pages,
+			source: "pdf-http",
+			duration: Date.now() - start,
+		};
+	} catch (error) {
+		clearTimeout(timeoutId);
+		return {
+			url,
+			finalUrl: url,
+			error: error.message || String(error),
+			source: "pdf-http",
+			duration: Date.now() - start,
+		};
+	}
+}
+
 export async function fetchSourceContent(url, maxChars = 8000) {
 	const start = Date.now();
+
+	if (isLikelyPdfUrl(url)) {
+		const pdfResult = await fetchPdfSourceHttp(url, maxChars);
+		if (pdfResult?.content || pdfResult?.status === 403) return pdfResult;
+	}
 
 	// Check if it's a GitHub URL
 	if (parseGitHubUrl(url)) {

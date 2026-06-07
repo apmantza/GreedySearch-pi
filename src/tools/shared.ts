@@ -66,9 +66,10 @@ export function runSearch(
 		engine: string,
 		status: "done" | "error" | "needs-human",
 	) => void,
-	headless?: boolean, // defaults to true (headless is the default)
+	options: { headless?: boolean } = {},
 ): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
+		const { headless = true } = options;
 		const allFlags = [...flags];
 		// Headless is default — only skip if explicitly false or GREEDY_SEARCH_VISIBLE=1
 		if (headless !== false && process.env.GREEDY_SEARCH_VISIBLE !== "1")
@@ -100,9 +101,9 @@ export function runSearch(
 
 		proc.stderr.on("data", (d: Buffer) => {
 			err += d;
-			// Match PROGRESS lines for any known engine (perplexity/google/chatgpt/bing/gemini)
+			// Match PROGRESS lines for any known engine.
 			const ENGINE_PROGRESS_RE =
-				/^PROGRESS:(perplexity|google|chatgpt|bing|gemini):(done|error|needs-human)$/;
+				/^PROGRESS:(perplexity|google|chatgpt|bing|gemini|semantic-scholar|semanticscholar|s2|logically):(done|error|needs-human)$/;
 			for (const line of d.toString().split("\n")) {
 				// Engine progress: any known engine
 				const engineMatch = line.match(ENGINE_PROGRESS_RE);

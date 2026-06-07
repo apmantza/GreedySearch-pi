@@ -81,7 +81,8 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 		name: "greedy_search",
 		label: "Greedy Search",
 		description:
-			"WEB/RESEARCH SEARCH ONLY — searches live web via Perplexity, Google AI, ChatGPT, and Gemini, plus opt-in research through Logically. " +
+			"WEB/RESEARCH SEARCH ONLY — searches live web via Perplexity, Google AI, ChatGPT, and Gemini, plus opt-in research through Semantic Scholar and Logically. " +
+			"Research mode reuses the configured ~/.pi/greedyconfig engines for child searches and Gemini for planning/final synthesis. " +
 			"Research mode is the centerpiece: it plans follow-up actions, fetches sources, audits citations, " +
 			"and writes a structured research bundle on disk. " +
 			"Use for: library docs, recent framework changes, error messages, best practices, current events. " +
@@ -91,7 +92,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			query: Type.String({ description: "The search query" }),
 			engine: Type.String({
 				description:
-					'Engine to use: "all" (default), "perplexity", "google", "chatgpt", "gemini", "gem". Research engine: "logically". "all" fans out to the configured engines and fetches top sources. Customize via ~/.pi/greedyconfig. Bing Copilot is still available as "bing" for signed-in users.',
+					'Engine to use: "all" (default), "perplexity", "google", "chatgpt", "gemini", "gem". Research engines: "semantic-scholar" (alias "s2") and "logically". "all" fans out to the configured engines and fetches top sources. Customize via ~/.pi/greedyconfig. Bing Copilot is still available as "bing" for signed-in users.',
 				default: "all",
 			}),
 			synthesize: Type.Optional(
@@ -110,7 +111,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			depth: Type.Optional(
 				Type.String({
 					description:
-						'Deprecated except "research". Use depth="research" for the iterative research workflow. Legacy values: "fast" skips source fetching; "standard"/"deep" alias synthesize=true.',
+						'Deprecated except "research". Use depth="research" for the iterative research workflow. Research child searches use ~/.pi/greedyconfig engines; Gemini handles research planning/final synthesis. Legacy values: "fast" skips source fetching; "standard"/"deep" alias synthesize=true.',
 				}),
 			),
 			breadth: Type.Optional(
@@ -248,7 +249,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 					`${baseDir}/bin/search.mjs`,
 					signal,
 					onProgress,
-					headless,
+					{ headless },
 				);
 				const text = formatResults(effectiveEngine, data);
 				return {

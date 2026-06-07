@@ -132,6 +132,16 @@ export function classifySourceType(domain, title = "", rawUrl = "") {
 	const lowerUrl = rawUrl.toLowerCase();
 
 	if (domain === "github.com" || domain === "gitlab.com") return "repo";
+	if (
+		domain === "arxiv.org" ||
+		domain === "doi.org" ||
+		domain === "semanticscholar.org" ||
+		domain.endsWith(".semanticscholar.org") ||
+		lowerUrl.includes("/paper/") ||
+		lowerUrl.includes("/pdf/")
+	) {
+		return "academic";
+	}
 	if (matchesDomain(domain, SOCIAL_HOSTS)) return "social";
 	if (matchesDomain(domain, COMMUNITY_HOSTS)) return "community";
 	if (matchesDomain(domain, NEWS_HOSTS)) return "news";
@@ -159,6 +169,8 @@ export function sourceTypePriority(sourceType) {
 		case "official-docs":
 			return 5;
 		case "repo":
+			return 4;
+		case "academic":
 			return 4;
 		case "maintainer-blog":
 			return 3;
@@ -335,7 +347,9 @@ export function domainMatches(hostname, candidate) {
 
 export function buildSourceRegistry(out, query = "") {
 	const seen = new Map();
-	const engineOrder = ["perplexity", "bing", "google"];
+	const engineOrder = Object.keys(out || {}).filter(
+		(key) => !key.startsWith("_"),
+	);
 
 	// Get preferred domains for this query
 	const preferredDomains = inferPreferredDomains(query);

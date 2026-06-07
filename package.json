@@ -47,6 +47,7 @@
 		"@mozilla/readability": "^0.6.0",
 		"@sinclair/typebox": "^0.34.48",
 		"jsdom": "^24.0.0",
+		"pdf-parse": "^2.4.5",
 		"turndown": "^7.1.2"
 	},
 	"peerDependencies": {
