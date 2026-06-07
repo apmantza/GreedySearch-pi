@@ -149,7 +149,7 @@ async function extractAnswer(tab, query = "") {
 				return t.length > 20;
 			})()`,
 		]);
-		if (ready === "true" || ready === true) {
+		if (ready === true) {
 			modelReady = true;
 			break;
 		}
