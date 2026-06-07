@@ -5,9 +5,9 @@
 Multi-engine AI web search for Pi via browser automation.
 
 - No API keys
-- Real browser results (Perplexity, Google AI, ChatGPT, Gemini — engines and synthesizer configurable via ~/.pi/greedyconfig)
+- Real browser results from configurable engines: Perplexity, Google AI, ChatGPT, Gemini, plus opt-in Semantic Scholar and Logically research engines
 - Research mode as the centerpiece: iterative planning, source fetching, citation audit, and structured bundles
-- Optional Gemini synthesis with source grounding
+- Optional configurable synthesis with source grounding (Gemini by default)
 - Chrome runs headless by default — no window, purely background
 
 ## Install
@@ -22,11 +22,9 @@ Or from git:
 pi install git:github.com/apmantza/GreedySearch-pi
 ```
 
-## Tools
+## Tool
 
-- `greedy_search` — multi-engine AI web search
-- `websearch` — lightweight DuckDuckGo/Brave search (via pi-webaio)
-- `webfetch` / `webpull` — page fetching and site crawling (via pi-webaio)
+- `greedy_search` — multi-engine AI web search, source-grounded synthesis, and deep research
 
 ## Quick usage
 
@@ -43,24 +41,35 @@ greedy_search({
 });
 // Research mode writes a dataroom-style bundle under .pi/greedysearch-research/ by default.
 // Headless is the default — no window. To force visible Chrome:
-greedy_search({ query: "Bing captcha setup", engine: "bing", visible: true });
+greedy_search({ query: "Visible browser setup", engine: "perplexity", visible: true });
 ```
 
 ## Parameters (`greedy_search`)
 
+### Common
+
 - `query` (required)
-- `engine`: `all` (default web/search fan-out), `perplexity`, `google`, `chatgpt`, `gemini`; opt-in research engines: `semantic-scholar`, `logically`; `bing` still works for signed-in users
-- `synthesize`: for `engine: "all"`, synthesize fetched sources with the configured synthesizer (default false)
-- `synthesizer`: override the configured synthesis engine for this call (`gemini` default, `chatgpt` supported)
-- `depth`: use `research` for deep research; legacy `fast`/`standard`/`deep` aliases are still accepted
-- `breadth`: research mode query breadth, 1-5 (default 3)
-- `iterations`: research mode rounds, 1-3 (default 2)
-- `maxSources`: research mode fetched source cap, 3-12
-- `researchOutDir`: optional directory for the research bundle
-- `writeResearchBundle`: write the research bundle to disk (default true for research mode)
 - `fullAnswer`: return full single-engine output instead of preview
 - `headless`: set to `false` to show Chrome window (default: `true`)
 - `visible` / `alwaysVisible`: set to `true` to always use visible Chrome for this search
+
+### Normal search
+
+- `engine`: `all` (default web/search fan-out), `perplexity`, `google`, `chatgpt`, `gemini`; opt-in research engines: `semantic-scholar`, `logically`; `bing` still works for signed-in users
+- `synthesize`: for `engine: "all"`, synthesize fetched sources with the configured synthesizer (default false)
+- `synthesizer`: override the configured synthesis engine for this call (`gemini` default, `chatgpt` supported)
+- `depth`: legacy `fast`/`standard`/`deep` aliases are still accepted for compatibility; prefer `synthesize` for normal search
+
+### Deep research
+
+- `depth`: set to `"research"` to run the iterative research workflow
+- `breadth`: number of research actions per round, 1-5 (default 3)
+- `iterations`: research rounds, 1-3 (default 2)
+- `maxSources`: fetched source cap for the final report, 3-12
+- `researchOutDir`: optional directory for the research bundle
+- `writeResearchBundle`: write the research bundle to disk (default true for research mode)
+
+Deep research uses the configured `~/.pi/greedyconfig.engines` list for child searches and Gemini for planning/final synthesis.
 
 ## Environment variables
 
@@ -165,32 +174,15 @@ Chrome is auto-cleaned after 5 min idle. Override with `GREEDY_SEARCH_IDLE_TIMEO
 - Chrome
 - Node.js 20.11.0+
 
-## Known engine quirks
-
-### Bing Copilot
-
-Bing Copilot detects headless Chrome and sandboxes all AI responses inside nested iframes (`copilot.microsoft.com` → `copilot.fun` → `blob:`). In this mode the copy button is hidden and the Cloudflare Turnstile challenge blocks content delivery. The clipboard-based extraction cannot work.
-
-**Auto-recovery:** When Bing or Perplexity fails with a headless-only extraction error (clipboard, verification, timeout, Cloudflare), GreedySearch automatically switches to **visible Chrome** and retries, even in `fast` mode. If manual verification is required, the visible browser is left open and the tool returns instructions to solve the challenge and rerun the same search.
-
-If you prefer to skip the auto-recovery delay, launch visible Chrome ahead of time with `/greedy-visible`, set `GREEDY_SEARCH_ALWAYS_VISIBLE=1`, or pass `visible: true` to `greedy_search`.
-
-## Anti-detection
-
-Headless Chrome auto-injects stealth patches before any page JavaScript runs:
-
-- `navigator.webdriver` hidden, plugins/languages faked, `window.chrome` shimmed
-- WebGL vendor spoofed (Intel Iris), realistic hardware concurrency / memory
-- CDP automation markers deleted, `requestAnimationFrame` kept alive
-- Human-like click simulation with coordinate jitter and variable delays
-
-This bypasses casual bot detection (basic `navigator.webdriver` checks) but does not defeat commercial anti-bot services (DataDome, PerimeterX, Kasada). **Bing Copilot specifically detects headless and sandboxes responses behind Cloudflare Turnstile** — see [Known engine quirks](#known-engine-quirks) for the auto-recovery mechanism.
+## Source fetching
 
 When using `engine: "all"`, top source content is fetched by default. Add `synthesize: true` to synthesize with the configured synthesizer:
 
-- **Reddit** — Uses Reddit's public `.json` API for posts and comments (no scraping)
+- **PDFs** — Direct PDF links are parsed to markdown text for source-grounded synthesis
+- **Semantic Scholar** — Discovers academic papers and prefers direct PDF/external paper links when available
+- **Reddit** — Uses Reddit's public `.json` API for posts and comments
 - **GitHub** — Uses GitHub REST API for repos, READMEs, and file trees
-- **General web** — Mozilla Readability extraction with browser fallback for bot-blocked pages
+- **General web** — Mozilla Readability extraction with browser fallback when needed
 - **Metadata** — title, author/byline, site name, publish date, language, excerpt
 
 ## Project layout
