@@ -65,7 +65,7 @@ jobs:
         shell: bash
         run: |
           npm pack
-          TARBALL=$(ls greedysearch-pi-*.tgz)
+          TARBALL=$(ls *.tgz)
           TMPDIR=$(mktemp -d)
           tar -xzf "$TARBALL" -C "$TMPDIR"
 
@@ -131,7 +131,7 @@ jobs:
           git push origin "${{ needs.prepare.outputs.tag }}"
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: ${{ needs.prepare.outputs.tag }}
