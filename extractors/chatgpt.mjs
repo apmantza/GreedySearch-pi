@@ -90,11 +90,32 @@ async function waitForResponse(tab, timeoutMs = 30000) {
 			return Math.max(50, ms + (Math.random() * ms * 0.4 - ms * 0.2));
 		}
 
+		// Find the assistant message that comes AFTER the last user message.
+		// chatgpt.com has a static pre-rendered greeting card
+		// (data-turn-start-message="true") that lives on the homepage before
+		// any conversation happens — we must skip it or the length check
+		// fires on a 32-char placeholder instead of the real response.
+		function _responseAfterLastUser() {
+			const all = document.querySelectorAll('[data-message-author-role]');
+			let lastUserIdx = -1;
+			for (let i = 0; i < all.length; i++) {
+				if (all[i].getAttribute('data-message-author-role') === 'user') {
+					lastUserIdx = i;
+				}
+			}
+			if (lastUserIdx < 0) return 0;
+			let bestLen = 0;
+			for (let i = lastUserIdx + 1; i < all.length; i++) {
+				if (all[i].getAttribute('data-message-author-role') === 'assistant') {
+					bestLen = Math.max(bestLen, (all[i].innerText || '').length);
+				}
+			}
+			return bestLen;
+		}
+
 		function _poll() {
 			try {
-				const msgs = document.querySelectorAll('[data-message-author-role="assistant"]');
-				const last = msgs[msgs.length - 1];
-				const cur = last?.innerText?.length ?? 0;
+				const cur = _responseAfterLastUser();
 				if (cur >= _minLen && cur === _lastLen) {
 					_stableCount++;
 					if (_stableCount >= 3) { resolve(cur); return; }
@@ -130,11 +151,28 @@ async function pollForResponseNodeSide(tab, maxMs = 35000) {
 	let lastLen = 0;
 	let stableRounds = 0;
 	while (Date.now() < deadline) {
+		// See waitForResponse for the rationale: skip the static greeting
+		// card by finding the assistant message that comes AFTER the last
+		// user message, not the absolute last assistant element.
 		const result = await cdp(
 			[
 				"eval",
 				tab,
-				`(document.querySelectorAll('[data-message-author-role="assistant"]')?.at(-1)?.innerText || '').length`,
+				String.raw`(() => {
+					const all = document.querySelectorAll('[data-message-author-role]');
+					let lastUserIdx = -1;
+					for (let i = 0; i < all.length; i++) {
+						if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
+					}
+					if (lastUserIdx < 0) return 0;
+					let bestLen = 0;
+					for (let i = lastUserIdx + 1; i < all.length; i++) {
+						if (all[i].getAttribute('data-message-author-role') === 'assistant') {
+							bestLen = Math.max(bestLen, (all[i].innerText || '').length);
+						}
+					}
+					return bestLen;
+				})()`,
 			],
 			4000,
 		).catch(() => "0");
@@ -157,8 +195,41 @@ async function extractAnswerFromDom(tab) {
 		tab,
 		String.raw`
 		(() => {
-			const assistant = Array.from(document.querySelectorAll('[data-message-author-role="assistant"]')).at(-1);
-			if (!assistant) return JSON.stringify({ answer: '', sources: [] });
+			// Find the assistant message that comes AFTER the last user message,
+			// not the absolute last assistant element. The chatgpt.com homepage
+			// has a static pre-rendered greeting card that renders as a
+			// [data-message-author-role="assistant"] element with
+			// data-turn-start-message="true" — it must be skipped or the
+			// static "Hello! How can I help you today?" placeholder gets
+			// returned as the answer to a query the assistant never answered.
+			const all = Array.from(document.querySelectorAll('[data-message-author-role]'));
+			let lastUserIdx = -1;
+			for (let i = 0; i < all.length; i++) {
+				if (all[i].getAttribute('data-message-author-role') === 'user') {
+					lastUserIdx = i;
+				}
+			}
+			if (lastUserIdx < 0) {
+				// No user message at all — page is still on the homepage.
+				return JSON.stringify({
+					answer: '',
+					sources: [],
+					skipped: 'no-user-message',
+				});
+			}
+			let assistant = null;
+			for (let i = lastUserIdx + 1; i < all.length; i++) {
+				if (all[i].getAttribute('data-message-author-role') === 'assistant') {
+					assistant = all[i];
+				}
+			}
+			if (!assistant) {
+				return JSON.stringify({
+					answer: '',
+					sources: [],
+					skipped: 'no-assistant-response',
+				});
+			}
 			const answer = (assistant.innerText || assistant.textContent || '').trim();
 			const seen = new Set();
 			const sources = [];
@@ -177,7 +248,7 @@ async function extractAnswerFromDom(tab) {
 	try {
 		return JSON.parse(raw);
 	} catch {
-		return { answer: "", sources: [] };
+		return { answer: "", sources: [], skipped: "parse-error" };
 	}
 }
 
@@ -331,10 +402,26 @@ async function main() {
 		}
 
 		logStage(env, "extract", startTime);
-		const { answer, sources } = await extractAnswer(tab, env);
+		const { answer, sources, skipped } = await extractAnswer(tab, env);
+		// If the DOM fallback skipped the response (no real assistant
+		// message after the user's query), surface a clear error so the
+		// caller doesn't silently consume the static homepage greeting
+		// card as a real answer. The static card lives on chatgpt.com
+		// before any conversation; without this guard the extractor used
+		// to return "Hello! How can I help you today?" as a successful
+		// response to every query.
+		if (!answer) {
+			env.blockedBy = "no-response";
+			env.skipped = skipped || null;
+			throw new Error(
+				skipped === "no-user-message"
+					? "ChatGPT still on homepage — query was not submitted"
+					: skipped === "no-assistant-response"
+						? "ChatGPT did not return an assistant response after submit"
+						: "ChatGPT returned no answer — assistant never responded",
+			);
+		}
 		logStage(env, "done", startTime);
-		if (!answer)
-			throw new Error("No answer extracted — ChatGPT may not have responded");
 
 		const finalUrl = await cdp(["eval", tab, "document.location.href"]).catch(
 			() => "https://chatgpt.com",
