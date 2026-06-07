@@ -393,11 +393,16 @@ export function buildSourceRegistry(out, query = "") {
 			// Penalize discussion/social sites for technical queries — high noise,
 			// hard to fetch cleanly, and rarely canonical. Q&A sites (StackOverflow,
 			// StackExchange) are excluded from the community penalty.
+			//
+			// Social penalty is now −20 (was −12). The original −12 wasn't enough
+			// to overcome the +10 preferred-domain boost + clean rank, so a single
+			// social citation could land as S1. The post-sort demotion below
+			// is the hard guardrail on top.
 			const queryTargetsSocialHost = preferredDomains.some((pd) =>
 				domainMatches(domain, pd),
 			);
 			if (sourceType === "social" && !queryTargetsSocialHost) {
-				smartScore -= 12;
+				smartScore -= 20;
 			}
 			if (preferredDomains.length > 0) {
 				if (matchesDomain(domain, DISCUSSION_HOSTS)) {
@@ -446,27 +451,38 @@ export function buildSourceRegistry(out, query = "") {
 		}
 	}
 
-	const sources = Array.from(seen.values())
-		.map((source) => ({
-			...source,
-			engineCount: source.engines.length,
-		}))
-		.sort((a, b) => {
-			// Single composite score so all signals contribute simultaneously.
-			// Avoids rank being ignored when engineCount differs, and smartScore
-			// dominating even when rank/type signal would break the tie better.
-			const diff = computeCompositeScore(b) - computeCompositeScore(a);
-			if (diff !== 0) return diff;
-			return a.domain.localeCompare(b.domain);
-		})
-		.slice(0, 12)
-		.map((source, index) => ({
-			...source,
-			id: `S${index + 1}`,
-			title: source.title || source.domain || source.canonicalUrl,
-		}));
+	const sources = Array.from(seen.values()).map((source) => ({
+		...source,
+		engineCount: source.engines.length,
+	}));
 
-	return sources;
+	// Social hard guardrail: when the query doesn't explicitly target a
+	// social host (rare — only happens for queries like "latest twitter
+	// announcement"), keep social sources OUT of the composite sort and
+	// pin them to the end of the registry. The smartScore −20 penalty
+	// above handles the "bare social gets a +10 boost" case, but a
+	// clean multi-engine social citation can still occasionally outscore
+	// a noisy single-engine academic source. This sort is the final say
+	// on what becomes S1, S2, etc.
+	const nonSocial = sources.filter((s) => s.sourceType !== "social");
+	const socialSources = sources.filter((s) => s.sourceType === "social");
+	nonSocial.sort((a, b) => {
+		const diff = computeCompositeScore(b) - computeCompositeScore(a);
+		if (diff !== 0) return diff;
+		return a.domain.localeCompare(b.domain);
+	});
+	socialSources.sort((a, b) => {
+		const diff = computeCompositeScore(b) - computeCompositeScore(a);
+		if (diff !== 0) return diff;
+		return a.domain.localeCompare(b.domain);
+	});
+	const ordered = [...nonSocial, ...socialSources];
+
+	return ordered.slice(0, 12).map((source, index) => ({
+		...source,
+		id: `S${index + 1}`,
+		title: source.title || source.domain || source.canonicalUrl,
+	}));
 }
 
 export function mergeFetchDataIntoSources(sources, fetchedSources) {

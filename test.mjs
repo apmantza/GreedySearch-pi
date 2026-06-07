@@ -485,6 +485,41 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 		);
 	}
 
+	// Social hard guardrail: a single-engine x.com citation must never be
+	// S1. Composite score is high (Google rank #1, x.com matched the
+	// "x" letter in "context"), so the smartScore −20 penalty alone
+	// isn't enough — the post-sort demotion is what keeps socials out
+	// of the top 12.
+	const socialGuardrail = buildSourceRegistry(
+		{
+			google: {
+				sources: [
+					{
+						title: "Redis on X",
+						url: "https://x.com/Redisinc/status/123",
+					},
+					{
+						title: "Self-Route paper",
+						url: "https://arxiv.org/abs/2407.16833",
+					},
+				],
+			},
+		},
+		"retrieval augmented generation vs long context LLMs for factual accuracy and hallucination reduction",
+	);
+	if (
+		socialGuardrail[0]?.sourceType !== "social" &&
+		socialGuardrail[0]?.domain === "arxiv.org"
+	) {
+		passMsg(
+			"source ranking: social sources are demoted below academic even with a higher composite score",
+		);
+	} else {
+		failMsg(
+			`source ranking: S1 should be arxiv, got ${socialGuardrail[0]?.domain} (${socialGuardrail[0]?.sourceType})`,
+		);
+	}
+
 	// ─── Phase 2: Quality Evaluator + Novelty Gate ────────────────────────
 
 	subsection("Novelty Gate — Jaccard similarity");

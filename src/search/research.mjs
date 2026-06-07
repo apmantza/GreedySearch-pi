@@ -1586,6 +1586,30 @@ export function updateQuestionLedger(
 		}
 	}
 
+	// Cap the open-question ledger growth. Discovered gap/follow-up questions
+	// are useful handoffs but Gemini tends to emit one per evidence slot, which
+	// blows up the ledger and inflates the `requiredQuestionsClosed` floor
+	// check. Keep at most MAX_OPEN_FOLLOWUPS of them across the whole run;
+	// older ones are auto-resolved as "covered by later evidence" so they
+	// don't block the floor forever.
+	const MAX_OPEN_FOLLOWUPS = 5;
+	const followupOpen = questions.filter(
+		(q) => q.status === "open" && q.reason === "Discovered gap/follow-up",
+	);
+	if (followupOpen.length > MAX_OPEN_FOLLOWUPS) {
+		const overflow = followupOpen
+			.sort((a, b) => (a.createdRound || 0) - (b.createdRound || 0))
+			.slice(0, followupOpen.length - MAX_OPEN_FOLLOWUPS);
+		for (const q of overflow) {
+			q.status = "resolved";
+			q.closedRound = roundNumber;
+			q.evidence = uniqueStrings(
+				[...(q.evidence || []), "Auto-resolved to cap open-question ledger"],
+				4,
+			);
+		}
+	}
+
 	const answered = Array.isArray(learningPayload.answeredQuestions)
 		? learningPayload.answeredQuestions
 		: [];
@@ -1624,6 +1648,45 @@ export function updateQuestionLedger(
 	}
 
 	return questions;
+}
+
+/**
+ * Pick direct-fetch targets from known academic source domains (arXiv,
+ * semanticscholar.org, DOI redirect). Returns the canonical URL plus a
+ * short label for the researchGoal. Filters out anything already fetched.
+ */
+function pickAcademicFetchTargets(combinedSources, usedUrls) {
+	if (!Array.isArray(combinedSources) || combinedSources.length === 0)
+		return [];
+	const ACADEMIC_HOSTS = ["arxiv.org", "semanticscholar.org", "doi.org"];
+	const seen = new Set();
+	const targets = [];
+	for (const source of combinedSources) {
+		const url = source?.canonicalUrl || source?.finalUrl || source?.url || "";
+		if (!url) continue;
+		let domain = "";
+		try {
+			domain = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+		} catch {
+			continue;
+		}
+		if (!ACADEMIC_HOSTS.some((h) => domain === h || domain.endsWith(`.${h}`))) {
+			continue;
+		}
+		if (usedUrls.has(url) || seen.has(url)) continue;
+		seen.add(url);
+		// Prefer the HTML/abs page over PDF for direct fetch — the source
+		// fetcher handles both, but the HTML page gives the synthesizer
+		// readable text + abstract immediately.
+		const htmlUrl = url.includes("/pdf/")
+			? url.replace(/\/pdf\//, "/html/").replace(/\.pdf$/i, "")
+			: url;
+		targets.push({
+			url: htmlUrl,
+			label: source?.title || source?.id || domain,
+		});
+	}
+	return targets.slice(0, 2);
 }
 
 function reconcileQuestionsFromSynthesis(questions, synthesis, citationAudit) {
@@ -1980,6 +2043,26 @@ export async function runResearchMode({
 		});
 
 		const roundActions = noveltyFiltered.slice(0, roundBreadth);
+
+		// Force at least one fetchUrl per round when a known academic source
+		// (arXiv, semantic-scholar, DOI) is present in combinedSources. The
+		// Gemini planner occasionally emits all-search actions even when the
+		// answer is in a single arXiv PDF; direct fetching gives the synthesizer
+		// real PDF text and reliably passes citation audits.
+		const academicTargets = pickAcademicFetchTargets(combinedSources, usedUrls);
+		const hasFetch = roundActions.some((a) => a.type === "fetchUrl");
+		if (!hasFetch && academicTargets.length > 0) {
+			const injectTarget = academicTargets[0];
+			roundActions.push({
+				type: "fetchUrl",
+				url: injectTarget.url,
+				researchGoal: `Direct fetch of known academic source: ${injectTarget.label || injectTarget.url}`,
+			});
+			process.stderr.write(
+				`[greedysearch] Forced fetchUrl for academic source: ${injectTarget.url}\n`,
+			);
+		}
+
 		const actionRuns = [];
 		for (let i = 0; i < roundActions.length; i++) {
 			const action = roundActions[i];
