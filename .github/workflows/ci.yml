@@ -7,9 +7,32 @@ on:
     branches: [master]
 
 jobs:
+  lint-and-lockfile:
+    name: Lint & lockfile sync
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Check lockfile sync
+        run: npm run check:lockfile
+
+      - name: Lint (.mjs syntax check)
+        run: npm run lint
+
   install-test:
     name: Install test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    needs: [lint-and-lockfile]
     permissions:
       contents: read
     strategy:
@@ -32,8 +55,41 @@ jobs:
         run: |
           TARBALL=$(ls *.tgz)
           echo "Checking tarball: $TARBALL"
-          tar -tzf "$TARBALL" | grep "package.json" || \
-            (echo "ERROR: package.json missing from tarball" && exit 1)
+          TMPDIR=$(mktemp -d)
+          tar -xzf "$TARBALL" -C "$TMPDIR"
+
+          # Verify all package.json files/pi entries exist in tarball
+          # (catches typos in pi.extensions / pi.skills / files whitelist
+          # that would cause "module not found" at runtime).
+          export GS_PKG_DIR="$TMPDIR/package"
+          node -e "
+            const path = require('path');
+            const fs = require('fs');
+            const pkgDir = process.env.GS_PKG_DIR;
+            const pkg = require(path.join(pkgDir, 'package.json'));
+            const pi = pkg.pi || {};
+            const entries = []
+              .concat(pi.extensions || [])
+              .concat(pi.skills || [])
+              .concat(pkg.files || []);
+            for (const entry of entries) {
+              const full = path.join(pkgDir, entry);
+              if (entry.endsWith('/')) {
+                if (!fs.existsSync(full) || !fs.readdirSync(full).length) {
+                  console.error('ERROR: pi/files directory missing or empty in tarball: ' + entry);
+                  process.exit(1);
+                }
+                console.log('OK: dir -> ' + entry);
+              } else {
+                if (!fs.existsSync(full)) {
+                  console.error('ERROR: pi/files entry missing from tarball: ' + entry);
+                  process.exit(1);
+                }
+                console.log('OK: file -> ' + entry);
+              }
+            }
+          "
+          rm -rf "$TMPDIR"
 
       - name: Install from tarball (simulates pi install npm:...)
         shell: bash
@@ -43,3 +99,21 @@ jobs:
 
       - name: Run unit tests
         run: node test.mjs unit
+
+      - name: Verify extension loads via jiti (catches missing deps)
+        shell: bash
+        run: |
+          # The scoped package installs to <global>/node_modules/@apmantza/greedysearch-pi
+          INSTALL_DIR="$(npm root -g)/@apmantza/greedysearch-pi"
+          # Simulate how pi loads extensions: jiti import index.ts
+          # ERR_MODULE_NOT_FOUND = missing dep → fail
+          # pi-coding-agent is a host-provided peer dep; its absence is expected here
+          cd "$INSTALL_DIR"
+          npx -y jiti ./index.ts 2>&1 | tee /tmp/jiti-output.txt || true
+          if grep -q "ERR_MODULE_NOT_FOUND\|Cannot find module" /tmp/jiti-output.txt \
+             && ! grep -q "pi-coding-agent" /tmp/jiti-output.txt; then
+            echo "FAILED: missing module dependency detected"
+            cat /tmp/jiti-output.txt
+            exit 1
+          fi
+          echo "Extension import check passed"

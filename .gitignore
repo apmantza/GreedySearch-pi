@@ -13,6 +13,7 @@ results/
 !test.mjs
 !src/**/*.mjs
 !test/**/*.mjs
+!scripts/*.mjs
 
 # OS files
 .DS_Store

@@ -15,11 +15,14 @@
 	"license": "MIT",
 	"scripts": {
 		"test": "node test.mjs",
+		"test:unit": "node test.mjs unit",
 		"test:quick": "node test.mjs quick",
 		"test:smoke": "node test.mjs smoke",
 		"test:bash": "./test.sh",
 		"test:bash:quick": "./test.sh quick",
-		"test:bash:smoke": "./test.sh smoke"
+		"test:bash:smoke": "./test.sh smoke",
+		"lint": "node scripts/lint.mjs",
+		"check:lockfile": "node scripts/check-lockfile.mjs"
 	},
 	"engines": {
 		"node": ">=20.11.0"
