@@ -10,6 +10,7 @@ export const GREEDY_PROFILE_DIR = `${tmpdir().replaceAll("\\", "/")}/greedysearc
 export const ACTIVE_PORT_FILE = `${GREEDY_PROFILE_DIR}/DevToolsActivePort`;
 export const PAGES_CACHE = `${tmpdir().replaceAll("\\", "/")}/cdp-pages.json`;
 export const CHROME_MODE_FILE = `${tmpdir().replaceAll("\\", "/")}/greedysearch-chrome-mode`;
+export const VISIBLE_RECOVERY_LOG = `${tmpdir().replaceAll("\\", "/")}/greedysearch-visible-recovery.jsonl`;
 
 // ── User config: ~/.pi/greedyconfig ────────────────────────────────────────
 // Users can override which engines participate in the "all" fan-out and which

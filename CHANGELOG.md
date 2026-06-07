@@ -10,7 +10,11 @@
 
 - **Browser-level CDP command (`browse`/`browserraw`)** (`bin/cdp.mjs`) — New CLI/daemon command for browser-target CDP methods (no `sessionId`). Adds `browserRawStr()` and forwards to the existing daemon socket. Needed for `Browser.setDownloadBehavior` and any future browser-level CDP method (permissions, geolocation, etc.). The evalraw path still works; browse is just the clean way to call browser-only methods.
 
+- **Visible recovery diagnostics log** (`bin/search.mjs`, `src/search/constants.mjs`) — Headless → visible fallback attempts now append structured JSONL events to the temp-file log `greedysearch-visible-recovery.jsonl`. Entries include scope (`single`/`all`), phase (`start`/`success`/`needs-human`), affected engines, extractor envelopes, visible result mode, duration, and last stage, without logging the raw query text. ChatGPT now participates in the same visible-recovery policy on headless timeout/verification signals, and its wrapper budget is 80s so the extractor's 30s stream wait plus 35s fallback can finish cleanly.
+
 ### Fixed
+
+- **Consensus kept undocumented/de-emphasized** (`README.md`, `skills/greedy-search/skill.md`, `src/tools/greedy-search-handler.ts`) — The Consensus extractor remains available for direct use, but it is no longer advertised in the primary tool/schema docs because it hits the free quota too easily. Logically is the documented opt-in research engine for now.
 
 - **Logically full citations in headless mode** (`extractors/logically.mjs`) — The answer and inline citation popovers worked headless, but the full `Citations (N)` popover sometimes rendered without the visible-mode `All / Academic (N) / Web (N)` header and old inline citation popovers remained mounted. Full citation extraction now removes stale inline citation popovers before opening the full citations control, detects headerless card-list popovers, and falls back to the button's citation count when tab headers are absent. Headless smoke now captures the full citation list instead of falling back to inline sources only.
 

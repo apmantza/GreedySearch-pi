@@ -52,7 +52,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 		name: "greedy_search",
 		label: "Greedy Search",
 		description:
-			"WEB/RESEARCH SEARCH ONLY — searches live web via Perplexity, Google AI, ChatGPT, and Gemini, plus opt-in research engines like Consensus and Logically. " +
+			"WEB/RESEARCH SEARCH ONLY — searches live web via Perplexity, Google AI, ChatGPT, and Gemini, plus opt-in research through Logically. " +
 			"Research mode is the centerpiece: it plans follow-up actions, fetches sources, audits citations, " +
 			"and writes a structured research bundle on disk. " +
 			"Use for: library docs, recent framework changes, error messages, best practices, current events. " +
@@ -62,7 +62,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			query: Type.String({ description: "The search query" }),
 			engine: Type.String({
 				description:
-					'Engine to use: "all" (default), "perplexity", "google", "chatgpt", "gemini", "gem". Research engines: "consensus", "logically". "all" fans out to the configured engines and fetches top sources. Customize via ~/.pi/greedyconfig. Bing Copilot is still available as "bing" for signed-in users.',
+					'Engine to use: "all" (default), "perplexity", "google", "chatgpt", "gemini", "gem". Research engine: "logically". "all" fans out to the configured engines and fetches top sources. Customize via ~/.pi/greedyconfig. Bing Copilot is still available as "bing" for signed-in users.',
 				default: "all",
 			}),
 			synthesize: Type.Optional(

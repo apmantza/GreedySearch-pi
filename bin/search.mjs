@@ -20,7 +20,7 @@
 //   node search.mjs gem "latest React features"
 //   node search.mjs all "how does TCP congestion control work"
 
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 // Config file for user defaults
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -33,7 +33,12 @@ import {
 	openNewTab,
 	touchActivity,
 } from "../src/search/chrome.mjs";
-import { ALL_ENGINES, ENGINES, SYNTHESIZER } from "../src/search/constants.mjs";
+import {
+	ALL_ENGINES,
+	ENGINES,
+	SYNTHESIZER,
+	VISIBLE_RECOVERY_LOG,
+} from "../src/search/constants.mjs";
 import { runExtractor } from "../src/search/engines.mjs";
 import {
 	fetchMultipleSources,
@@ -71,6 +76,18 @@ function loadUserConfig() {
 		// Ignore errors
 	}
 	return {};
+}
+
+function logVisibleRecovery(event) {
+	try {
+		appendFileSync(
+			VISIBLE_RECOVERY_LOG,
+			`${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`,
+			"utf8",
+		);
+	} catch {
+		// Best-effort diagnostics only. Never fail a search because logging failed.
+	}
 }
 
 /** Read query/prompt from stdin (used with --stdin to avoid command-line leakage) */
@@ -367,6 +384,20 @@ async function main() {
 				recoveryCandidates.length > 0 &&
 				process.env.GREEDY_SEARCH_VISIBLE !== "1"
 			) {
+				logVisibleRecovery({
+					scope: "all",
+					phase: "start",
+					engines: recoveryCandidates,
+					reasons: Object.fromEntries(
+						recoveryCandidates.map((engineName) => [
+							engineName,
+							{
+								error: out[engineName]?.error || null,
+								envelope: out[engineName]?._envelope || null,
+							},
+						]),
+					),
+				});
 				process.stderr.write(
 					`[greedysearch] 🔓 Headless ${recoveryCandidates.join(", ")} search hit timeout/verification/antibot signals — retrying visible to establish cookies...\n`,
 				);
@@ -466,6 +497,23 @@ async function main() {
 						stillBlocked.length = 0;
 						stillBlocked.push(...secondStillBlocked);
 					}
+
+					logVisibleRecovery({
+						scope: "all",
+						phase: stillBlocked.length > 0 ? "needs-human" : "success",
+						engines: recoveryCandidates,
+						results: Object.fromEntries(
+							recoveryCandidates.map((engineName) => [
+								engineName,
+								{
+									mode: out[engineName]?._envelope?.mode || null,
+									durationMs: out[engineName]?._envelope?.durationMs || null,
+									lastStage: out[engineName]?._envelope?.lastStage || null,
+									error: out[engineName]?.error || null,
+								},
+							]),
+						),
+					});
 
 					if (stillBlocked.length > 0) {
 						for (const blockedEngine of stillBlocked) {
@@ -624,17 +672,31 @@ async function main() {
 			? "bing"
 			: script.includes("perplexity")
 				? "perplexity"
-				: script.includes("consensus")
-					? "consensus"
-					: script.includes("logically")
-						? "logically"
-						: null;
+				: script.includes("chatgpt")
+					? "chatgpt"
+					: script.includes("consensus")
+						? "consensus"
+						: script.includes("logically")
+							? "logically"
+							: null;
 		const canRetryVisible =
 			recoveryEngine &&
 			process.env.GREEDY_SEARCH_VISIBLE !== "1" &&
 			isHeadlessBlockedResult(e);
 
 		if (canRetryVisible) {
+			logVisibleRecovery({
+				scope: "single",
+				phase: "start",
+				engines: [recoveryEngine],
+				reasons: {
+					[recoveryEngine]: {
+						error: e.message || null,
+						envelope: e.envelope || null,
+						lastStage: e.lastStage || null,
+					},
+				},
+			});
 			process.stderr.write(
 				`[greedysearch] 🔓 ${recoveryEngine} blocked in headless — retrying visible to establish cookies...\n`,
 			);
@@ -655,12 +717,33 @@ async function main() {
 					null,
 					locale,
 				);
+				logVisibleRecovery({
+					scope: "single",
+					phase: "success",
+					engines: [recoveryEngine],
+					result: {
+						engine: recoveryEngine,
+						mode: result._envelope?.mode || null,
+						durationMs: result._envelope?.durationMs || null,
+						lastStage: result._envelope?.lastStage || null,
+					},
+				});
 				if (fetchSource && result.sources?.length > 0) {
 					result.topSource = await fetchTopSource(result.sources[0].url);
 				}
 				writeOutput(result, outFile, { inline, synthesize: false, query });
 				return;
 			} catch (retryErr) {
+				logVisibleRecovery({
+					scope: "single",
+					phase: "needs-human",
+					engines: [recoveryEngine],
+					result: {
+						engine: recoveryEngine,
+						error: retryErr.message || String(retryErr),
+						envelope: retryErr.envelope || null,
+					},
+				});
 				// Any visible retry failure: keep Chrome open so user can solve Turnstile.
 				// Once solved, cookies are stored in the shared profile for future headless runs.
 				keepVisibleForHuman = true;

@@ -22,14 +22,17 @@ export function runExtractor(
 	locale = null,
 ) {
 	// Gemini synthesis: 70s budget (45s stream + ~25s nav/settle overhead)
+	// ChatGPT can use a 30s in-page stream wait plus a 35s node-side fallback.
 	// Logically research answers can run academic + web searches before streaming.
 	// Other engines: 60s budget
 	if (timeoutMs === null) {
 		timeoutMs = script.includes("logically")
 			? 120000
-			: script.includes("gemini")
-				? 70000
-				: 60000;
+			: script.includes("chatgpt")
+				? 80000
+				: script.includes("gemini")
+					? 70000
+					: 60000;
 	}
 	const extraArgs = [
 		...(tabPrefix ? ["--tab", tabPrefix] : []),

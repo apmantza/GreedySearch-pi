@@ -1,13 +1,13 @@
 ---
 name: greedy-search
-description: Web/search plus opt-in research engines via Perplexity, Google AI, ChatGPT, Gemini, Consensus, and Logically. Grounded all-engine search fetches sources by default; optional configurable synthesis; deep research as separate workflow. Configurable via ~/.pi/greedyconfig. Bing Copilot available for signed-in users. Current docs, recent changes, dependency choices. NOT codebase search.
+description: Web/search plus opt-in research via Perplexity, Google AI, ChatGPT, Gemini, and Logically. Grounded all-engine search fetches sources by default; optional configurable synthesis; deep research as separate workflow. Configurable via ~/.pi/greedyconfig. Bing Copilot available for signed-in users. Current docs, recent changes, dependency choices. NOT codebase search.
 ---
 
-`greedy_search({ query, engine: "all"|"perplexity"|"google"|"chatgpt"|"gemini"|"consensus"|"logically"|"bing", synthesize?: bool, synthesizer?: "gemini"|"chatgpt", depth?: "research", breadth: 1-5, iterations: 1-3, maxSources: 3-12, researchOutDir?: string, writeResearchBundle?: bool, visible: bool })`
+`greedy_search({ query, engine: "all"|"perplexity"|"google"|"chatgpt"|"gemini"|"logically"|"bing", synthesize?: bool, synthesizer?: "gemini"|"chatgpt", depth?: "research", breadth: 1-5, iterations: 1-3, maxSources: 3-12, researchOutDir?: string, writeResearchBundle?: bool, visible: bool })`
 
 **Modes:** individual engine search · grounded `engine:"all"` search with fetched sources · optional `synthesize:true` using the configured synthesizer over all-engine results · `depth:"research"` for the iterative deep-research workflow.
 
-**Config:** `~/.pi/greedyconfig` supports `{ "engines": ["perplexity", "google", "chatgpt", "gemini", "consensus", "logically"], "synthesizer": "gemini" }`. Gemini is a normal search engine; Consensus and Logically are opt-in research engines. Any configured engine can participate in `engine:"all"`; synthesis remains controlled separately by `synthesizer`.
+**Config:** `~/.pi/greedyconfig` supports `{ "engines": ["perplexity", "google", "chatgpt", "gemini", "logically"], "synthesizer": "gemini" }`. Gemini is a normal search engine; Logically is an opt-in research engine. Any configured engine can participate in `engine:"all"`; synthesis remains controlled separately by `synthesizer`.
 
 **Compatibility:** legacy `depth:"fast"|"standard"|"deep"` is still accepted. `fast` skips source fetching; `standard`/`deep` alias `synthesize:true`. Prefer `synthesize:true`, optional `synthesizer`, and `depth:"research"` going forward.
 
