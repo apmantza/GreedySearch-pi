@@ -210,6 +210,13 @@ async function extractAnswer(tab, env) {
 	// copy button when the assistant response is still empty (0 chars) and
 	// has no copy button of its own. That copied the user's query into
 	// the clipboard interceptor and returned it as the "answer".
+	//
+	// If the assistant message has no copy button yet (still streaming, or
+	// the React tree hasn't rendered the button after streaming completed),
+	// we deliberately click NOTHING rather than falling back to the last
+	// copy button on the page. An empty clipboard routes us to the DOM
+	// fallback, which correctly targets the assistant message after the
+	// last user message and returns its innerText.
 	await cdp([
 		"eval",
 		tab,
@@ -220,8 +227,6 @@ async function extractAnswer(tab, env) {
 				if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
 			}
 			if (lastUserIdx < 0) return 'no-user';
-			// Walk forward from the last user message; find the copy
-			// button on the LAST assistant message after it.
 			let assistantCopy = null;
 			for (let i = lastUserIdx + 1; i < all.length; i++) {
 				if (all[i].getAttribute('data-message-author-role') === 'assistant') {
@@ -230,11 +235,7 @@ async function extractAnswer(tab, env) {
 				}
 			}
 			if (assistantCopy) { assistantCopy.click(); return 'clicked'; }
-			// Fallback: click the last copy button on the page (the
-			// old behaviour). Better than nothing.
-			const buttons = document.querySelectorAll('${COPY_SELECTOR}');
-			buttons[buttons.length - 1]?.click();
-			return 'fallback';
+			return 'no-assistant-copy';
 		})()`,
 	]);
 	await new Promise((r) => setTimeout(r, 600));
@@ -242,7 +243,9 @@ async function extractAnswer(tab, env) {
 	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
 	env.clipboardEmpty = !answer;
 
-	// Retry once if clipboard is empty
+	// Retry once if clipboard is empty — the assistant message may have
+	// finished streaming and the copy button may have rendered in the
+	// meantime.
 	if (!answer) {
 		console.error("[chatgpt] Clipboard empty, retrying in 2s...");
 		await cdp([
@@ -263,9 +266,7 @@ async function extractAnswer(tab, env) {
 					}
 				}
 				if (assistantCopy) { assistantCopy.click(); return 'clicked'; }
-				const buttons = document.querySelectorAll('${COPY_SELECTOR}');
-				buttons[buttons.length - 1]?.click();
-				return 'fallback';
+				return 'no-assistant-copy';
 			})()`,
 		]);
 		await new Promise((r) => setTimeout(r, 2000));
