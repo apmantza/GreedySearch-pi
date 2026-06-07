@@ -120,11 +120,7 @@ async function pollForResponseNodeSide(tab, maxMs = 15000) {
 	let stableRounds = 0;
 	while (Date.now() < deadline) {
 		const result = await cdp(
-			[
-				"eval",
-				tab,
-				`${CHATGPT_RESPONSE_SELECTOR}?.innerText?.length ?? 0`,
-			],
+			["eval", tab, `${CHATGPT_RESPONSE_SELECTOR}?.innerText?.length ?? 0`],
 			4000,
 		).catch(() => "0");
 		const len = parseInt(result, 10) || 0;

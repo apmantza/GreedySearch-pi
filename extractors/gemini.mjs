@@ -121,7 +121,7 @@ async function extractAnswerFromDom(tab) {
 	try {
 		return JSON.parse(raw);
 	} catch {
-		return { answer: '', sources: [] };
+		return { answer: "", sources: [] };
 	}
 }
 
@@ -230,10 +230,7 @@ async function extractAnswer(tab, query = "") {
 
 	const sourcesInline = parseSourcesFromMarkdown(answer);
 	const sourceMap = new Map();
-	for (const s of [
-		...(domFallback?.sources || []),
-		...sourcesInline,
-	]) {
+	for (const s of [...(domFallback?.sources || []), ...sourcesInline]) {
 		if (s?.url && !sourceMap.has(s.url)) sourceMap.set(s.url, s);
 	}
 	const sources = Array.from(sourceMap.values()).slice(0, 10);
