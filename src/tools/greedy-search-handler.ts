@@ -84,7 +84,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			"WEB/RESEARCH SEARCH ONLY — searches live web via Perplexity, Google AI, ChatGPT, and Gemini, plus opt-in research through Semantic Scholar and Logically. " +
 			"Research mode reuses the configured ~/.pi/greedyconfig engines for child searches and Gemini for planning/final synthesis. " +
 			"Research mode is the centerpiece: it plans follow-up actions, fetches sources, audits citations, " +
-			"and writes a structured research bundle on disk. " +
+			"and writes a structured research bundle on disk. Scale-aware: simple queries auto-classify and use a fast single-pass path. " +
 			"Use for: library docs, recent framework changes, error messages, best practices, current events. " +
 			"Reports streaming progress as each engine completes.",
 		promptSnippet: "Multi-engine AI web search with streaming progress",

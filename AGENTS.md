@@ -105,6 +105,7 @@ EOF
 
 Important behavior:
 
+- **Scale-aware research** — When `breadth` and `iterations` are at defaults (user didn't specify them), `classifyResearchComplexity()` runs a fast Gemini call to classify the query as simple/moderate/complex. Simple queries ("what is X") bypass the iterative loop entirely via `runSimpleResearchMode()` in `src/search/simple-research.mjs` — single all-search + fetch + evidence + synthesis, ~70% faster. Moderate queries get adjusted breadth/iterations from the classifier. Complex queries use the full default loop. User-specified `breadth`/`iterations` always override the classifier.
 - Research child searches must use `--stdin`; never leak query text in process args.
 - Child-search stderr is intentionally filtered in `runFastAllSearch()` so page CSS/HTML cannot flood Pi output. Preserve `PROGRESS:*`, `[greedysearch]`, and extractor diagnostic lines only.
 - Social/login-wall sources are low-quality citations. `src/search/sources.mjs` applies a −20 `smartScore` penalty to `SOCIAL_HOSTS` entries (facebook, linkedin, x.com, etc.) AND a hard post-sort guardrail that pins all social sources below non-social ones. The composite score formula is `smartScore*3 + engineCount*5 + priority*2 + max(0, 7-rank)`. With the −20 penalty plus the hard guardrail, a social source cannot land as S1 even if it scores highly on every other axis.
@@ -219,6 +220,16 @@ EOF
 
 node bin/search.mjs all --inline --stdin --depth research --breadth 1 --iterations 1 --max-sources 3 <<'EOF'
 What is Lightpanda browser and when should AI agents use it?
+EOF
+
+# Scale-aware: simple query should auto-classify and use fast path
+node bin/search.mjs all --inline --stdin --depth research --max-sources 3 2>&1 <<'EOF'
+What is Redis
+EOF
+
+# Scale-aware: user-specified breadth/iterations bypasses classifier
+node bin/search.mjs all --inline --stdin --depth research --breadth 3 --iterations 2 2>&1 <<'EOF'
+What is Redis
 EOF
 ```
 

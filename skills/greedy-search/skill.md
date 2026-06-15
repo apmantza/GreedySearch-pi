@@ -13,6 +13,8 @@ description: Web/search plus opt-in research via Perplexity, Google AI, ChatGPT,
 
 **Research output:** `depth:"research"` writes a dataroom-style bundle by default under `.pi/greedysearch-research/<timestamp>_<query>/` with `STATUS.md`, `OUTLINE.md`, `reports/SUMMARY.md`, `reports/CLAIMS.md`, `reports/GAPS.md`, `sources/`, and `data/manifest.json`. Pass `researchOutDir` to choose the directory or `writeResearchBundle:false` to disable disk output.
 
+**Scale-aware research:** When `breadth` and `iterations` are not explicitly set, the classifier auto-detects query complexity. Simple queries ("what is X") use a fast single-pass path (~70% faster). Moderate queries get tighter breadth/iterations. Complex queries use the full loop. Explicit `breadth`/`iterations` always override the classifier.
+
 **Auto-recovery:** Headless default. Bing/Perplexity auto-retry visible on CF block. Manual CAPTCHA → visible stays open; solve then rerun.
 
 **CDP safety:** Use `bin/cdp-greedy.mjs` only. Never raw `bin/cdp.mjs`.

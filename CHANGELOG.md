@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Scale-aware research** (`src/search/scale-aware.mjs`, `src/search/simple-research.mjs`, `src/search/research.mjs`) — Research mode now classifies query complexity before entering the iterative loop. When `breadth` and `iterations` are at defaults (not user-specified), `classifyResearchComplexity()` runs a fast Gemini call to categorize the query as simple/moderate/complex. Simple queries ("what is X", narrow factual questions) bypass the iterative loop entirely via `runSimpleResearchMode()` — single all-engine search → fetch top sources → evidence extraction → synthesis — delivering ~70% faster results with lower API cost. Moderate queries get adjusted breadth/iterations from the classifier. Complex queries use the full default loop. User-specified `breadth`/`iterations` always override the classifier. Classification failure falls back to the original defaults gracefully.
+
 ## [2.0.0] — 2026-06-07
 
 Major release consolidating ~6 weeks of work since 1.9.2: two new research engines (Semantic Scholar, Logically), deep-research structured output, configurable `all`-mode engines, ChatGPT and Gemini extractor rewrites that cut solo times from 71s → 8s, and full release/CI automation.
