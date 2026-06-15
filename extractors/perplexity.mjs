@@ -267,7 +267,67 @@ async function main() {
 
 		if (!onPerplexity) {
 			await cdp(["nav", tab, "https://www.perplexity.ai/"], 20000);
-			await new Promise((r) => setTimeout(r, 800));
+			// Wait for the React app to hydrate. In all-mode under CDP
+			// contention, the input element exists in the DOM but React
+			// hasn't attached its focus/onChange handlers yet — programmatic
+			// focus() silently fails and activeElement stays as BODY.
+			// Use a real click to trigger React's event system, then verify
+			// the input is the active element. Poll up to 15s.
+			const _inputReady = await cdp(
+				[
+					"eval",
+					tab,
+					`new Promise((resolve) => {
+						const _deadline = Date.now() + 15000;
+						function _check() {
+							const input = document.querySelector('${S.input}');
+							if (input) {
+								// Simulate a real click — this dispatches mousedown/mouseup/click
+								// events that React's synthetic event system listens for
+								const rect = input.getBoundingClientRect();
+								if (rect.width > 0 && rect.height > 0) {
+									const ev = new MouseEvent('mousedown', { bubbles: true, clientX: rect.left + 10, clientY: rect.top + 10 });
+									input.dispatchEvent(ev);
+									const ev2 = new MouseEvent('mouseup', { bubbles: true, clientX: rect.left + 10, clientY: rect.top + 10 });
+									input.dispatchEvent(ev2);
+									const ev3 = new MouseEvent('click', { bubbles: true, clientX: rect.left + 10, clientY: rect.top + 10 });
+									input.dispatchEvent(ev3);
+								}
+								input.focus();
+								if (document.activeElement === input) return resolve('ready');
+							}
+							if (Date.now() < _deadline) setTimeout(_check, 500);
+							else resolve('timeout');
+						}
+						_check();
+					})`,
+				],
+				18000,
+			).catch(() => "timeout");
+			if (_inputReady !== "ready") {
+				// Retry navigation up to 2 more times — the first nav may have
+				// been preempted by CDP contention in all-mode
+				for (let retry = 0; retry < 2; retry++) {
+					await cdp(["nav", tab, "https://www.perplexity.ai/"], 20000);
+					await new Promise((r) => setTimeout(r, 2000));
+					const _retryReady = await cdp(
+						[
+							"eval",
+							tab,
+							`(() => {
+								const input = document.querySelector('${S.input}');
+								if (!input) return false;
+								input.focus();
+								return document.activeElement === input;
+							})()`,
+						],
+						5000,
+					).catch(() => false);
+					if (_retryReady === "true") break;
+				}
+			} else {
+				await new Promise((r) => setTimeout(r, 600));
+			}
 		}
 		// Handle verification challenges (Cloudflare Turnstile, etc.)
 		const verifyResult = await handleVerification(tab, cdp, 10000);
@@ -349,7 +409,11 @@ async function main() {
 							const input = document.querySelector('${S.input}');
 							if (!input) return 'no-input';
 							input.focus();
-							if (document.activeElement !== input) return 'not-focused';
+							if (document.activeElement !== input) {
+								const activeTag = document.activeElement?.tagName || 'none';
+								const activeClass = (document.activeElement?.className || '').slice(0, 80);
+								return 'not-focused:active=' + activeTag + '.' + activeClass;
+							}
 							// execCommand('insertText') dispatches the proper input
 							// event that React's onChange listens for
 							const ok = document.execCommand('insertText', false, ${JSON.stringify(query)});
@@ -360,7 +424,11 @@ async function main() {
 				5000,
 			);
 			if (typeResult === "ok") break;
-			await new Promise((r) => setTimeout(r, 500));
+			// On not-focused, try clicking the input first to force focus
+			if (String(typeResult).startsWith("not-focused")) {
+				await cdp(["click", tab, S.input]).catch(() => {});
+			}
+			await new Promise((r) => setTimeout(r, 800));
 		}
 		if (typeResult !== "ok") {
 			throw new Error(`Perplexity type failed: ${typeResult}`);
