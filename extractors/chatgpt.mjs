@@ -12,7 +12,6 @@
 import {
 	buildEnvelope,
 	cdp,
-	cdpWithInput,
 	formatAnswer,
 	getOrOpenTab,
 	handleError,
@@ -414,7 +413,22 @@ async function main() {
 		}
 
 		logStage(env, "extract", startTime);
-		const { answer, sources, skipped } = await extractAnswer(tab, env);
+		// Retry extract up to 3 times with 2s delays. After stream-wait
+		// times out in all-mode under CDP contention, the assistant message
+		// may still be rendering. A short retry loop catches the response
+		// once it lands without burning the full 60s engine budget.
+		let extractResult;
+		for (let attempt = 0; attempt < 3; attempt++) {
+			extractResult = await extractAnswer(tab, env);
+			if (extractResult.answer) break;
+			if (attempt < 2) {
+				console.error(
+					`[chatgpt] Extract attempt ${attempt + 1} returned empty, retrying in 2s...`,
+				);
+				await new Promise((r) => setTimeout(r, 2000));
+			}
+		}
+		const { answer, sources, skipped } = extractResult;
 		// If the DOM fallback skipped the response (no real assistant
 		// message after the user's query), surface a clear error so the
 		// caller doesn't silently consume the static homepage greeting
