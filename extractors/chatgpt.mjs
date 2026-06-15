@@ -44,9 +44,28 @@ async function typeAndSubmit(tab, query) {
 	await cdp(["click", tab, PROSE_SELECTOR]);
 	await new Promise((r) => setTimeout(r, jitter(200)));
 
-	// Type via CDP (sends Input.insertText). Use stdin so long synthesis
-	// prompts do not hit Windows command-line length limits.
-	await cdpWithInput(["type", tab, "--stdin"], query);
+	// Type via execCommand — this is the only reliable way to insert text into
+	// a ProseMirror editor (ChatGPT's input). CDP's Input.insertText targets
+	// input/textarea elements and doesn't dispatch the synthetic events that
+	// ProseMirror's editor view listens for, causing the send button to stay
+	// disabled in all-mode under CDP contention.
+	const typeResult = await cdp(
+		[
+			"eval",
+			tab,
+			`(() => {
+				const editor = document.querySelector('${PROSE_SELECTOR}');
+				if (!editor) return 'no-editor';
+				editor.focus();
+				const ok = document.execCommand('insertText', false, ${JSON.stringify(query)});
+				return ok ? 'ok' : 'exec-failed';
+			})()`,
+		],
+		5000,
+	);
+	if (typeResult !== "ok") {
+		throw new Error(`ChatGPT type failed: ${typeResult}`);
+	}
 	await new Promise((r) => setTimeout(r, jitter(300)));
 
 	// Click send button
@@ -54,6 +73,7 @@ async function typeAndSubmit(tab, query) {
 		(() => {
 			const btn = document.querySelector('${SEND_SELECTOR}');
 			if (!btn) return 'no-send';
+			if (btn.disabled) return 'send-disabled';
 			btn.click();
 			return 'ok';
 		})()
@@ -61,6 +81,8 @@ async function typeAndSubmit(tab, query) {
 	const sendResult = await cdp(["eval", tab, sendCode]);
 	if (sendResult === "no-send")
 		throw new Error("ChatGPT send button not found");
+	if (sendResult === "send-disabled")
+		throw new Error("ChatGPT send button disabled — query was not registered");
 	await new Promise((r) => setTimeout(r, jitter(300)));
 }
 

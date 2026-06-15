@@ -330,14 +330,48 @@ async function main() {
 		await injectClipboardInterceptor(tab, GLOBAL_VAR);
 		await cdp(["click", tab, S.input]);
 		await new Promise((r) => setTimeout(r, jitter(400)));
-		await cdp(["type", tab, query]);
+
+		// Type via execCommand + focus. This triggers React's onChange
+		// (via the synthetic input event) in a way that Input.insertText
+		// cannot — Input.insertText sends raw text but doesn't dispatch
+		// the events that React's controlled-input system listens for.
+		// Causes the query to not register in all-mode under CDP contention.
+		const typeResult = await cdp(
+			[
+				"eval",
+				tab,
+				`(() => {
+					try {
+						const input = document.querySelector('${S.input}');
+						if (!input) return 'no-input';
+						input.focus();
+						// execCommand('insertText') dispatches the proper input
+						// event that React's onChange listens for
+						const ok = document.execCommand('insertText', false, ${JSON.stringify(query)});
+						return ok ? 'ok' : 'exec-failed';
+					} catch (e) { return 'err:' + e.message; }
+				})()`,
+			],
+			5000,
+		);
+		if (typeResult !== "ok") {
+			throw new Error(`Perplexity type failed: ${typeResult}`);
+		}
 		await new Promise((r) => setTimeout(r, jitter(400)));
 
-		// Submit with Enter (most reliable across Chrome instances)
+		// Submit with Enter — use a real KeyboardEvent on the input so React's
+		// keydown handler fires. keyCode:13 is needed for compatibility.
 		await cdp([
 			"eval",
 			tab,
-			`document.querySelector('${S.input}')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,keyCode:13})), 'ok'`,
+			`(() => {
+				const input = document.querySelector('${S.input}');
+				if (!input) return 'no-input';
+				input.focus();
+				const ev = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true });
+				input.dispatchEvent(ev);
+				return 'ok';
+			})()`,
 		]);
 
 		await waitForStreamComplete(tab, {
