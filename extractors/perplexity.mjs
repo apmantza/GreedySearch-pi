@@ -47,6 +47,84 @@ function findCopyButtonJsExpression() {
 }
 
 // ============================================================================
+// DOM fallback — read answer + sources when clipboard interceptor fails
+// ============================================================================
+
+async function extractAnswerFromDom(tab, env) {
+	// Perplexity renders the answer in a prose container after the user message.
+	// Try multiple selectors to cover layout changes across locales/versions.
+	const domExtract = await cdp(
+		[
+			"eval",
+			tab,
+			`(() => {
+				// Find the last .prose block (the answer, not the question)
+				const proseBlocks = Array.from(document.querySelectorAll('.prose, [class*="prose"], [class*="markdown"], [class*="answer-content"]'));
+				const lastProse = proseBlocks.pop();
+				if (lastProse && lastProse.innerText?.trim().length > 20) {
+					return JSON.stringify({
+						answer: lastProse.innerText.trim(),
+						method: 'prose'
+					});
+				}
+				// Fallback: find the largest text block after the input area
+				const input = document.querySelector('${S.input}');
+				if (!input) return null;
+				const inputRect = input.getBoundingClientRect();
+				const blocks = Array.from(document.querySelectorAll('div'))
+					.filter(d => {
+						const r = d.getBoundingClientRect();
+						return r.top > inputRect.bottom && d.innerText?.trim().length > 100 && d.children.length < 10;
+					})
+					.sort((a, b) => b.innerText.length - a.innerText.length);
+				if (blocks.length > 0) {
+					return JSON.stringify({
+						answer: blocks[0].innerText.trim(),
+						method: 'largest-block'
+					});
+				}
+				return null;
+			})()`,
+		],
+		5000,
+	).catch(() => null);
+
+	if (!domExtract || domExtract === "null") return null;
+
+	try {
+		const { answer, method } = JSON.parse(domExtract);
+		if (answer && answer.length > 20) {
+			env.fallbackUsed = `dom:${method}`;
+			env.clipboardEmpty = true;
+			// Try to extract sources from links near the answer
+			const sourcesExtract = await cdp(
+				[
+					"eval",
+					tab,
+					`(() => {
+						const links = Array.from(document.querySelectorAll('a[href^="https://"]'))
+							.filter(a => {
+								const href = a.href || '';
+								return !href.includes('perplexity.ai') && !href.includes('google.com') && !href.includes('gstatic');
+							})
+							.slice(0, 10)
+							.map(a => ({ title: a.innerText?.trim() || a.href, url: a.href }));
+						return JSON.stringify(links);
+					})()`,
+				],
+				3000,
+			).catch(() => "[]");
+			let sources = [];
+			try {
+				sources = JSON.parse(sourcesExtract || "[]");
+			} catch {}
+			return { answer, sources };
+		}
+	} catch {}
+	return null;
+}
+
+// ============================================================================
 // Extraction
 // ============================================================================
 
@@ -68,7 +146,17 @@ async function extractAnswer(tab, env) {
 		env.clipboardEmpty = !answer;
 	}
 
-	if (!answer) throw new Error("Clipboard interceptor returned empty text");
+	// DOM fallback: when clipboard interception fails (intermittent in headless),
+	// read the answer from the page DOM instead of triggering visible recovery.
+	if (!answer) {
+		console.error("[perplexity] Clipboard empty — trying DOM fallback...");
+		const domResult = await extractAnswerFromDom(tab, env);
+		if (domResult) {
+			console.error(`[perplexity] DOM fallback succeeded (${env.fallbackUsed})`);
+			return domResult;
+		}
+		throw new Error("Clipboard interceptor returned empty text");
+	}
 
 	const sources = parseSourcesFromMarkdown(answer);
 	return { answer: answer.trim(), sources };
