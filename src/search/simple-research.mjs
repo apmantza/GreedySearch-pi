@@ -5,16 +5,16 @@
 // compatibility with the rest of the pipeline.
 
 import { RESEARCH_ENGINES } from "./constants.mjs";
-import { buildSourceRegistry, mergeFetchDataIntoSources } from "./sources.mjs";
+import { buildSourceRegistry, mergeFetchDataIntoSources, trimText } from "./sources.mjs";
 import {
 	auditCitations,
 	buildFinalReportPrompt,
 	buildSynthesisFromEvidencePrompt,
-	checkCitationUrls,
 	computeResearchFloor,
 	createQuestionLedger,
 	extractEvidenceFromSources,
 	reconcileQuestionsFromSynthesis,
+	runCitationUrlCheck,
 	writeResearchBundle,
 } from "./research.mjs";
 import { parseStructuredJson } from "./synthesis.mjs";
@@ -30,16 +30,6 @@ const __dir = fileURLToPath(new URL(".", import.meta.url)).replace(
 	"$1",
 );
 const SEARCH_BIN = join(__dir, "..", "..", "bin", "search.mjs");
-
-function trimText(text = "", maxChars = 240) {
-	const clean = String(text).replaceAll(/\s+/g, " ").trim();
-	if (clean.length <= maxChars) return clean;
-	const truncated = clean.slice(0, maxChars);
-	const lastSpace = truncated.lastIndexOf(" ");
-	return lastSpace > 0
-		? `${truncated.slice(0, lastSpace)}...`
-		: `${truncated}...`;
-}
 
 function uniqueStrings(items, limit = Infinity) {
 	const seen = new Set();
@@ -318,20 +308,7 @@ export async function runSimpleResearchMode({
 	const citationAudit = auditCitations(synthesis.answer || "", combinedSources);
 
 	// Citation URL reachability check
-	process.stderr.write("PROGRESS:research:simple:check-urls\n");
-	let citationUrls = null;
-	try {
-		citationUrls = await checkCitationUrls(combinedSources, { timeoutMs: 6000, concurrency: 4 });
-		if (!citationUrls.ok) {
-			process.stderr.write(
-				`[greedysearch] ${citationUrls.dead.length} dead citation URL(s) detected\n`,
-			);
-		}
-	} catch (error) {
-		process.stderr.write(
-			`[greedysearch] URL reachability check failed: ${error.message}\n`,
-		);
-	}
+	const citationUrls = await runCitationUrlCheck(combinedSources);
 
 	reconcileQuestionsFromSynthesis(questions, synthesis, citationAudit);
 	const allGaps = uniqueStrings(synthesis.caveats || []);
@@ -403,6 +380,9 @@ export async function runSimpleResearchMode({
 			fetchedFiles = bundle.sourceFiles;
 			delete bundle.sourceFiles;
 		} catch (error) {
+			process.stderr.write(
+				`[greedysearch] Research bundle write failed: ${error.message}\n`,
+			);
 			bundle = { error: error.message || String(error) };
 			fetchedFiles = await writeSourcesToFiles(fetchedSources);
 		}

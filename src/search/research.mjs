@@ -1407,7 +1407,11 @@ export function auditCitations(answer, sources) {
  * Check reachability of cited source URLs via HEAD requests.
  * Returns { reachable, dead, skipped } with per-URL status.
  */
-export async function checkCitationUrls(sources, { timeoutMs = 8000, concurrency = 3 } = {}) {
+export async function checkCitationUrls(
+	sources,
+	{ timeoutMs = 6000, concurrency = 4 } = {},
+) {
+	const safeConcurrency = Math.max(1, Math.floor(concurrency || 1));
 	const citedSources = (sources || []).filter(
 		(s) => s?.id && (s?.canonicalUrl || s?.finalUrl || s?.url),
 	);
@@ -1420,8 +1424,8 @@ export async function checkCitationUrls(sources, { timeoutMs = 8000, concurrency
 	const skipped = [];
 
 	// Process in batches to avoid overwhelming
-	for (let i = 0; i < citedSources.length; i += concurrency) {
-		const batch = citedSources.slice(i, i + concurrency);
+	for (let i = 0; i < citedSources.length; i += safeConcurrency) {
+		const batch = citedSources.slice(i, i + safeConcurrency);
 		const results = await Promise.allSettled(
 			batch.map(async (source) => {
 				const url =
@@ -1444,27 +1448,42 @@ export async function checkCitationUrls(sources, { timeoutMs = 8000, concurrency
 				try {
 					const controller = new AbortController();
 					const timer = setTimeout(() => controller.abort(), timeoutMs);
-					const response = await fetch(url, {
-						method: "HEAD",
-						redirect: "follow",
-						signal: controller.signal,
-						// Minimal headers to avoid bot detection
-						headers: { "User-Agent": "GreedySearch/2.0 (research-audit)" },
-					});
-					clearTimeout(timer);
-					const ok = response.status >= 200 && response.status < 400;
-					return {
-						id: source.id,
-						url,
-						status: ok ? "reachable" : "dead",
-						httpStatus: response.status,
-					};
+					try {
+						const response = await fetch(url, {
+							method: "HEAD",
+							redirect: "follow",
+							signal: controller.signal,
+							headers: {
+								"User-Agent":
+									"Mozilla/5.0 (compatible; GreedySearch/2.0; +https://github.com/apmantza/greedysearch-pi)",
+							},
+						});
+						clearTimeout(timer);
+						const ok = response.status >= 200 && response.status < 400;
+						return {
+							id: source.id,
+							url,
+							status: ok ? "reachable" : "dead",
+							httpStatus: response.status,
+						};
+					} catch (fetchError) {
+						clearTimeout(timer);
+						return {
+							id: source.id,
+							url,
+							status: "dead",
+							error:
+								fetchError.name === "AbortError"
+									? "timeout"
+									: fetchError.message,
+						};
+					}
 				} catch (error) {
 					return {
 						id: source.id,
 						url,
 						status: "dead",
-						error: error.name === "AbortError" ? "timeout" : error.message,
+						error: error.message,
 					};
 				}
 			}),
@@ -1472,12 +1491,14 @@ export async function checkCitationUrls(sources, { timeoutMs = 8000, concurrency
 
 		for (const result of results) {
 			const value =
-				result.status === "fulfilled" ? result.value : {
-					id: "?",
-					url: "",
-					status: "dead",
-					error: result.reason?.message || "unknown",
-				};
+				result.status === "fulfilled"
+					? result.value
+					: {
+							id: "?",
+							url: "",
+							status: "dead",
+							error: result.reason?.message || "unknown",
+						};
 			if (value.status === "reachable") reachable.push(value);
 			else if (value.status === "dead") dead.push(value);
 			else skipped.push(value);
@@ -1490,6 +1511,32 @@ export async function checkCitationUrls(sources, { timeoutMs = 8000, concurrency
 		skipped,
 		ok: dead.length === 0,
 	};
+}
+
+/**
+ * Shared orchestration: run citation URL check with logging.
+ * Used by both runResearchMode() and runSimpleResearchMode() to avoid
+ * duplicating the try/catch/logging block.
+ */
+export async function runCitationUrlCheck(combinedSources) {
+	process.stderr.write("PROGRESS:research:check-urls\n");
+	try {
+		const citationUrls = await checkCitationUrls(combinedSources, {
+			timeoutMs: 6000,
+			concurrency: 4,
+		});
+		if (!citationUrls.ok) {
+			process.stderr.write(
+				`[greedysearch] ${citationUrls.dead.length} dead citation URL(s) detected\n`,
+			);
+		}
+		return citationUrls;
+	} catch (error) {
+		process.stderr.write(
+			`[greedysearch] URL reachability check failed: ${error.message}\n`,
+		);
+		return null;
+	}
 }
 
 export function computeResearchFloor({
@@ -1839,16 +1886,19 @@ function markdownList(items, fallback = "None recorded.") {
  * Write a human-readable provenance sidecar next to the research bundle.
  * Records date, rounds, sources, verification status, and floor results.
  */
-function writeProvenanceSidecar(dir, {
-	query,
-	rounds,
-	sources,
-	fetchedSources,
-	citationAudit,
-	citationUrls,
-	floor,
-	manifest,
-}) {
+function writeProvenanceSidecar(
+	dir,
+	{
+		query,
+		rounds,
+		sources,
+		fetchedSources,
+		citationAudit,
+		citationUrls,
+		floor,
+		manifest,
+	},
+) {
 	const fetchedOk = (fetchedSources || []).filter(
 		(s) => s?.contentChars > 100 || s?.fetch?.ok,
 	);
@@ -1875,7 +1925,7 @@ function writeProvenanceSidecar(dir, {
 		`- **Primary sources:** ${primarySources.length}`,
 		`- **Cited in report:** ${citedSources.length}`,
 		"",
-	]
+	];
 
 	// Cited source details
 	if (citedSources.length > 0) {
@@ -1883,24 +1933,33 @@ function writeProvenanceSidecar(dir, {
 		for (const source of citedSources) {
 			const url = source.canonicalUrl || source.finalUrl || source.url || "";
 			const fetched = source.fetch?.ok ? "✓" : "✗";
-			lines.push(`- **${source.id}:** [${source.title || url}](${url}) (${source.sourceType || "unknown"}, fetched: ${fetched})`);
+			lines.push(
+				`- **${source.id}:** [${source.title || url}](${url}) (${source.sourceType || "unknown"}, fetched: ${fetched})`,
+			);
 		}
 		lines.push("");
 	}
 
 	// URL reachability
-	if (citationUrls && (citationUrls.reachable.length > 0 || citationUrls.dead.length > 0)) {
+	if (
+		citationUrls &&
+		(citationUrls.reachable.length > 0 || citationUrls.dead.length > 0)
+	) {
 		lines.push("## URL reachability", "");
 		if (citationUrls.dead.length > 0) {
 			lines.push("");
 			lines.push("**Dead links:**");
 			for (const d of citationUrls.dead) {
-				lines.push(`- ${d.id}: ${d.url} (${d.httpStatus || d.error || "unknown"})`);
+				lines.push(
+					`- ${d.id}: ${d.url} (${d.httpStatus || d.error || "unknown"})`,
+				);
 			}
 		}
 		if (citationUrls.reachable.length > 0) {
 			lines.push("");
-			lines.push(`**Reachable:** ${citationUrls.reachable.length}/${citationUrls.reachable.length + citationUrls.dead.length}`);
+			lines.push(
+				`**Reachable:** ${citationUrls.reachable.length}/${citationUrls.reachable.length + citationUrls.dead.length}`,
+			);
 		}
 		lines.push("");
 	}
@@ -2114,17 +2173,23 @@ export async function writeResearchBundle({
 		"utf8",
 	);
 
-	// Provenance sidecar — human-readable run metadata
-	writeProvenanceSidecar(dir, {
-		query,
-		rounds,
-		sources,
-		fetchedSources,
-		citationAudit,
-		citationUrls,
-		floor,
-		manifest,
-	});
+	// Provenance sidecar — human-readable run metadata (non-critical)
+	try {
+		writeProvenanceSidecar(dir, {
+			query,
+			rounds,
+			sources,
+			fetchedSources,
+			citationAudit,
+			citationUrls,
+			floor,
+			manifest,
+		});
+	} catch (sidecarError) {
+		process.stderr.write(
+			`[greedysearch] Provenance sidecar write failed (non-critical): ${sidecarError.message}\n`,
+		);
+	}
 
 	return {
 		dir,
@@ -2694,20 +2759,7 @@ export async function runResearchMode({
 	const citationAudit = auditCitations(synthesis.answer || "", combinedSources);
 
 	// Citation URL reachability check
-	process.stderr.write("PROGRESS:research:check-urls\n");
-	let citationUrls = null;
-	try {
-		citationUrls = await checkCitationUrls(combinedSources, { timeoutMs: 6000, concurrency: 4 });
-		if (!citationUrls.ok) {
-			process.stderr.write(
-				`[greedysearch] ${citationUrls.dead.length} dead citation URL(s) detected\n`,
-			);
-		}
-	} catch (error) {
-		process.stderr.write(
-			`[greedysearch] URL reachability check failed: ${error.message}\n`,
-		);
-	}
+	const citationUrls = await runCitationUrlCheck(combinedSources);
 
 	reconcileQuestionsFromSynthesis(questions, synthesis, citationAudit);
 	const floor = computeResearchFloor({
