@@ -4,8 +4,12 @@
 // synthesis in one pass. Returns the same shape as runResearchMode() for
 // compatibility with the rest of the pipeline.
 
-import { RESEARCH_ENGINES } from "./constants.mjs";
-import { buildSourceRegistry, mergeFetchDataIntoSources, trimText } from "./sources.mjs";
+import { ALL_ENGINES, RESEARCH_ENGINES } from "./constants.mjs";
+import {
+	buildSourceRegistry,
+	mergeFetchDataIntoSources,
+	trimText,
+} from "./sources.mjs";
 import {
 	auditCitations,
 	buildFinalReportPrompt,
@@ -44,13 +48,15 @@ function uniqueStrings(items, limit = Infinity) {
 	return out;
 }
 
+// Build engine-matching regex from ALL_ENGINES so new engines are auto-forwarded
+const _enginePattern = ALL_ENGINES.join("|");
+const _engineRegex = new RegExp(`^\\[(${_enginePattern})\\]`);
+
 function shouldForwardChildStderr(line) {
 	return (
 		/^PROGRESS:/.test(line) ||
 		/^\[greedysearch\]/.test(line) ||
-		/^\[(bing|perplexity|google|gemini|chatgpt|logically|semantic-scholar)\]/.test(
-			line,
-		) ||
+		_engineRegex.test(line) ||
 		/^GreedySearch Chrome/.test(line) ||
 		/^Launching GreedySearch Chrome/.test(line) ||
 		/^Headless mode/.test(line) ||
