@@ -8,7 +8,7 @@
 
 - **Provenance sidecar** (`src/search/research.mjs`) — Research bundles now include a `provenance.md` file alongside `STATUS.md` and `manifest.json`. The sidecar is a human-readable summary recording: date, duration, mode (simple/iterative), rounds, sources consulted/fetched/cited, primary source count, per-cited-source details with URLs and fetch status, URL reachability results, citation audit pass/fail, floor check results, and overall verification status. Written automatically by `writeResearchBundle()` for both iterative and simple research paths.
 
-- **Citation URL reachability** (`src/search/research.mjs`) — After citation audit, `checkCitationUrls()` performs HEAD requests against cited source URLs (batched, 6s timeout, concurrency 4) to detect dead links. Results are included in the provenance sidecar and the `_citationUrls` return field. Dead URLs are logged to stderr during the run. Non-HTTP URLs and bot-protected endpoints are gracefully skipped.
+- **Citation URL reachability** (`src/search/research.mjs`) — After citation audit, `checkCitationUrls()` performs HEAD requests against cited source URLs (batched, 6s timeout, concurrency 4) to detect dead links. Results are included in the provenance sidecar and the `_citationUrls` return field. Dead URLs are logged to stderr during the run. Non-HTTP URLs and bot-protected endpoints are gracefully skipped. `runCitationUrlCheck()` provides shared orchestration used by both iterative and simple research modes. Uses Mozilla-compat User-Agent to avoid false 403s. Timer cleanup and concurrency guards prevent resource leaks.
 
 ## [2.0.0] — 2026-06-07
 

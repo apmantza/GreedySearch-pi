@@ -114,7 +114,7 @@ Important behavior:
 - If Gemini under-plans fewer queries than requested breadth, deterministic fallback angles fill the breadth (official docs/GitHub, benchmarks/limitations, alternatives/use-cases, anti-bot/rendering caveats). Keep this so `breadth` remains meaningful.
 - Per-round learning failures should be captured in `_research.rounds[].learningError` instead of aborting the whole run.
 - **Provenance sidecar** — `writeResearchBundle()` automatically writes a `provenance.md` alongside the bundle with: date, duration, mode (simple/iterative), rounds, sources consulted/fetched/cited, per-cited-source details, URL reachability results, citation audit pass/fail, floor checks, and overall verification status.
-- **Citation URL reachability** — After citation audit, `checkCitationUrls()` runs HEAD requests against cited URLs (batched, 6s timeout, concurrency 4) to detect dead links. Results appear in the provenance sidecar and `_citationUrls` return field. Non-HTTP and bot-protected URLs are skipped gracefully.
+- **Citation URL reachability** — After citation audit, `checkCitationUrls()` runs HEAD requests against cited URLs (batched, 6s timeout, concurrency 4) to detect dead links. `runCitationUrlCheck()` provides shared orchestration used by both iterative and simple research modes. Results appear in the provenance sidecar and `_citationUrls` return field. Non-HTTP and bot-protected URLs are skipped gracefully. Uses Mozilla-compat User-Agent; timer cleanup and concurrency guards prevent resource leaks.
 
 ## Recovery policy
 
