@@ -336,24 +336,32 @@ async function main() {
 		// cannot — Input.insertText sends raw text but doesn't dispatch
 		// the events that React's controlled-input system listens for.
 		// Causes the query to not register in all-mode under CDP contention.
-		const typeResult = await cdp(
-			[
-				"eval",
-				tab,
-				`(() => {
-					try {
-						const input = document.querySelector('${S.input}');
-						if (!input) return 'no-input';
-						input.focus();
-						// execCommand('insertText') dispatches the proper input
-						// event that React's onChange listens for
-						const ok = document.execCommand('insertText', false, ${JSON.stringify(query)});
-						return ok ? 'ok' : 'exec-failed';
-					} catch (e) { return 'err:' + e.message; }
-				})()`,
-			],
-			5000,
-		);
+		// Retry up to 3 times — execCommand can fail if the input isn't
+		// fully focused yet (common under CDP contention in all-mode).
+		let typeResult;
+		for (let attempt = 0; attempt < 3; attempt++) {
+			typeResult = await cdp(
+				[
+					"eval",
+					tab,
+					`(() => {
+						try {
+							const input = document.querySelector('${S.input}');
+							if (!input) return 'no-input';
+							input.focus();
+							if (document.activeElement !== input) return 'not-focused';
+							// execCommand('insertText') dispatches the proper input
+							// event that React's onChange listens for
+							const ok = document.execCommand('insertText', false, ${JSON.stringify(query)});
+							return ok ? 'ok' : 'exec-failed';
+						} catch (e) { return 'err:' + e.message; }
+					})()`,
+				],
+				5000,
+			);
+			if (typeResult === "ok") break;
+			await new Promise((r) => setTimeout(r, 500));
+		}
 		if (typeResult !== "ok") {
 			throw new Error(`Perplexity type failed: ${typeResult}`);
 		}
