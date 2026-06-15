@@ -51,49 +51,107 @@ function findCopyButtonJsExpression() {
 // ============================================================================
 
 async function extractAnswerFromDom(tab, env) {
+	// First wait for the page to navigate to a search results URL (perplexity.ai/search/...)
+	// The homepage has a sidebar with nav items that would be falsely picked up as the answer.
+	const navResult = await cdp(
+		[
+			"eval",
+			tab,
+			`new Promise((resolve) => {
+				const _deadline = Date.now() + 8000;
+				function _checkNav() {
+					const url = document.location.href;
+					if (url.includes('/search/') || url.includes('/thread/') || url.match(/perplexity.ai\\/[^/]+/)) {
+						resolve('navigated');
+					} else if (Date.now() < _deadline) {
+						setTimeout(_checkNav, 300);
+					} else {
+						resolve('timeout');
+					}
+				}
+				_checkNav();
+			})`,
+		],
+		10000,
+	).catch(() => "timeout");
+
+	if (navResult === "timeout") {
+		// Page never navigated to a search URL — answer extraction will be unreliable
+		return null;
+	}
+
 	// Perplexity renders the answer in a prose container after the user message.
-	// Try multiple selectors to cover layout changes across locales/versions.
+	// First wait for the answer to actually appear (up to 5s), then extract it.
 	const domExtract = await cdp(
 		[
 			"eval",
 			tab,
-			`(() => {
-				// Find the last .prose block (the answer, not the question)
-				const proseBlocks = Array.from(document.querySelectorAll('.prose, [class*="prose"], [class*="markdown"], [class*="answer-content"]'));
-				const lastProse = proseBlocks.pop();
-				if (lastProse && lastProse.innerText?.trim().length > 20) {
-					return JSON.stringify({
-						answer: lastProse.innerText.trim(),
-						method: 'prose'
-					});
+			`new Promise((resolve) => {
+				const _deadline = Date.now() + 5000;
+				function _tryExtract() {
+					try {
+						// Strategy 1: Find .prose block that's NOT the question
+						// and NOT in the sidebar/nav. The answer is the last .prose
+						// that contains substantial text and is in the main content area.
+						const proseBlocks = Array.from(document.querySelectorAll('.prose, [class*="prose"]'));
+						const candidates = proseBlocks.filter(el => {
+							const text = el.innerText?.trim() || '';
+							if (text.length < 50) return false;
+							// Exclude sidebar/nav (they're usually in <nav> or <aside> or have specific classes)
+							if (el.closest('nav, aside, [role="navigation"], [class*="sidebar"], [class*="nav-"]')) return false;
+							return true;
+						});
+						if (candidates.length > 0) {
+							const last = candidates[candidates.length - 1];
+							return resolve(JSON.stringify({ answer: last.innerText.trim(), method: 'prose' }));
+						}
+
+						// Strategy 2: Look for the answer container by data attributes
+						// Perplexity uses [data-testid*="answer"] or [class*="answer-content"]
+						const answerContainer = document.querySelector('[data-testid*="answer"], [class*="answer-content"], [class*="response-content"]');
+						if (answerContainer && answerContainer.innerText?.trim().length > 50) {
+							return resolve(JSON.stringify({ answer: answerContainer.innerText.trim(), method: 'answer-container' }));
+						}
+
+						// Strategy 3: Find the largest text block in the main content area
+						// (not in nav/aside/sidebar), positioned after the input.
+						const input = document.querySelector('${S.input}');
+						if (!input) return resolve(null);
+						const inputRect = input.getBoundingClientRect();
+						const main = document.querySelector('main, [role="main"], [class*="main-content"]') || document.body;
+						const blocks = Array.from(main.querySelectorAll('div, article, section'))
+							.filter(d => {
+								const r = d.getBoundingClientRect();
+								if (r.top <= inputRect.bottom) return false; // not below input
+								if (r.width === 0 || r.height === 0) return false; // not visible
+								if (d.closest('nav, aside, [role="navigation"], [class*="sidebar"]')) return false; // not in nav
+								const text = d.innerText?.trim() || '';
+								return text.length > 100 && d.children.length < 20;
+							})
+							.sort((a, b) => (b.innerText?.length || 0) - (a.innerText?.length || 0));
+						if (blocks.length > 0) {
+							return resolve(JSON.stringify({ answer: blocks[0].innerText.trim(), method: 'main-content' }));
+						}
+
+						// Retry if we haven't found anything yet
+						if (Date.now() < _deadline) {
+							setTimeout(_tryExtract, 400);
+						} else {
+							resolve(null);
+						}
+					} catch(e) { resolve(null); }
 				}
-				// Fallback: find the largest text block after the input area
-				const input = document.querySelector('${S.input}');
-				if (!input) return null;
-				const inputRect = input.getBoundingClientRect();
-				const blocks = Array.from(document.querySelectorAll('div'))
-					.filter(d => {
-						const r = d.getBoundingClientRect();
-						return r.top > inputRect.bottom && d.innerText?.trim().length > 100 && d.children.length < 10;
-					})
-					.sort((a, b) => b.innerText.length - a.innerText.length);
-				if (blocks.length > 0) {
-					return JSON.stringify({
-						answer: blocks[0].innerText.trim(),
-						method: 'largest-block'
-					});
-				}
-				return null;
-			})()`,
+				_tryExtract();
+			})`,
 		],
-		5000,
+		8000,
 	).catch(() => null);
 
 	if (!domExtract || domExtract === "null") return null;
 
 	try {
 		const { answer, method } = JSON.parse(domExtract);
-		if (answer && answer.length > 20) {
+		if (answer && answer.length > 50) {
 			env.fallbackUsed = `dom:${method}`;
 			env.clipboardEmpty = true;
 			// Try to extract sources from links near the answer
@@ -152,7 +210,9 @@ async function extractAnswer(tab, env) {
 		console.error("[perplexity] Clipboard empty — trying DOM fallback...");
 		const domResult = await extractAnswerFromDom(tab, env);
 		if (domResult) {
-			console.error(`[perplexity] DOM fallback succeeded (${env.fallbackUsed})`);
+			console.error(
+				`[perplexity] DOM fallback succeeded (${env.fallbackUsed})`,
+			);
 			return domResult;
 		}
 		throw new Error("Clipboard interceptor returned empty text");
@@ -223,11 +283,16 @@ async function main() {
 		// then re-navigate to homepage if we ended up somewhere else.
 		if (verifyResult === "clicked") {
 			await new Promise((r) => setTimeout(r, TIMING.afterVerify));
-			const postVerifyUrl = await cdp(["eval", tab, "document.location.href"]).catch(() => "");
+			const postVerifyUrl = await cdp([
+				"eval",
+				tab,
+				"document.location.href",
+			]).catch(() => "");
 			let onPerplexityAfter = false;
 			try {
 				const host = new URL(postVerifyUrl).hostname.toLowerCase();
-				onPerplexityAfter = host === "perplexity.ai" || host.endsWith(".perplexity.ai");
+				onPerplexityAfter =
+					host === "perplexity.ai" || host.endsWith(".perplexity.ai");
 			} catch {}
 			if (!onPerplexityAfter) {
 				await cdp(["nav", tab, "https://www.perplexity.ai/"], 20000);
@@ -242,7 +307,9 @@ async function main() {
 		if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
 			const snap = await cdp(["snap", tab]).catch(() => "");
 			if (/cloudflare|challenge|security check/i.test(snap)) {
-				console.error("[perplexity] Cloudflare challenge in snap — fast-failing to visible retry");
+				console.error(
+					"[perplexity] Cloudflare challenge in snap — fast-failing to visible retry",
+				);
 				env.blockedBy = "cloudflare";
 				throw new Error("Cloudflare challenge detected — headless blocked");
 			}
@@ -253,7 +320,9 @@ async function main() {
 		env.inputReady = inputReady;
 
 		if (!inputReady) {
-			throw new Error("Perplexity input not found — page may not have loaded or is in unexpected state");
+			throw new Error(
+				"Perplexity input not found — page may not have loaded or is in unexpected state",
+			);
 		}
 
 		await new Promise((r) => setTimeout(r, jitter(300)));
