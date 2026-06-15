@@ -1403,6 +1403,95 @@ export function auditCitations(answer, sources) {
 	};
 }
 
+/**
+ * Check reachability of cited source URLs via HEAD requests.
+ * Returns { reachable, dead, skipped } with per-URL status.
+ */
+export async function checkCitationUrls(sources, { timeoutMs = 8000, concurrency = 3 } = {}) {
+	const citedSources = (sources || []).filter(
+		(s) => s?.id && (s?.canonicalUrl || s?.finalUrl || s?.url),
+	);
+	if (citedSources.length === 0) {
+		return { reachable: [], dead: [], skipped: [], ok: true };
+	}
+
+	const reachable = [];
+	const dead = [];
+	const skipped = [];
+
+	// Process in batches to avoid overwhelming
+	for (let i = 0; i < citedSources.length; i += concurrency) {
+		const batch = citedSources.slice(i, i + concurrency);
+		const results = await Promise.allSettled(
+			batch.map(async (source) => {
+				const url =
+					source.fetch?.finalUrl ||
+					source.canonicalUrl ||
+					source.finalUrl ||
+					source.url;
+				if (!url) return { id: source.id, url: "", status: "skipped" };
+
+				// Skip non-HTTP URLs and known-unreachable patterns
+				try {
+					const parsed = new URL(url);
+					if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+						return { id: source.id, url, status: "skipped" };
+					}
+				} catch {
+					return { id: source.id, url, status: "skipped" };
+				}
+
+				try {
+					const controller = new AbortController();
+					const timer = setTimeout(() => controller.abort(), timeoutMs);
+					const response = await fetch(url, {
+						method: "HEAD",
+						redirect: "follow",
+						signal: controller.signal,
+						// Minimal headers to avoid bot detection
+						headers: { "User-Agent": "GreedySearch/2.0 (research-audit)" },
+					});
+					clearTimeout(timer);
+					const ok = response.status >= 200 && response.status < 400;
+					return {
+						id: source.id,
+						url,
+						status: ok ? "reachable" : "dead",
+						httpStatus: response.status,
+					};
+				} catch (error) {
+					return {
+						id: source.id,
+						url,
+						status: "dead",
+						error: error.name === "AbortError" ? "timeout" : error.message,
+					};
+				}
+			}),
+		);
+
+		for (const result of results) {
+			const value =
+				result.status === "fulfilled" ? result.value : {
+					id: "?",
+					url: "",
+					status: "dead",
+					error: result.reason?.message || "unknown",
+				};
+			if (value.status === "reachable") reachable.push(value);
+			else if (value.status === "dead") dead.push(value);
+			else skipped.push(value);
+		}
+	}
+
+	return {
+		reachable,
+		dead,
+		skipped,
+		ok: dead.length === 0,
+	};
+}
+
 export function computeResearchFloor({
 	sources = [],
 	fetchedSources = [],
@@ -1746,6 +1835,107 @@ function markdownList(items, fallback = "None recorded.") {
 		: fallback;
 }
 
+/**
+ * Write a human-readable provenance sidecar next to the research bundle.
+ * Records date, rounds, sources, verification status, and floor results.
+ */
+function writeProvenanceSidecar(dir, {
+	query,
+	rounds,
+	sources,
+	fetchedSources,
+	citationAudit,
+	citationUrls,
+	floor,
+	manifest,
+}) {
+	const fetchedOk = (fetchedSources || []).filter(
+		(s) => s?.contentChars > 100 || s?.fetch?.ok,
+	);
+	const primarySources = (sources || []).filter((s) =>
+		["official-docs", "repo", "maintainer-blog", "academic"].includes(
+			String(s?.sourceType || ""),
+		),
+	);
+	const citedIds = new Set(citationAudit?.cited || []);
+	const citedSources = (sources || []).filter((s) => citedIds.has(s?.id));
+
+	const lines = [
+		`# Provenance: ${query}`,
+		"",
+		`- **Date:** ${manifest?.startedAt || new Date().toISOString()}`,
+		`- **Duration:** ${manifest?.durationMs ? `${(manifest.durationMs / 1000).toFixed(1)}s` : "unknown"}`,
+		`- **Mode:** ${manifest?.terminationReason === "simple_single_pass" ? "simple (single-pass)" : "iterative"}`,
+		`- **Rounds:** ${manifest?.rounds || rounds?.length || 1}`,
+		"",
+		"## Sources",
+		"",
+		`- **Consulted:** ${sources?.length || 0}`,
+		`- **Fetched successfully:** ${fetchedOk.length}`,
+		`- **Primary sources:** ${primarySources.length}`,
+		`- **Cited in report:** ${citedSources.length}`,
+		"",
+	]
+
+	// Cited source details
+	if (citedSources.length > 0) {
+		lines.push("### Cited sources", "");
+		for (const source of citedSources) {
+			const url = source.canonicalUrl || source.finalUrl || source.url || "";
+			const fetched = source.fetch?.ok ? "✓" : "✗";
+			lines.push(`- **${source.id}:** [${source.title || url}](${url}) (${source.sourceType || "unknown"}, fetched: ${fetched})`);
+		}
+		lines.push("");
+	}
+
+	// URL reachability
+	if (citationUrls && (citationUrls.reachable.length > 0 || citationUrls.dead.length > 0)) {
+		lines.push("## URL reachability", "");
+		if (citationUrls.dead.length > 0) {
+			lines.push("");
+			lines.push("**Dead links:**");
+			for (const d of citationUrls.dead) {
+				lines.push(`- ${d.id}: ${d.url} (${d.httpStatus || d.error || "unknown"})`);
+			}
+		}
+		if (citationUrls.reachable.length > 0) {
+			lines.push("");
+			lines.push(`**Reachable:** ${citationUrls.reachable.length}/${citationUrls.reachable.length + citationUrls.dead.length}`);
+		}
+		lines.push("");
+	}
+
+	// Verification status
+	const verificationStatus = !citationAudit
+		? "NOT CHECKED"
+		: citationAudit.ok && (citationUrls?.ok ?? true)
+			? "PASS"
+			: citationAudit.ok === false
+				? "FAIL (missing citations)"
+				: "FAIL (dead links)";
+
+	lines.push(
+		"## Verification",
+		"",
+		`- **Citations:** ${citationAudit?.ok ? "PASS" : `FAIL — missing: ${(citationAudit?.missing || []).join(", ")}`}`,
+		`- **URL reachability:** ${citationUrls ? (citationUrls.ok ? "PASS" : `FAIL — ${citationUrls.dead.length} dead`) : "SKIPPED"}`,
+		`- **Floor:** ${floor?.floorMet ? "PASS" : "PARTIAL"}`,
+		`- **Overall:** ${verificationStatus}`,
+		"",
+	);
+
+	// Floor checks
+	if (floor?.checks) {
+		lines.push("## Floor checks", "");
+		for (const [name, ok] of Object.entries(floor.checks)) {
+			lines.push(`- [${ok ? "x" : " "}] ${name}`);
+		}
+		lines.push("");
+	}
+
+	writeFileSync(join(dir, "provenance.md"), lines.join("\n"), "utf8");
+}
+
 export async function writeResearchBundle({
 	query,
 	rounds,
@@ -1758,6 +1948,7 @@ export async function writeResearchBundle({
 	manifest,
 	allGaps = [],
 	questions = [],
+	citationUrls = null,
 	outDir = null,
 }) {
 	const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-").slice(0, 19);
@@ -1813,6 +2004,7 @@ export async function writeResearchBundle({
 			"- `reports/CLAIMS.md` — extracted claims with support/source IDs",
 			"- `reports/EVIDENCE.md` — goal-based source evidence",
 			"- `reports/GAPS.md` — remaining caveats and uncertainties",
+			"- `provenance.md` — human-readable run metadata and verification",
 			"- `sources/` — fetched source markdown files",
 			"- `data/manifest.json` — machine-readable run metadata",
 			"- `data/rounds.json` — per-round actions/learnings/gaps",
@@ -1921,11 +2113,25 @@ export async function writeResearchBundle({
 		].join("\n"),
 		"utf8",
 	);
+
+	// Provenance sidecar — human-readable run metadata
+	writeProvenanceSidecar(dir, {
+		query,
+		rounds,
+		sources,
+		fetchedSources,
+		citationAudit,
+		citationUrls,
+		floor,
+		manifest,
+	});
+
 	return {
 		dir,
 		statusPath: join(dir, "STATUS.md"),
 		summaryPath: join(reportsDir, "SUMMARY.md"),
 		manifestPath: join(dataDir, "manifest.json"),
+		provenancePath: join(dir, "provenance.md"),
 		sourceCount: sourceFiles.length,
 		sourceFiles,
 	};
@@ -2486,6 +2692,23 @@ export async function runResearchMode({
 	// Citation audit + final question reconciliation + deterministic completion floor
 	process.stderr.write("PROGRESS:research:audit-citations\n");
 	const citationAudit = auditCitations(synthesis.answer || "", combinedSources);
+
+	// Citation URL reachability check
+	process.stderr.write("PROGRESS:research:check-urls\n");
+	let citationUrls = null;
+	try {
+		citationUrls = await checkCitationUrls(combinedSources, { timeoutMs: 6000, concurrency: 4 });
+		if (!citationUrls.ok) {
+			process.stderr.write(
+				`[greedysearch] ${citationUrls.dead.length} dead citation URL(s) detected\n`,
+			);
+		}
+	} catch (error) {
+		process.stderr.write(
+			`[greedysearch] URL reachability check failed: ${error.message}\n`,
+		);
+	}
+
 	reconcileQuestionsFromSynthesis(questions, synthesis, citationAudit);
 	const floor = computeResearchFloor({
 		sources: combinedSources,
@@ -2533,6 +2756,7 @@ export async function runResearchMode({
 				evidenceItems,
 				synthesis,
 				citationAudit,
+				citationUrls,
 				floor,
 				manifest,
 				allGaps,
@@ -2572,6 +2796,7 @@ export async function runResearchMode({
 			manifest,
 		},
 		_citationAudit: citationAudit,
+		_citationUrls: citationUrls,
 		_sources: combinedSources,
 		_fetchedSources: fetchedFiles,
 		_synthesis: synthesis,

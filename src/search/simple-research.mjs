@@ -10,6 +10,7 @@ import {
 	auditCitations,
 	buildFinalReportPrompt,
 	buildSynthesisFromEvidencePrompt,
+	checkCitationUrls,
 	computeResearchFloor,
 	createQuestionLedger,
 	extractEvidenceFromSources,
@@ -315,6 +316,23 @@ export async function runSimpleResearchMode({
 	// Step 5: Citation audit + floor check
 	process.stderr.write("PROGRESS:research:simple:audit\n");
 	const citationAudit = auditCitations(synthesis.answer || "", combinedSources);
+
+	// Citation URL reachability check
+	process.stderr.write("PROGRESS:research:simple:check-urls\n");
+	let citationUrls = null;
+	try {
+		citationUrls = await checkCitationUrls(combinedSources, { timeoutMs: 6000, concurrency: 4 });
+		if (!citationUrls.ok) {
+			process.stderr.write(
+				`[greedysearch] ${citationUrls.dead.length} dead citation URL(s) detected\n`,
+			);
+		}
+	} catch (error) {
+		process.stderr.write(
+			`[greedysearch] URL reachability check failed: ${error.message}\n`,
+		);
+	}
+
 	reconcileQuestionsFromSynthesis(questions, synthesis, citationAudit);
 	const allGaps = uniqueStrings(synthesis.caveats || []);
 	const floor = computeResearchFloor({
@@ -364,6 +382,7 @@ export async function runSimpleResearchMode({
 				evidenceItems,
 				synthesis,
 				citationAudit,
+				citationUrls,
 				floor,
 				manifest: {
 					...baseManifest,
@@ -422,6 +441,7 @@ export async function runSimpleResearchMode({
 			manifest: baseManifest,
 		},
 		_citationAudit: citationAudit,
+		_citationUrls: citationUrls,
 		_sources: combinedSources,
 		_fetchedSources: fetchedFiles,
 		_synthesis: synthesis,

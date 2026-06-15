@@ -6,6 +6,10 @@
 
 - **Scale-aware research** (`src/search/scale-aware.mjs`, `src/search/simple-research.mjs`, `src/search/research.mjs`) — Research mode now classifies query complexity before entering the iterative loop. When `breadth` and `iterations` are at defaults (not user-specified), `classifyResearchComplexity()` runs a fast Gemini call to categorize the query as simple/moderate/complex. Simple queries ("what is X", narrow factual questions) bypass the iterative loop entirely via `runSimpleResearchMode()` — single all-engine search → fetch top sources → evidence extraction → synthesis — delivering ~70% faster results with lower API cost. Moderate queries get adjusted breadth/iterations from the classifier. Complex queries use the full default loop. User-specified `breadth`/`iterations` always override the classifier. Classification failure falls back to the original defaults gracefully.
 
+- **Provenance sidecar** (`src/search/research.mjs`) — Research bundles now include a `provenance.md` file alongside `STATUS.md` and `manifest.json`. The sidecar is a human-readable summary recording: date, duration, mode (simple/iterative), rounds, sources consulted/fetched/cited, primary source count, per-cited-source details with URLs and fetch status, URL reachability results, citation audit pass/fail, floor check results, and overall verification status. Written automatically by `writeResearchBundle()` for both iterative and simple research paths.
+
+- **Citation URL reachability** (`src/search/research.mjs`) — After citation audit, `checkCitationUrls()` performs HEAD requests against cited source URLs (batched, 6s timeout, concurrency 4) to detect dead links. Results are included in the provenance sidecar and the `_citationUrls` return field. Dead URLs are logged to stderr during the run. Non-HTTP URLs and bot-protected endpoints are gracefully skipped.
+
 ## [2.0.0] — 2026-06-07
 
 Major release consolidating ~6 weeks of work since 1.9.2: two new research engines (Semantic Scholar, Logically), deep-research structured output, configurable `all`-mode engines, ChatGPT and Gemini extractor rewrites that cut solo times from 71s → 8s, and full release/CI automation.
@@ -18,7 +22,6 @@ Major release consolidating ~6 weeks of work since 1.9.2: two new research engin
 - **Tarball entry-point verification** (`.github/workflows/ci.yml`) — CI now verifies every entry in `pi.extensions`, `pi.skills`, and `files` exists in the published tarball (not just `package.json`). Catches typos in the whitelist that would cause "module not found" at runtime.
 - **Extension-load check** (`.github/workflows/ci.yml`) — `npx jiti ./index.ts` smoke test on the globally-installed tarball that catches missing dependencies. The `pi-coding-agent` peer-dep absence is expected and ignored.
 - **CONTRIBUTING.md** — new document with the extractor authoring guide (clipboard interception, single-eval stream wait, language-agnostic selectors, registration in two places, headless fast-fail, recovery engine list, docs to update), and recovery-policy notes. Links to AGENTS.md for architecture details.
-
 
 ### Added
 
@@ -339,8 +342,8 @@ Major release consolidating ~6 weeks of work since 1.9.2: two new research engin
 ### Security
 
 - **SonarCloud security hotspots fixed** — Two open hotspots resolved:
-  - _Weak cryptography (S2245)_ in `extractors/consent.mjs`: replaced `Math.random()` with `crypto.randomInt()` for the mouse-jitter RNG. Not actually security-sensitive (used only for ±3px jitter and timing delays), but compliant now.
-  - _PATH injection (S4036)_ in `src/search/chrome.mjs`: `spawn("node", ...)` replaced with `spawn(process.execPath, ...)` so the launcher doesn't rely on the `PATH` environment variable.
+  - *Weak cryptography (S2245)* in `extractors/consent.mjs`: replaced `Math.random()` with `crypto.randomInt()` for the mouse-jitter RNG. Not actually security-sensitive (used only for ±3px jitter and timing delays), but compliant now.
+  - *PATH injection (S4036)* in `src/search/chrome.mjs`: `spawn("node", ...)` replaced with `spawn(process.execPath, ...)` so the launcher doesn't rely on the `PATH` environment variable.
 - **Query/prompt leakage prevention** — Queries and synthesis prompts no longer appear in OS process tables. All `spawn()` calls now pipe query/prompt through stdin via `--stdin` flag instead of command-line arguments. Affects `runSearch`, `runExtractor`, `synthesizeWithGemini`, and all 5 extractors (`perplexity`, `bing-copilot`, `google-ai`, `google-search`, `gemini`).
 
 ### Visual

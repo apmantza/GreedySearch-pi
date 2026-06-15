@@ -113,6 +113,8 @@ Important behavior:
 - The open-question ledger is capped at `MAX_OPEN_FOLLOWUPS = 5` per round. Overflow "Discovered gap/follow-up" questions are auto-resolved with evidence rather than carried forward, keeping the floor check (`computeResearchFloor.requiredQuestions`) meaningful.
 - If Gemini under-plans fewer queries than requested breadth, deterministic fallback angles fill the breadth (official docs/GitHub, benchmarks/limitations, alternatives/use-cases, anti-bot/rendering caveats). Keep this so `breadth` remains meaningful.
 - Per-round learning failures should be captured in `_research.rounds[].learningError` instead of aborting the whole run.
+- **Provenance sidecar** — `writeResearchBundle()` automatically writes a `provenance.md` alongside the bundle with: date, duration, mode (simple/iterative), rounds, sources consulted/fetched/cited, per-cited-source details, URL reachability results, citation audit pass/fail, floor checks, and overall verification status.
+- **Citation URL reachability** — After citation audit, `checkCitationUrls()` runs HEAD requests against cited URLs (batched, 6s timeout, concurrency 4) to detect dead links. Results appear in the provenance sidecar and `_citationUrls` return field. Non-HTTP and bot-protected URLs are skipped gracefully.
 
 ## Recovery policy
 
@@ -171,6 +173,7 @@ Two subtle bugs to know about when modifying the extractor:
 2. **Copy button on the wrong target** — `document.querySelectorAll('[data-testid="copy-turn-action-button"]')[buttons.length - 1]` picks the absolute last copy button on the page. When the assistant response is still empty (0 chars) it has no copy button of its own, so the last button is the USER message's copy button — clicking it copies the user's query into the clipboard interceptor and the extractor returns it as a "successful" answer. Find the copy button on the assistant message specifically, and if none exists, click nothing (the DOM fallback handles it).
 
 `extractors/chatgpt.mjs` uses:
+
 - `waitForStreamComplete(tab, { minLength: 1, timeout: 20000, ... })` from `common.mjs` — the same shared helper Perplexity and Gemini use.
 - 15s node-side fallback (`pollForResponseNodeSide`) for throttled `all`-mode tabs where the in-browser poll is clamped to 1Hz.
 - A DOM fallback that reads the assistant message's innerText (skipping the static greeting card by finding the message after the last user message).
@@ -181,6 +184,7 @@ Two subtle bugs to know about when modifying the extractor:
 Gemini uses a Material Design icon-based copy button (`button:has(mat-icon[data-mat-icon-name="copy"])`). The page has many copy icons (copy link, copy code, etc.), so the absolute last copy button is not always the assistant's response copy button.
 
 `extractors/gemini.mjs` therefore:
+
 1. Waits for the `model-response` custom element to have content > 20 chars (not just the locale-specific "Gemini said" / "Το Gemini είπε" label).
 2. Clicks the copy button on the `model-response` element specifically.
 3. Falls back to the `model-response` innerText if the clipboard contains the user's query (echoed-query detection) or is empty.
@@ -256,11 +260,13 @@ Releases are fully automated via `.github/workflows/release.yml`. The flow mirro
 1. **Bump version** in `package.json` (e.g. `1.9.2` → `2.0.0`).
 2. **Add a CHANGELOG entry** under `## [X.Y.Z] — YYYY-MM-DD` in `CHANGELOG.md`. Move content from the `[Unreleased]` section into the new version section (the `[Unreleased]` section should be empty after the bump). The release workflow's `prepare` job greps for `^## \[$VERSION\]` and fails the release if the entry is missing.
 3. **Run local checks** before pushing:
+
    ```bash
    npm run check:lockfile  # package.json ↔ package-lock.json sync
    npm run lint            # node --check on all .mjs files
    node test.mjs unit      # 86+ unit tests
    ```
+
 4. **Commit and push to master** with a clear conventional message (e.g. `release: 2.0.0`).
 
 ### What the CI does on push to master
@@ -324,6 +330,7 @@ This is the difference between ChatGPT timing out at 60s (Node polling) and fini
 ### 4. Language-agnostic selectors
 
 Never match on English text (`innerText.includes("Sign in")`). Use:
+
 - Data attributes (`data-testid`, `data-mat-icon-name`)
 - DOM structure (`div.ProseMirror`, `textarea[name="prompt-textarea"]`)
 - OAuth endpoint URLs in `href` (`login.microsoftonline.com`)
