@@ -20,7 +20,12 @@ export const VISIBLE_RECOVERY_LOG = `${tmpdir().replaceAll("\\", "/")}/greedysea
 const CONFIG_DIR = join(homedir(), ".pi");
 const CONFIG_FILE = join(CONFIG_DIR, "greedyconfig");
 
-export const DEFAULT_ENGINES = ["perplexity", "google", "chatgpt"];
+export const DEFAULT_ENGINES = [
+	"perplexity",
+	"google",
+	"chatgpt",
+	"semantic-scholar",
+];
 export const DEFAULT_SYNTHESIZER = "gemini";
 
 function loadUserEngines() {
