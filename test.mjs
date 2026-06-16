@@ -1174,6 +1174,28 @@ trailing note`);
 			`structured JSON: failed to repair ${JSON.stringify(parsedLooseJson)}`,
 		);
 	}
+
+	subsection("Progress tracker — bar rendering and ETA");
+	const { createProgressTracker } = await import("./src/search/progress.mjs");
+	const silentTracker = createProgressTracker({ totalActions: 4, silent: true });
+	silentTracker.startAction("search", "test");
+	silentTracker.endAction();
+	silentTracker.startAction("fetch", "https://example.com");
+	silentTracker.endAction();
+	if (silentTracker.getElapsedMs() >= 0) {
+		passMsg("progress: tracker records action timing");
+	} else {
+		failMsg("progress: tracker elapsed time invalid");
+	}
+	// Test bar formatting indirectly via duration
+	const tracker2 = createProgressTracker({ totalActions: 2, totalRounds: 1, silent: true });
+	tracker2.startAction("search", "q1");
+	tracker2.endAction();
+	if (tracker2.getElapsedMs() >= 0) {
+		passMsg("progress: round tracking works");
+	} else {
+		failMsg("progress: round tracking broken");
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

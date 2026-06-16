@@ -22,6 +22,7 @@ import { RESEARCH_ENGINES } from "./constants.mjs";
 import { runGeminiPrompt } from "./synthesis-runner.mjs";
 import { classifyResearchComplexity } from "./scale-aware.mjs";
 import { runSimpleResearchMode } from "./simple-research.mjs";
+import { createProgressTracker } from "./progress.mjs";
 
 const __dir = fileURLToPath(new URL(".", import.meta.url)).replace(
 	/^\/([A-Z]:)/,
@@ -2286,6 +2287,18 @@ export async function runResearchMode({
 	let totalFetches = 0;
 	const engineFailures = [];
 
+	// Progress bar with ETA — pre-compute totals from plan so the bar
+	// reflects the full run, not just the current round. The actual
+	// actions per round come from Gemini's plan; we estimate 1 fetch
+	// per academic source found.
+	const progressTracker = createProgressTracker({
+		totalActions: options.iterations * options.breadth,
+		totalRounds: options.iterations,
+		totalFetches: options.iterations, // estimate: ~1 fetch per round
+		silent: process.env.GREEDY_RESEARCH_QUIET === "1",
+	});
+	progressTracker.startRound(1);
+
 	process.stderr.write(
 		`[greedysearch] Research mode: breadth ${options.breadth}, iterations ${options.iterations}, qualityThreshold ${qualityThreshold}, engines ${RESEARCH_ENGINES.join(",")}, synthesizer gemini\n`,
 	);
@@ -2399,6 +2412,10 @@ export async function runResearchMode({
 			process.stderr.write(
 				`[greedysearch] Action ${i + 1}/${roundActions.length} [${action.type}]: ${(action.query || action.url).slice(0, 80)}\n`,
 			);
+			progressTracker.startAction(
+				action.type,
+				(action.query || action.url || "").slice(0, 60),
+			);
 			const run = await executeResearchAction(action, {
 				locale,
 				short,
@@ -2406,10 +2423,14 @@ export async function runResearchMode({
 				usedUrls,
 				maxChars: 8000,
 			});
+			progressTracker.endAction();
 			actionRuns.push(run);
 			totalActionsRun++;
 			if (action.type === "search") totalSearches++;
-			if (action.type === "fetchUrl") totalFetches++;
+			if (action.type === "fetchUrl") {
+				totalFetches++;
+				progressTracker.endFetch(run.ok);
+			}
 			if (!run.ok) {
 				engineFailures.push({
 					round: roundNumber,
@@ -2570,6 +2591,10 @@ export async function runResearchMode({
 
 		// Quality evaluation
 		process.stderr.write(`PROGRESS:research:round-${roundNumber}:evaluating\n`);
+		progressTracker.endRound();
+		if (roundNumber < options.iterations) {
+			progressTracker.startRound(roundNumber + 1);
+		}
 		const evaluation = await evaluateResearchQuality(
 			query,
 			rounds,
@@ -2832,6 +2857,7 @@ export async function runResearchMode({
 	}
 
 	process.stderr.write("PROGRESS:research:done\n");
+	progressTracker.finish();
 
 	return {
 		query,
