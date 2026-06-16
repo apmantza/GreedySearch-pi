@@ -472,18 +472,18 @@ async function main() {
 			const postSnap = await cdp(["snap", tab]).catch(() => "");
 			// [dialog] + upgrade-related button + no answer prose = rate-limit wall
 			if (
-					/\[dialog\]/i.test(postSnap) &&
-					/Pro|αναβάθμιση|upgrade/i.test(postSnap) &&
-					!/\.prose|\[article\]/i.test(postSnap)
-				) {
-					console.error(
-						"[perplexity] Rate Limited — skipping (visible retry won't help)",
-					);
-					env.blockedBy = "rate-limit";
-					throw new Error(
-						"Rate Limited — Perplexity free search limit reached. Wait a few hours or upgrade to Pro.",
-					);
-				}
+				/\[dialog\]/i.test(postSnap) &&
+				/Pro|αναβάθμιση|upgrade/i.test(postSnap) &&
+				!/\.prose|\[article\]/i.test(postSnap)
+			) {
+				console.error(
+					"[perplexity] Rate Limited — skipping (visible retry won't help)",
+				);
+				env.blockedBy = "rate-limit";
+				throw new Error(
+					"Rate Limited — Perplexity free search limit reached. Wait a few hours.",
+				);
+			}
 		}
 
 		const { answer, sources } = await extractAnswer(tab, env);
