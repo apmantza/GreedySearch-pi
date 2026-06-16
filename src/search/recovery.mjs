@@ -63,7 +63,11 @@ export function findHeadlessBlockedEngines(resultsByEngine) {
 export function isHeadlessBlockedResult(error) {
 	if (!error) return false;
 	const env = error.envelope;
-	if (env?.blockedBy) return true;
+	if (env?.blockedBy) {
+		// Skip non-recoverable blocks (rate-limit, ban, etc.)
+		if (NON_RECOVERABLE_BLOCKED_BY.has(env.blockedBy)) return false;
+		return true;
+	}
 	if (env?.verificationResult === "needs-human") return true;
 	return isHeadlessBlockedError(error.message);
 }
