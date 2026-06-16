@@ -85,39 +85,45 @@ async function scrollToBottom(tab) {
  * the assistant's response copy button).
  */
 async function extractAnswerFromDom(tab) {
-	const raw = await cdp([
-		"eval",
-		tab,
-		String.raw`
-		(() => {
-			// The model-response element is a custom element <model-response>.
-			// Its innerText starts with the "Gemini said" label in the
-			// current locale; strip that prefix and return the rest.
-			const resp = document.querySelector('model-response');
-			if (!resp) return JSON.stringify({ answer: '', sources: [] });
-			const text = (resp.innerText || resp.textContent || '').trim();
-			// Strip the locale-specific "Gemini said" label prefix.
-			// It varies ("Το Gemini είπε" in Greek, "Gemini said" in
-			// English, etc.) so we just look for the first newline and
-			// take what follows.
-			const idx = text.indexOf('\n');
-			const answer = idx >= 0 ? text.slice(idx + 1).trim() : text;
-			if (!answer) return JSON.stringify({ answer: '', sources: [] });
-			// Extract source links from the response.
-			const seen = new Set();
-			const sources = [];
-			for (const link of resp.querySelectorAll('a[href]')) {
-				const url = link.href;
-				if (!url || seen.has(url)) continue;
-				seen.add(url);
-				const title = (link.innerText || link.textContent || '').replace(/\s+/g, ' ').trim();
-				sources.push({ title, url });
-				if (sources.length >= 10) break;
-			}
-			return JSON.stringify({ answer, sources });
-		})()
-	`,
-	]);
+	const raw = await cdp(
+		[
+			"eval",
+			tab,
+			String.raw`
+			new Promise((resolve) => {
+				const _deadline = Date.now() + 6000;
+				function _tryExtract() {
+					const resp = document.querySelector('model-response');
+					if (resp) {
+						const text = (resp.innerText || resp.textContent || '').trim();
+						const idx = text.indexOf('\n');
+						const answer = idx >= 0 ? text.slice(idx + 1).trim() : text;
+						if (answer) {
+							const seen = new Set();
+							const sources = [];
+							for (const link of resp.querySelectorAll('a[href]')) {
+								const url = link.href;
+								if (!url || seen.has(url)) continue;
+								seen.add(url);
+								const title = (link.innerText || link.textContent || '').replace(/\s+/g, ' ').trim();
+								sources.push({ title, url });
+								if (sources.length >= 10) break;
+							}
+							return resolve(JSON.stringify({ answer, sources }));
+						}
+					}
+					if (Date.now() < _deadline) {
+						setTimeout(_tryExtract, 500);
+					} else {
+						resolve(JSON.stringify({ answer: '', sources: [] }));
+					}
+				}
+				_tryExtract();
+			})
+		`,
+		],
+		8000,
+	);
 	try {
 		return JSON.parse(raw);
 	} catch {
