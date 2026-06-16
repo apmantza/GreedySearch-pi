@@ -98,7 +98,12 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	section("🧪 Unit Tests");
 
 	subsection("stripQuotes — param double-escaping workaround (issue #2)");
-	const { stripQuotes } = await import("./src/tools/shared.ts");
+	// Inlined from src/tools/shared.ts — importing the .ts file from
+	// test.mjs works at the project root (Node strips types) but fails
+	// when test.mjs runs from the installed tarball in node_modules
+	// (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING). Keep in sync with
+	// src/tools/shared.ts.
+	const stripQuotes = (val) => String(val ?? "").replace(/^"|"$/g, "");
 
 	const stripCases = [
 		// [input, expected, label]
@@ -974,6 +979,111 @@ END_JSON`,
 		passMsg("citation audit: S2 flagged as unfetched (no content)");
 	} else {
 		failMsg("citation audit: S2 should be flagged as unfetched");
+	}
+
+	subsection("Citation URL Reachability — checkCitationUrls");
+	const { checkCitationUrls, runCitationUrlCheck } = await import(
+		"./src/search/research.mjs"
+	);
+
+	// Empty sources → ok
+	const emptyResult = await checkCitationUrls([]);
+	if (emptyResult.ok && emptyResult.reachable.length === 0) {
+		passMsg("checkCitationUrls: empty sources returns ok");
+	} else {
+		failMsg(
+			`checkCitationUrls: empty sources unexpected: ${JSON.stringify(emptyResult)}`,
+		);
+	}
+
+	// Non-HTTP URLs are skipped
+	const nonHttpResult = await checkCitationUrls([
+		{ id: "S1", url: "ftp://example.com/file" },
+		{ id: "S2", url: "not-a-url" },
+	]);
+	if (
+		nonHttpResult.ok &&
+		nonHttpResult.skipped.length === 2 &&
+		nonHttpResult.reachable.length === 0
+	) {
+		passMsg("checkCitationUrls: non-HTTP URLs are skipped");
+	} else {
+		failMsg(
+			`checkCitationUrls: non-HTTP unexpected: ${JSON.stringify(nonHttpResult)}`,
+		);
+	}
+
+	// Concurrency guard: concurrency=0 should not infinite loop
+	const concurrencyResult = await checkCitationUrls(
+		[{ id: "S1", url: "https://example.com" }],
+		{ concurrency: 0, timeoutMs: 2000 },
+	);
+	if (concurrencyResult.ok || concurrencyResult.dead.length > 0) {
+		passMsg("checkCitationUrls: concurrency=0 does not infinite loop");
+	} else {
+		failMsg(
+			`checkCitationUrls: concurrency=0 unexpected: ${JSON.stringify(concurrencyResult)}`,
+		);
+	}
+
+	// runCitationUrlCheck returns null on error (non-throwing)
+	const runResult = await runCitationUrlCheck([]);
+	if (runResult && runResult.ok) {
+		passMsg("runCitationUrlCheck: empty sources returns ok");
+	} else {
+		failMsg(
+			`runCitationUrlCheck: empty sources unexpected: ${JSON.stringify(runResult)}`,
+		);
+	}
+
+	subsection("Provenance Sidecar — writeProvenanceSidecar");
+	const { writeProvenanceSidecar } = await import("./src/search/research.mjs");
+	const { existsSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+
+	const testProvenanceDir = join(
+		tmpdir(),
+		`greedysearch-test-provenance-${Date.now()}`,
+	);
+	mkdirSync(testProvenanceDir, { recursive: true });
+
+	try {
+		writeProvenanceSidecar(testProvenanceDir, {
+			query: "test query",
+			rounds: [{ round: 1, actions: [], learnings: [], gaps: [] }],
+			sources: [{ id: "S1", title: "Test Source" }],
+			fetchedSources: [{ id: "S1", contentChars: 500 }],
+			citationAudit: { ok: true, cited: ["S1"], missing: [], unfetched: [] },
+			citationUrls: { reachable: [], dead: [], skipped: [], ok: true },
+			floor: { floorMet: true, checks: { citationsPresent: true } },
+			manifest: {
+				startedAt: "2026-01-01",
+				finishedAt: "2026-01-01",
+				durationMs: 1000,
+			},
+		});
+
+		const provenancePath = join(testProvenanceDir, "provenance.md");
+		if (existsSync(provenancePath)) {
+			const content = readFileSync(provenancePath, "utf8");
+			if (content.includes("test query") && content.includes("S1")) {
+				passMsg(
+					"writeProvenanceSidecar: writes provenance.md with query and sources",
+				);
+			} else {
+				failMsg(
+					"writeProvenanceSidecar: provenance.md missing expected content",
+				);
+			}
+		} else {
+			failMsg("writeProvenanceSidecar: provenance.md not created");
+		}
+	} catch (e) {
+		failMsg(`writeProvenanceSidecar: threw error: ${e.message}`);
+	} finally {
+		try {
+			rmSync(testProvenanceDir, { recursive: true, force: true });
+		} catch {}
 	}
 
 	subsection("Research Floor and Question Ledger");
