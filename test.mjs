@@ -1177,7 +1177,10 @@ trailing note`);
 
 	subsection("Progress tracker — bar rendering and ETA");
 	const { createProgressTracker } = await import("./src/search/progress.mjs");
-	const silentTracker = createProgressTracker({ totalActions: 4, silent: true });
+	const silentTracker = createProgressTracker({
+		totalActions: 4,
+		silent: true,
+	});
 	silentTracker.startAction("search", "test");
 	silentTracker.endAction();
 	silentTracker.startAction("fetch", "https://example.com");
@@ -1188,7 +1191,11 @@ trailing note`);
 		failMsg("progress: tracker elapsed time invalid");
 	}
 	// Test bar formatting indirectly via duration
-	const tracker2 = createProgressTracker({ totalActions: 2, totalRounds: 1, silent: true });
+	const tracker2 = createProgressTracker({
+		totalActions: 2,
+		totalRounds: 1,
+		silent: true,
+	});
 	tracker2.startAction("search", "q1");
 	tracker2.endAction();
 	if (tracker2.getElapsedMs() >= 0) {

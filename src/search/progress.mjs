@@ -77,10 +77,8 @@ export function createProgressTracker({
 
 	function buildStatus(phase) {
 		const elapsed = Date.now() - startedAt;
-		const total =
-			totalActions + totalFetches + totalRounds;
-		const done =
-			completedActions + completedFetches + completedRounds;
+		const total = totalActions + totalFetches + totalRounds;
+		const done = completedActions + completedFetches + completedRounds;
 		const progress = total > 0 ? Math.min(1, done / total) : 0;
 		const bar = renderBar(progress);
 		const avg = avgActionMs();

@@ -239,7 +239,9 @@ export async function runSimpleResearchMode({
 	process.stderr.write("PROGRESS:research:simple:fetching\n");
 	if (combinedSources.length > 0) {
 		try {
-			progressTracker.startFetch(`top ${Math.min(maxSources, combinedSources.length)} sources`);
+			progressTracker.startFetch(
+				`top ${Math.min(maxSources, combinedSources.length)} sources`,
+			);
 			fetchedSources = await fetchMultipleSources(
 				combinedSources,
 				Math.min(maxSources, combinedSources.length),
