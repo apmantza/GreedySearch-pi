@@ -48,6 +48,39 @@ function uniqueStrings(items, limit = Infinity) {
 	return out;
 }
 
+// Build 3 distinct search angles for direct-mode research. Inspired by
+// Feynman's deepresearch prompt: definition, mechanism, current usage.
+export function buildSearchAngles(query) {
+	const trimmed = String(query || "").trim();
+	if (!trimmed) return [];
+	return [
+		`${trimmed} — definition and overview`,
+		`${trimmed} — how it works, mechanism, or key details`,
+		`${trimmed} — current usage, comparison, or best practices`,
+	];
+}
+
+// Merge sources from multiple search angles, deduplicating by URL.
+export function mergeSourcesByUrl(existing, incoming) {
+	const urlMap = new Map();
+	for (const s of existing || []) {
+		const key = s?.canonicalUrl || s?.finalUrl || s?.url;
+		if (key) urlMap.set(key, s);
+	}
+	for (const s of incoming || []) {
+		const key = s?.canonicalUrl || s?.finalUrl || s?.url;
+		if (!key) continue;
+		if (urlMap.has(key)) {
+			// Merge: keep existing but note the new angle
+			const merged = { ...urlMap.get(key), angles: [...(urlMap.get(key).angles || [urlMap.get(key).query || '']), s.query || ''] };
+			urlMap.set(key, merged);
+		} else {
+			urlMap.set(key, s);
+		}
+	}
+	return Array.from(urlMap.values());
+}
+
 // Build engine-matching regex from ALL_ENGINES so new engines are auto-forwarded
 const _enginePattern = ALL_ENGINES.join("|");
 const _engineRegex = new RegExp(`^\\[(${_enginePattern})\\]`);
@@ -158,17 +191,25 @@ export async function runSimpleResearchMode({
 		`[greedysearch] Simple research mode: single-pass for "${trimText(query, 80)}"\n`,
 	);
 
-	// Step 1: Single all-engine search
-	process.stderr.write("PROGRESS:research:simple:searching\n");
+	// Step 1: Multi-angle search. Feynman's deepresearch pattern: for
+	// direct-mode research, run a minimum of 3 distinct search angles
+	// (definition, mechanism, current usage/comparison) to get broader
+	// source coverage than a single query.
 	let combinedSources = [];
 	let fetchedSources = [];
-	try {
-		const result = await runFastAllSearch(query, { locale, short: true });
-		combinedSources = buildSourceRegistry(result, query);
-	} catch (error) {
-		process.stderr.write(
-			`[greedysearch] Simple search failed: ${error.message}\n`,
-		);
+	const searchAngles = buildSearchAngles(query);
+	const searchResults = [];
+	for (const angle of searchAngles) {
+		try {
+			const result = await runFastAllSearch(angle, { locale, short: true });
+			searchResults.push({ angle, result });
+			const sources = buildSourceRegistry(result, angle);
+			combinedSources = mergeSourcesByUrl(combinedSources, sources);
+		} catch (error) {
+			process.stderr.write(
+				`[greedysearch] Simple search angle "${angle}" failed: ${error.message}\n`,
+			);
+		}
 	}
 
 	// Step 2: Fetch top sources
