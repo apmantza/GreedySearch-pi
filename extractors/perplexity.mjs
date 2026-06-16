@@ -267,12 +267,11 @@ async function main() {
 
 		if (!onPerplexity) {
 			await cdp(["nav", tab, "https://www.perplexity.ai/"], 20000);
-			// Wait for the React app to hydrate. In all-mode under CDP
-			// contention, the input element exists in the DOM but React
-			// hasn't attached its focus/onChange handlers yet — programmatic
-			// focus() silently fails and activeElement stays as BODY.
-			// Use a real click to trigger React's event system, then verify
-			// the input is the active element. Poll up to 15s.
+			// Wait for the React app to hydrate and make the input visible.
+			// In all-mode under CDP contention, the input element exists but
+			// its first 5 parent DIVs have visibility:hidden — focus()
+			// silently fails. Force the parents to visibility:visible, then
+			// poll up to 15s for the input to be focusable.
 			const _inputReady = await cdp(
 				[
 					"eval",
@@ -282,16 +281,15 @@ async function main() {
 						function _check() {
 							const input = document.querySelector('${S.input}');
 							if (input) {
-								// Simulate a real click — this dispatches mousedown/mouseup/click
-								// events that React's synthetic event system listens for
-								const rect = input.getBoundingClientRect();
-								if (rect.width > 0 && rect.height > 0) {
-									const ev = new MouseEvent('mousedown', { bubbles: true, clientX: rect.left + 10, clientY: rect.top + 10 });
-									input.dispatchEvent(ev);
-									const ev2 = new MouseEvent('mouseup', { bubbles: true, clientX: rect.left + 10, clientY: rect.top + 10 });
-									input.dispatchEvent(ev2);
-									const ev3 = new MouseEvent('click', { bubbles: true, clientX: rect.left + 10, clientY: rect.top + 10 });
-									input.dispatchEvent(ev3);
+								// Force visibility on all parents up to body —
+								// Perplexity hides the first 5 wrapper DIVs until
+								// the user interacts with the page
+								let el = input;
+								while (el && el !== document.body) {
+									if (window.getComputedStyle(el).visibility === 'hidden') {
+										el.style.visibility = 'visible';
+									}
+									el = el.parentElement;
 								}
 								input.focus();
 								if (document.activeElement === input) return resolve('ready');
@@ -317,6 +315,13 @@ async function main() {
 							`(() => {
 								const input = document.querySelector('${S.input}');
 								if (!input) return false;
+								let el = input;
+								while (el && el !== document.body) {
+									if (window.getComputedStyle(el).visibility === 'hidden') {
+										el.style.visibility = 'visible';
+									}
+									el = el.parentElement;
+								}
 								input.focus();
 								return document.activeElement === input;
 							})()`,
@@ -456,6 +461,30 @@ async function main() {
 			stableRounds: 3,
 			selector: "document.body",
 		});
+
+		// Detect Perplexity's free-search-limit wall. Shown as a [dialog]
+		// in the accessibility tree after hitting the rate limit. The wall
+		// text is localized (Greek, English, etc.) so we detect the
+		// structural [dialog] marker combined with the Upgrade button
+		// (αναβάθμιση/upgrade/Pro). Visible-mode cookies can't bypass
+		// this — it's account-level, not session-level.
+		if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
+			const postSnap = await cdp(["snap", tab]).catch(() => "");
+			// [dialog] + upgrade-related button + no answer prose = rate-limit wall
+			if (
+				/\[dialog\]/i.test(postSnap) &&
+				/Pro|αναβάθμιση|upgrade/i.test(postSnap) &&
+				!/\.prose|\[article\]/i.test(postSnap)
+			) {
+				console.error(
+					"[perplexity] Free search limit wall detected — skipping (visible retry won't help)",
+				);
+				env.blockedBy = "rate-limit";
+				throw new Error(
+					"Perplexity free search limit reached — visible retry cannot bypass this",
+				);
+			}
+		}
 
 		const { answer, sources } = await extractAnswer(tab, env);
 

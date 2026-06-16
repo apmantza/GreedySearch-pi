@@ -10,6 +10,12 @@ export const HEADLESS_RECOVERY_ENGINES = [
 	"logically",
 ];
 
+// blockedBy values that indicate visible-mode cookies CANNOT bypass the block.
+// These still match the "headless blocked" shape but should NOT trigger
+// visible recovery — the block is account-level (rate limit, ban) or
+// structural (page redesign), not session-level.
+const NON_RECOVERABLE_BLOCKED_BY = new Set(["rate-limit"]);
+
 const HEADLESS_BLOCKED_PATTERN =
 	/timed out|timeout|verification|captcha|cloudflare|turnstile|input not found|ask-input|clipboard|copy button hidden|sign.in|login required/i;
 
@@ -24,12 +30,24 @@ export function isManualVerificationError(error) {
 	return MANUAL_VERIFICATION_PATTERN.test(String(error || ""));
 }
 
+/**
+ * Check if a blockedBy value is non-recoverable (visible retry won't help).
+ */
+export function isNonRecoverableBlockedBy(blockedBy) {
+	return NON_RECOVERABLE_BLOCKED_BY.has(blockedBy);
+}
+
 export function findHeadlessBlockedEngines(resultsByEngine) {
 	return HEADLESS_RECOVERY_ENGINES.filter((engine) => {
 		const result = resultsByEngine?.[engine];
 		if (!result) return false;
 		// Data-driven: check envelope first (zero regex cost)
-		if (result._envelope?.blockedBy) return true;
+		const blockedBy = result._envelope?.blockedBy;
+		if (blockedBy) {
+			// Skip non-recoverable blocks (rate-limit, ban, etc.)
+			if (NON_RECOVERABLE_BLOCKED_BY.has(blockedBy)) return false;
+			return true;
+		}
 		if (result._envelope?.verificationResult === "needs-human") return true;
 		// Fallback: legacy string matching for errors passed as plain strings
 		const error = result.error;
