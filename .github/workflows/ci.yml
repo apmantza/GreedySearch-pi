@@ -97,6 +97,9 @@ jobs:
           TARBALL=$(ls *.tgz)
           npm install -g "$TARBALL"
 
+      - name: Install dependencies (for test imports)
+        run: npm install --no-audit --no-fund
+
       - name: Run unit tests
         run: node test.mjs unit
 
