@@ -1575,7 +1575,13 @@ export function computeResearchFloor({
 		(q) => !q.createdRound || q.reason === "Original research question",
 	);
 	const requiredQuestionStats = questionProgress(requiredQuestions);
-	const minFetched = Math.min(4, Math.max(2, Number(maxSources) || 8));
+	// Scale the minimum fetched sources by the number of rounds. The
+	// simple research path runs 1 round with fewer sources, so requiring
+	// 2-4 sources would be too strict. Iterative research (2+ rounds)
+	// gets the full minFetched requirement.
+	const roundCount = (rounds || []).length;
+	const baseMin = Math.min(4, Math.max(2, Number(maxSources) || 8));
+	const minFetched = roundCount <= 1 ? Math.min(2, baseMin) : baseMin;
 	const checks = {
 		roundsRun: rounds.length >= 1,
 		fetchedSources: fetchedOk.length >= minFetched,
@@ -1886,7 +1892,7 @@ function markdownList(items, fallback = "None recorded.") {
  * Write a human-readable provenance sidecar next to the research bundle.
  * Records date, rounds, sources, verification status, and floor results.
  */
-function writeProvenanceSidecar(
+export function writeProvenanceSidecar(
 	dir,
 	{
 		query,
