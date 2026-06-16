@@ -25,6 +25,7 @@ import { parseStructuredJson } from "./synthesis.mjs";
 import { writeSourcesToFiles } from "./file-sources.mjs";
 import { fetchMultipleSources } from "./fetch-source.mjs";
 import { runGeminiPrompt } from "./synthesis-runner.mjs";
+import { createProgressTracker } from "./progress.mjs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,7 +73,13 @@ export function mergeSourcesByUrl(existing, incoming) {
 		if (!key) continue;
 		if (urlMap.has(key)) {
 			// Merge: keep existing but note the new angle
-			const merged = { ...urlMap.get(key), angles: [...(urlMap.get(key).angles || [urlMap.get(key).query || '']), s.query || ''] };
+			const merged = {
+				...urlMap.get(key),
+				angles: [
+					...(urlMap.get(key).angles || [urlMap.get(key).query || ""]),
+					s.query || "",
+				],
+			};
 			urlMap.set(key, merged);
 		} else {
 			urlMap.set(key, s);
@@ -191,6 +198,19 @@ export async function runSimpleResearchMode({
 		`[greedysearch] Simple research mode: single-pass for "${trimText(query, 80)}"\n`,
 	);
 
+	// Progress bar with ETA — simple path does 3 search angles + 1 fetch
+	// batch + 1-2 synthesis calls. Use a conservative total so the ETA
+	// doesn't start at zero.
+	const searchAnglesCount = 3;
+	const totalSteps = searchAnglesCount + 1 + 2; // searches + fetch + 2 synth calls
+	const progressTracker = createProgressTracker({
+		totalActions: totalSteps,
+		totalRounds: 1,
+		totalFetches: 1,
+		silent: process.env.GREEDY_RESEARCH_QUIET === "1",
+	});
+	progressTracker.startRound(1);
+
 	// Step 1: Multi-angle search. Feynman's deepresearch pattern: for
 	// direct-mode research, run a minimum of 3 distinct search angles
 	// (definition, mechanism, current usage/comparison) to get broader
@@ -201,11 +221,14 @@ export async function runSimpleResearchMode({
 	const searchResults = [];
 	for (const angle of searchAngles) {
 		try {
+			progressTracker.startAction("search", angle.slice(0, 50));
 			const result = await runFastAllSearch(angle, { locale, short: true });
+			progressTracker.endAction();
 			searchResults.push({ angle, result });
 			const sources = buildSourceRegistry(result, angle);
 			combinedSources = mergeSourcesByUrl(combinedSources, sources);
 		} catch (error) {
+			progressTracker.endAction();
 			process.stderr.write(
 				`[greedysearch] Simple search angle "${angle}" failed: ${error.message}\n`,
 			);
@@ -216,17 +239,20 @@ export async function runSimpleResearchMode({
 	process.stderr.write("PROGRESS:research:simple:fetching\n");
 	if (combinedSources.length > 0) {
 		try {
+			progressTracker.startFetch(`top ${Math.min(maxSources, combinedSources.length)} sources`);
 			fetchedSources = await fetchMultipleSources(
 				combinedSources,
 				Math.min(maxSources, combinedSources.length),
 				8000,
 				Math.min(3, maxSources),
 			);
+			progressTracker.endFetch(true);
 			combinedSources = mergeFetchDataIntoSources(
 				combinedSources,
 				fetchedSources,
 			);
 		} catch (error) {
+			progressTracker.endFetch(false);
 			process.stderr.write(
 				`[greedysearch] Source fetching failed: ${error.message}\n`,
 			);
@@ -303,6 +329,7 @@ export async function runSimpleResearchMode({
 
 	if (evidenceItems.length > 0) {
 		try {
+			progressTracker.startAction("synth-evidence", "from evidence");
 			const rawReport = await runGeminiPrompt(
 				buildSynthesisFromEvidencePrompt(
 					query,
@@ -312,6 +339,7 @@ export async function runSimpleResearchMode({
 				),
 				{ timeoutMs: 120_000 },
 			);
+			progressTracker.endAction();
 			synthesis = {
 				...synthesis,
 				...(parseStructuredJson(rawReport?.answer || "") || {}),
@@ -327,6 +355,7 @@ export async function runSimpleResearchMode({
 
 	if (!synthesis.synthesized && combinedSources.length > 0) {
 		try {
+			progressTracker.startAction("synth-final", "fallback report");
 			const rawReport = await runGeminiPrompt(
 				buildFinalReportPrompt(
 					query,
@@ -337,6 +366,7 @@ export async function runSimpleResearchMode({
 				),
 				{ timeoutMs: 120_000 },
 			);
+			progressTracker.endAction();
 			synthesis = {
 				...synthesis,
 				...(parseStructuredJson(rawReport?.answer || "") || {}),
@@ -438,6 +468,8 @@ export async function runSimpleResearchMode({
 	}
 
 	process.stderr.write("PROGRESS:research:done\n");
+	progressTracker.endRound();
+	progressTracker.finish();
 
 	return {
 		query,
