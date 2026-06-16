@@ -13,7 +13,6 @@
 import {
 	buildEnvelope,
 	cdp,
-	cdpWithInput,
 	formatAnswer,
 	getOrOpenTab,
 	handleError,
@@ -34,10 +33,11 @@ const START_URL = "https://logically.app/research-assistant/";
 
 const SELECTORS = {
 	input:
-		'.chat-control div.ProseMirror[contenteditable="true"][role="textbox"]',
-	submitButton: '.chat-control button[class*="MuiButton-black"]',
-	answerContainer: "#last-message .chat-content",
-	citationSpan: "#last-message .chat-content span[title]",
+		'div.ProseMirror[contenteditable="true"]',
+	submitButton:
+		'.chat-control button[class*="MuiButton-black"], button[type="submit"]',
+	answerContainer: "#last-message .chat-content, [class*=\"chat-content\"]",
+	citationSpan: "#last-message .chat-content span[title], [class*=\"chat-content\"] span[title]",
 };
 
 async function startNewChat(tab) {
@@ -115,7 +115,32 @@ async function typeIntoLogically(tab, text) {
 	await new Promise((r) => setTimeout(r, jitter(120)));
 	await cdp(["clickxy", tab, String(point.x), String(point.y)]);
 	await new Promise((r) => setTimeout(r, jitter(TIMING.postClick)));
-	await cdpWithInput(["type", tab, "--stdin"], text);
+	// Use tiptap's commands API to insert text. CDP's Input.insertText
+	// targets input/textarea elements and doesn't dispatch the events
+	// that ProseMirror/tiptap's editor view listens for. The tiptap
+	// editor instance is accessible via ed.editor.commands.
+	const typeResult = await cdp(
+		[
+			"eval",
+			tab,
+			`(() => {
+				const ed = document.querySelector('${SELECTORS.input}');
+				if (!ed) return 'no-input';
+				ed.focus();
+				if (!ed.editor || !ed.editor.commands) {
+					// Fallback to execCommand for non-tiptap editors
+					const ok = document.execCommand('insertText', false, ${JSON.stringify(text)});
+					return ok ? 'ok' : 'exec-failed';
+				}
+				const ok = ed.editor.commands.insertContent(${JSON.stringify(text)});
+				return ok ? 'ok' : 'tiptap-failed';
+			})()`,
+		],
+		5000,
+	);
+	if (typeResult !== "ok") {
+		throw new Error(`Logically type failed: ${typeResult}`);
+	}
 	await new Promise((r) => setTimeout(r, jitter(TIMING.postType)));
 
 	const inserted = await cdp([
@@ -497,6 +522,43 @@ async function main() {
 			throw new Error(
 				"Logically input not found — page may not have loaded or is in unexpected state",
 			);
+		}
+
+		// Detect free-tier quota wall. Logically shows "Chat messages: N/5"
+		// in the sidebar. If the user is at 5/5, the "Create" button is
+		// disabled and queries can't be submitted. Same pattern as
+		// Perplexity's rate-limit wall — visible-mode cookies can't bypass
+		// this, it's account-level.
+		if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
+			const quotaResult = await cdp(
+				[
+					"eval",
+					tab,
+					`(() => {
+						const text = document.body?.innerText || '';
+						const m = text.match(/Chat messages\\s*\\n?\\s*(\\d+)\\s*\\/\\s*(\\d+)/i);
+						if (m && parseInt(m[1], 10) >= parseInt(m[2], 10)) {
+							return 'quota-exceeded';
+						}
+						// Also check if Create button is disabled
+						const createBtn = Array.from(document.querySelectorAll('button')).find(
+							(b) => b.innerText.trim() === 'Create',
+						);
+						if (createBtn && createBtn.disabled) return 'create-disabled';
+						return 'ok';
+					})()`,
+				],
+				5000,
+			).catch(() => "ok");
+			if (quotaResult === "quota-exceeded" || quotaResult === "create-disabled") {
+				console.error(
+					"[logically] Rate Limited — skipping (visible retry won't help)",
+				);
+				env.blockedBy = "rate-limit";
+				throw new Error(
+					"Rate Limited — Logically free message quota exhausted. Wait until reset.",
+				);
+			}
 		}
 
 		logStage(env, "type-and-submit", startTime);
