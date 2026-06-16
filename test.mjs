@@ -1014,16 +1014,20 @@ END_JSON`,
 	}
 
 	// Concurrency guard: concurrency=0 should not infinite loop
-	const concurrencyResult = await checkCitationUrls(
-		[{ id: "S1", url: "https://example.com" }],
-		{ concurrency: 0, timeoutMs: 2000 },
-	);
-	if (concurrencyResult.ok || concurrencyResult.dead.length > 0) {
-		passMsg("checkCitationUrls: concurrency=0 does not infinite loop");
-	} else {
-		failMsg(
-			`checkCitationUrls: concurrency=0 unexpected: ${JSON.stringify(concurrencyResult)}`,
+	// Skip in CI — makes a real HEAD request to example.com which may be
+	// blocked in sandboxed CI environments
+	if (!process.env.CI) {
+		const concurrencyResult = await checkCitationUrls(
+			[{ id: "S1", url: "https://example.com" }],
+			{ concurrency: 0, timeoutMs: 2000 },
 		);
+		if (concurrencyResult.ok || concurrencyResult.dead.length > 0) {
+			passMsg("checkCitationUrls: concurrency=0 does not infinite loop");
+		} else {
+			failMsg(
+				`checkCitationUrls: concurrency=0 unexpected: ${JSON.stringify(concurrencyResult)}`,
+			);
+		}
 	}
 
 	// runCitationUrlCheck returns null on error (non-throwing)
