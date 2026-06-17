@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Tool progress bar, ETA, and multi-line layout now forwarded to Pi UI** (`src/tools/shared.ts`, `src/tools/greedy-search-handler.ts`) — `runSearch()` now parses `[greedysearch] [bar] … ETA …` stderr lines and `PROGRESS:research:*` markers from the spawned process, forwarding them as live `onUpdate` callbacks. `makeProgressTracker()` accepts a `query` param and renders multi-line output: **line 1** original query (stays frozen), **line 2** progress bar + ETA (persists across engine updates via `latestBarText` caching), **line 3+** per-engine status + synthesis progress. Before this fix, only `PROGRESS:<engine>:done|error` reached the UI, so research runs appeared frozen with no bar or ETA.
+
 ### Added
 
 - **Scale-aware research** (`src/search/scale-aware.mjs`, `src/search/simple-research.mjs`, `src/search/research.mjs`) — Research mode now classifies query complexity before entering the iterative loop. When `breadth` and `iterations` are at defaults (not user-specified), `classifyResearchComplexity()` runs a fast Gemini call to categorize the query as simple/moderate/complex. Simple queries ("what is X", narrow factual questions) bypass the iterative loop entirely via `runSimpleResearchMode()` — single all-engine search → fetch top sources → evidence extraction → synthesis — delivering ~70% faster results with lower API cost. Moderate queries get adjusted breadth/iterations from the classifier. Complex queries use the full default loop. User-specified `breadth`/`iterations` always override the classifier. Classification failure falls back to the original defaults gracefully.
