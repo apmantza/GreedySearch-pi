@@ -531,7 +531,8 @@ async function main() {
 						// polling budget is exhausted.
 						const allPollResults = await Promise.all(
 							stillBlocked.map(async (blockedEngine) => {
-								const tab = retryTabs[recoveryCandidates.indexOf(blockedEngine)];
+								const tab =
+									retryTabs[recoveryCandidates.indexOf(blockedEngine)];
 								const result = await waitForChallengeCleared({
 									tab,
 									engine: blockedEngine,
@@ -560,9 +561,7 @@ async function main() {
 											locale,
 										);
 										out[p.engine] = result;
-										process.stderr.write(
-											`PROGRESS:${p.engine}:done\n`,
-										);
+										process.stderr.write(`PROGRESS:${p.engine}:done\n`);
 									} catch (resumeErr) {
 										process.stderr.write(
 											`[greedysearch] ⚠️  Resume extraction failed for ${p.engine}: ${resumeErr.message}\n`,

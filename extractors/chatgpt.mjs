@@ -367,8 +367,13 @@ async function main() {
 		if (verificationResult === "needs-human") {
 			env.blockedBy = "cloudflare-closed-shadow-dom";
 			throw new Error(
-				"ChatGPT is showing a Cloudflare Turnstile challenge inside a closed shadow DOM that auto-clicking cannot reach — please solve it in the visible browser window",
+				"ChatGPT is showing a Cloudflare Turnstile challenge that auto-clicking could not clear — please solve it in the visible browser window",
 			);
+		}
+		// Verification was auto-cleared (button clicked via CDP pierce).
+		// Wait for the chat UI to render before continuing.
+		if (verificationResult === "clicked") {
+			await new Promise((r) => setTimeout(r, 2500));
 		}
 
 		logStage(env, "input-wait", startTime);

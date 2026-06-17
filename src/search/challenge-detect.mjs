@@ -10,7 +10,7 @@
 //   const cleared = await waitForChallengeCleared({ tab, engine: "chatgpt", timeoutMs: 300000 });
 //   if (!cleared) emit _needsHumanVerification; else re-run extractor.
 
-import { cdp } from "../../bin/cdp.mjs";
+import { cdp } from "../../extractors/common.mjs";
 
 const DEFAULT_TIMEOUT_MS = Number.parseInt(
 	process.env.GREEDY_SEARCH_CHALLENGE_WAIT_MS || "300000",
@@ -60,7 +60,9 @@ const ENGINE_SIGNALS = {
 			if (!info.onChatGPT) return false;
 			if (
 				info.title &&
-				/περιμένετε|please wait|just a moment|verifying|checking/i.test(info.title)
+				/περιμένετε|please wait|just a moment|verifying|checking/i.test(
+					info.title,
+				)
 			) {
 				return false;
 			}

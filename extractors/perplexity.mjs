@@ -366,21 +366,12 @@ async function main() {
 			}
 		}
 
-		// In headless mode: snap the accessibility tree to detect Cloudflare
-		// before burning the selector wait. Perplexity is CF-protected in headless
-		// just like Bing — fast-fail triggers the visible retry.
-		if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
-			const snap = await cdp(["snap", tab]).catch(() => "");
-			if (/cloudflare|challenge|security check/i.test(snap)) {
-				console.error(
-					"[perplexity] Cloudflare challenge in snap — fast-failing to visible retry",
-				);
-				env.blockedBy = "cloudflare";
-				throw new Error("Cloudflare challenge detected — headless blocked");
-			}
-		}
-
 		// Wait for React app to mount input (up to 15s — gives CF redirect + hydration time)
+		// Note: we no longer fast-fail on Cloudflare detection here because the
+		// new CDP-pierce + browser-level-click path in handleVerification can
+		// auto-clear the Turnstile checkbox from a fresh headless session. The
+		// downstream handleVerification() call will either click through or
+		// surface needs-human; let it run.
 		const inputReady = await waitForSelector(tab, S.input, 15000, 400);
 		env.inputReady = inputReady;
 

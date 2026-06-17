@@ -355,13 +355,7 @@ function tryHumanClick(tab, cdp, detectResult) {
 		detectResult === "still-verifying" ||
 		detectResult === "cf-closed-shadow-dom"
 	)
-		return "cant-click";
-
-	// Sentinel for closed-shadow-DOM Cloudflare Turnstile — explicitly
-	// distinguish from "nothing to click".
-	if (detectResult === "cf-closed-shadow-dom") {
-		return "cant-click";
-	}
+		return Promise.resolve("no-challenge");
 
 	// JSON format: {t:"sel",s:"...",txt:"..."} or {t:"xy",x:...,y:...}
 	try {
@@ -376,7 +370,7 @@ function tryHumanClick(tab, cdp, detectResult) {
 		}
 		if (info.t === "xy") {
 			// Skip zero/invalid coordinates — element is off-screen or not rendered
-			if (!info.x && !info.y) return "cant-click";
+			if (!info.x && !info.y) return Promise.resolve("cant-click");
 			process.stderr.write(
 				`[greedysearch] Human-clicking at (${info.x.toFixed(0)}, ${info.y.toFixed(0)})...\n`,
 			);
@@ -384,12 +378,124 @@ function tryHumanClick(tab, cdp, detectResult) {
 		}
 	} catch {}
 
-	return "no-challenge";
+	return Promise.resolve("no-challenge");
 }
 
 export async function detectVerificationChallenge(tab, cdp) {
+	// Run the CDP-pierce probe FIRST so we get real click coordinates for
+	// Cloudflare iframes hidden inside closed shadow roots (chatgpt.com,
+	// perplexity.ai, etc.). The page-context probe falls back to a
+	// cf-closed-shadow-dom sentinel when the iframe is opaque to JS DOM
+	// queries, but that sentinel can't be auto-clicked.
+	const cfIframe = await findCloudflareIframeViaPierce(tab, cdp).catch(
+		() => null,
+	);
+	if (cfIframe) return cfIframe;
+
 	const result = await cdp(["eval", tab, VERIFY_DETECT_JS]).catch(() => null);
-	return result && result !== "null" ? result : null;
+	if (result && result !== "null") return result;
+
+	return null;
+}
+
+/**
+ * Walk the page DOM with pierce:true to locate a Cloudflare Turnstile
+ * iframe that's hidden inside a closed shadow root. Returns JSON of the
+ * shape `{t:'xy', x, y}` matching the main-document probe's convention,
+ * OR null if nothing was found.
+ *
+ * The returned coords target the **checkbox area** of the Turnstile widget
+ * (left ~25% of the 300x65 iframe, vertical center) rather than the
+ * iframe's geometric center, because the visible "Verify you are human"
+ * checkbox sits there in the standard widget layout.
+ */
+async function findCloudflareIframeViaPierce(tab, cdp) {
+	if (typeof cdp !== "function") return null;
+
+	// Step 1: enable DOM domain if needed (cheap idempotent call)
+	await cdp(["evalraw", tab, "DOM.enable", "{}"]).catch(() => {});
+
+	// Step 2: get the full DOM tree with pierce — walks closed shadow roots
+	const doc = await cdp(["evalraw", tab, "DOM.getDocument", JSON.stringify({ depth: -1, pierce: true })]).catch(
+		() => null,
+	);
+	if (!doc) return null;
+	let docParsed;
+	try {
+		docParsed = JSON.parse(doc);
+	} catch {
+		return null;
+	}
+	if (docParsed.error || !docParsed.root) return null;
+
+	// Step 3: recursive walk looking for an iframe whose src points at
+	// challenges.cloudflare.com / turnstile
+	const root = docParsed.root;
+	const found = await walkForCfIframe(root, tab, cdp);
+	return found;
+}
+
+async function walkForCfIframe(node, tab, cdp) {
+	if (!node) return null;
+	const children = [];
+	if (node.shadowRoots && node.shadowRoots.length > 0) {
+		for (const s of node.shadowRoots) {
+			children.push(s);
+		}
+	}
+	if (node.children) {
+		for (const c of node.children) children.push(c);
+	}
+	for (const child of children) {
+		if (child.nodeName === "IFRAME") {
+			const attrs = child.attributes || [];
+			const srcIdx = attrs.indexOf("src");
+			const src = srcIdx >= 0 ? attrs[srcIdx + 1] : "";
+			if (
+				src &&
+				/challenges\.cloudflare\.com|turnstile/i.test(src) &&
+				child.backendNodeId
+			) {
+				// Get bounding box via DOM.getBoxModel
+				const boxRes = await cdp([
+					"evalraw",
+					tab,
+					"DOM.getBoxModel",
+					JSON.stringify({ backendNodeId: child.backendNodeId }),
+				]).catch(() => null);
+				if (!boxRes) continue;
+				let boxParsed;
+				try {
+					boxParsed = JSON.parse(boxRes);
+				} catch {
+					continue;
+				}
+				const content =
+					boxParsed?.model?.content || boxParsed?.result?.model?.content;
+				if (!content || content.length < 8) continue;
+				// content = [x1, y1, x2, y2, x3, y3, x4, y4]
+				const x1 = content[0];
+				const y1 = content[1];
+				const x3 = content[4];
+				const y3 = content[5];
+				const width = x3 - x1;
+				const height = y3 - y1;
+				// Skip degenerate boxes (hidden iframes)
+				if (width < 50 || height < 20) continue;
+				// Click the checkbox: standard CF widget is 300x65 with the
+				// checkbox centered at ~25% width, 50% height.
+				const checkboxX = x1 + width * 0.25;
+				const checkboxY = y1 + height * 0.5;
+				process.stderr.write(
+					`[greedysearch] Found CF iframe via CDP pierce at (${x1.toFixed(0)}, ${y1.toFixed(0)}) ${width.toFixed(0)}x${height.toFixed(0)}, clicking checkbox at (${checkboxX.toFixed(0)}, ${checkboxY.toFixed(0)})\n`,
+				);
+				return JSON.stringify({ t: "xy", x: checkboxX, y: checkboxY });
+			}
+		}
+		const deeper = await walkForCfIframe(child, tab, cdp);
+		if (deeper) return deeper;
+	}
+	return null;
 }
 
 // Returns 'clear' | 'clicked' | 'needs-human'
@@ -414,17 +520,13 @@ export async function handleVerification(tab, cdp, waitMs = 30000) {
 		return "needs-human";
 	}
 
-	// Cloudflare Turnstile rendered in closed shadow DOM (e.g. chatgpt.com).
-	// The host element is opaque to JS queries — we cannot auto-click the
-	// checkbox. Tell the caller immediately so it can surface a clear
-	// "please solve in visible Chrome" message instead of burning time on
-	// a doomed waitForSelector.
-	if (result === "cf-closed-shadow-dom") {
-		process.stderr.write(
-			"[greedysearch] Cloudflare Turnstile challenge detected in closed shadow DOM — please solve it manually in the visible browser window.\n",
-		);
-		return "needs-human";
-	}
+	// Cloudflare Turnstile rendered inside a closed shadow root (e.g.
+	// chatgpt.com). detectVerificationChallenge now uses CDP-level
+	// DOM.getDocument({pierce:true}) to walk into the closed root and
+	// locate the iframe's screen-space bounding box. The result here is
+	// a normal {t:'xy',x,y} coordinate payload that flows through the
+	// regular click path. The historical "cf-closed-shadow-dom" sentinel
+	// is kept in VERIFY_DETECT_JS only as a safety net for unusual pages.
 
 	// Perform human click on detected element
 	const clickResult = await tryHumanClick(tab, cdp, result);

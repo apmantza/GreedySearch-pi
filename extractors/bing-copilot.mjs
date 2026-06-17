@@ -60,20 +60,12 @@ async function detectSignInWall(tab) {
 }
 
 async function extractAnswer(tab, env, query = "") {
-	// In headless mode: snap the accessibility tree before spending ~18s on
-	// clipboard polls. Copilot loads its input fine in headless but renders
-	// responses behind a Cloudflare-protected iframe — detecting that here
-	// fast-fails to the visible retry instead of burning all the poll time.
-	if (process.env.GREEDY_SEARCH_HEADLESS === "1") {
-		const verification = await detectVerificationChallenge(tab, cdp);
-		if (verification) {
-			console.error(
-				"[bing] Verification challenge detected — fast-failing to visible retry",
-			);
-			env.blockedBy = "verification";
-			throw new Error("Verification challenge detected — headless blocked");
-		}
-	}
+	// Note: removed the prior headless fast-fail on Cloudflare detection.
+	// The new CDP-pierce + browser-level-click path in handleVerification
+	// can auto-clear the Turnstile checkbox from a fresh headless session,
+	// so we let the main flow run handleVerification and either click
+	// through or surface needs-human. We keep the env.blockedBy / signal
+	// surface so callers still see why an answer came back empty.
 
 	// Wait for the assistant copy button to exist. On fresh Copilot
 	// sessions the answer text can render before the button handler is
