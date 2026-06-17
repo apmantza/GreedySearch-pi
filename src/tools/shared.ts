@@ -199,7 +199,12 @@ function renderBar(done: number, total: number): string {
 	if (total <= 0) return "";
 	const width = 16;
 	const filled = Math.round((done / total) * width);
-	return "[" + "█".repeat(Math.min(filled, width)) + "░".repeat(Math.max(0, width - filled)) + "]";
+	return (
+		"[" +
+		"█".repeat(Math.min(filled, width)) +
+		"░".repeat(Math.max(0, width - filled)) +
+		"]"
+	);
 }
 
 /**
