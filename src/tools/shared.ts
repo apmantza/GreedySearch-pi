@@ -52,6 +52,19 @@ export function errorResult(prefix: string, e: unknown): ToolResult {
 	};
 }
 
+/** Progress update for a single engine finishing/failing */
+type EngineProgress = {
+	type: "engine";
+	engine: string;
+	status: "done" | "error" | "needs-human";
+};
+
+/** Free-form progress text (e.g. research bar + ETA) */
+type TextProgress = {
+	type: "text";
+	text: string;
+};
+
 /**
  * Spawn search.mjs and collect JSON results, with progress streaming via stderr.
  * Shared by GreedySearch tool handlers.
@@ -62,10 +75,7 @@ export function runSearch(
 	flags: string[],
 	searchBin: string,
 	signal?: AbortSignal,
-	onProgress?: (
-		engine: string,
-		status: "done" | "error" | "needs-human",
-	) => void,
+	onProgress?: (update: EngineProgress | TextProgress) => void,
 	options: { headless?: boolean } = {},
 ): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
@@ -108,20 +118,38 @@ export function runSearch(
 				// Engine progress: any known engine
 				const engineMatch = line.match(ENGINE_PROGRESS_RE);
 				if (engineMatch && onProgress) {
-					onProgress(
-						engineMatch[1],
-						engineMatch[2] as "done" | "error" | "needs-human",
-					);
+					onProgress({
+						type: "engine",
+						engine: engineMatch[1],
+						status: engineMatch[2] as "done" | "error" | "needs-human",
+					});
 				}
 				// Synthesis progress: skipped (manual verification) or done/error
 				const synthMatch = line.match(
 					/^PROGRESS:synthesis:(done|error|skipped)$/,
 				);
 				if (synthMatch && onProgress) {
-					onProgress(
-						"synthesis",
-						synthMatch[1] as "done" | "error" | "needs-human",
-					);
+					onProgress({
+						type: "engine",
+						engine: "synthesis",
+						status: synthMatch[1] as "done" | "error" | "needs-human",
+					});
+				}
+				// Research progress markers (planning/fetching/synthesizing)
+				const researchMatch = line.match(/^PROGRESS:research:(.+)$/);
+				if (researchMatch && onProgress) {
+					onProgress({
+						type: "text",
+						text: researchMatch[1],
+					});
+				}
+				// Progress bar + ETA lines from createProgressTracker
+				const barMatch = line.match(/^\[greedysearch\] (\[.+?\] .+)$/);
+				if (barMatch && onProgress) {
+					onProgress({
+						type: "text",
+						text: barMatch[1],
+					});
 				}
 			}
 		});
@@ -153,11 +181,15 @@ export function makeProgressTracker(
 	onUpdate: ((update: ProgressUpdate) => void) | undefined,
 	suffix: "Searching" | "Researching",
 	showSynthesis: boolean,
+	query?: string,
 ) {
 	const completed = new Map<string, "done" | "error" | "needs-human">();
+	let latestBarText = "";
 
-	return (eng: string, status: "done" | "error" | "needs-human") => {
-		completed.set(eng, status);
+	function render() {
+		const lines: string[] = [];
+		lines.push(`**${suffix}...** ${query || ""}`.trim());
+		if (latestBarText) lines.push(latestBarText);
 		const parts: string[] = [];
 		for (const e of engines) {
 			const s = completed.get(e);
@@ -176,12 +208,25 @@ export function makeProgressTracker(
 			else if (synStatus === "needs-human") parts.push("⏭️ synthesis skipped");
 			else parts.push("🔄 synthesizing");
 		}
+		if (parts.length > 0) lines.push(parts.join(" · "));
 
 		onUpdate?.({
-			content: [
-				{ type: "text", text: `**${suffix}...** ${parts.join(" · ")}` },
-			],
+			content: [{ type: "text", text: lines.join("\n") }],
 			details: { _progress: true },
 		} satisfies ProgressUpdate);
+	}
+
+	return (update: EngineProgress | TextProgress) => {
+		if (update.type === "text") {
+			if (update.text.startsWith("[")) {
+				latestBarText = update.text;
+			}
+			render();
+			return;
+		}
+
+		const { engine, status } = update;
+		completed.set(engine, status);
+		render();
 	};
 }

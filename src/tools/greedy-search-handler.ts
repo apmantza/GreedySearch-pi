@@ -238,6 +238,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 							onUpdate,
 							researchMode ? "Researching" : "Searching",
 							synthesize,
+							query,
 						)
 					: undefined;
 
