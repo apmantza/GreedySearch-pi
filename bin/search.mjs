@@ -44,6 +44,7 @@ import {
 	fetchMultipleSources,
 	fetchTopSource,
 } from "../src/search/fetch-source.mjs";
+import { waitForChallengeCleared } from "../src/search/challenge-detect.mjs";
 import { writeSourcesToFiles } from "../src/search/file-sources.mjs";
 import { writeOutput } from "../src/search/output.mjs";
 import {
@@ -522,18 +523,74 @@ async function main() {
 						for (const blockedEngine of stillBlocked) {
 							process.stderr.write(`PROGRESS:${blockedEngine}:needs-human\n`);
 						}
-						keepVisibleForHuman = true;
-						out._needsHumanVerification = {
-							engines: stillBlocked,
-							message:
-								"Visible Chrome is open with the engine page loaded. Solve the Turnstile checkbox or other challenge in the visible window to store cookies. Cookies persist for future runs.",
-						};
-						process.stderr.write(
-							`[greedysearch] 🔓 ${stillBlocked.join(", ")} still blocked — keeping visible Chrome open. Solve the challenge in the window to store cookies, then rerun.\n`,
+
+						// Poll for the user to solve any remaining challenges in
+						// visible Chrome. If a per-engine challenge clears, retry
+						// that engine's extractor on the cleared tab. Fall back to
+						// the existing _needsHumanVerification envelope only if the
+						// polling budget is exhausted.
+						const allPollResults = await Promise.all(
+							stillBlocked.map(async (blockedEngine) => {
+								const tab = retryTabs[recoveryCandidates.indexOf(blockedEngine)];
+								const result = await waitForChallengeCleared({
+									tab,
+									engine: blockedEngine,
+								}).catch((pollErr) => ({
+									cleared: false,
+									reason: pollErr.message || String(pollErr),
+								}));
+								return { engine: blockedEngine, tab, ...result };
+							}),
 						);
-						// Visible Chrome stays open so the user can interact with any
-						// Turnstile/Cloudflare challenge. Once solved, cookies are stored
-						// in the shared profile and future headless runs will reuse them.
+						const clearedEngines = allPollResults.filter((p) => p.cleared);
+						if (clearedEngines.length > 0) {
+							process.stderr.write(
+								`[greedysearch] 🔄 Auto-resuming ${clearedEngines.map((p) => p.engine).join(", ")} on cleared tabs...\n`,
+							);
+							await Promise.allSettled(
+								clearedEngines.map(async (p) => {
+									const script = ENGINES[p.engine];
+									try {
+										const result = await runExtractor(
+											script,
+											query,
+											p.tab,
+											short,
+											null,
+											locale,
+										);
+										out[p.engine] = result;
+										process.stderr.write(
+											`PROGRESS:${p.engine}:done\n`,
+										);
+									} catch (resumeErr) {
+										process.stderr.write(
+											`[greedysearch] ⚠️  Resume extraction failed for ${p.engine}: ${resumeErr.message}\n`,
+										);
+									}
+								}),
+							);
+						}
+						const stillStillBlocked = stillBlocked.filter(
+							(e) => !clearedEngines.find((p) => p.engine === e),
+						);
+						if (stillStillBlocked.length === 0) {
+							// All blocked engines cleared and resumed successfully
+							keepVisibleForHuman = false;
+						} else {
+							keepVisibleForHuman = true;
+							out._needsHumanVerification = {
+								engines: stillStillBlocked,
+								message:
+									"Visible Chrome is open with the engine page loaded. Solve the Turnstile checkbox or other challenge in the visible window to store cookies. Cookies persist for future runs.",
+							};
+							process.stderr.write(
+								`[greedysearch] 🔓 ${stillStillBlocked.join(", ")} still blocked — keeping visible Chrome open. Solve the challenge in the window to store cookies, then rerun.\n`,
+							);
+							// Visible Chrome stays open so the user can interact with any
+							// Turnstile/Cloudflare challenge. Once solved, cookies are stored
+							// in the shared profile and future headless runs will reuse them.
+						}
 					}
 				} finally {
 					if (keepVisibleForHuman) {
@@ -747,8 +804,60 @@ async function main() {
 						envelope: retryErr.envelope || null,
 					},
 				});
-				// Any visible retry failure: keep Chrome open so user can solve Turnstile.
-				// Once solved, cookies are stored in the shared profile for future headless runs.
+				// Any visible retry failure: poll for the user to solve the challenge in
+				// visible Chrome. If the page transitions past the challenge (cookies
+				// cleared, chat UI rendered, Turnstile iframe gone), automatically retry
+				// the extractor so the user does not need to rerun manually. Fall back
+				// to the existing _needsHumanVerification envelope only if the polling
+				// budget is exhausted.
+				const pollResult = await waitForChallengeCleared({
+					tab: retryTab,
+					engine: recoveryEngine,
+				}).catch((pollErr) => ({
+					cleared: false,
+					reason: pollErr.message || String(pollErr),
+				}));
+
+				if (pollResult.cleared) {
+					process.stderr.write(
+						`[greedysearch] 🔄 Auto-resuming ${recoveryEngine} extraction on the now-cleared tab...\n`,
+					);
+					try {
+						const result = await runExtractor(
+							script,
+							query,
+							retryTab,
+							short,
+							null,
+							locale,
+						);
+						logVisibleRecovery({
+							scope: "single",
+							phase: "success-after-poll",
+							engines: [recoveryEngine],
+							result: {
+								engine: recoveryEngine,
+								mode: result._envelope?.mode || null,
+								durationMs: result._envelope?.durationMs || null,
+								lastStage: result._envelope?.lastStage || null,
+							},
+						});
+						if (fetchSource && result.sources?.length > 0) {
+							result.topSource = await fetchTopSource(result.sources[0].url);
+						}
+						writeOutput(result, outFile, { inline, synthesize: false, query });
+						return;
+					} catch (resumeErr) {
+						process.stderr.write(
+							`[greedysearch] ⚠️  Resume extraction failed: ${resumeErr.message}\n`,
+						);
+						// Fall through to needs-human with the resume error context
+					}
+				}
+
+				// Polling timed out (or resume extraction failed) — keep Chrome open so the
+				// user can solve Turnstile. Once solved, cookies are stored in the shared
+				// profile for future headless runs.
 				keepVisibleForHuman = true;
 				writeOutput(
 					{

@@ -57,11 +57,23 @@ const VERIFY_DETECT_JS = `
 
   // --- Cloudflare Turnstile widget inside closed shadow DOM (Copilot, etc.) ---
   // The iframe is not queryable from main document, but the host container
-  // (#cf-turnstile) and the hidden response input are.
-  var cfTurnstileHost = document.querySelector('#cf-turnstile, [id^="cf-chl-widget-"]');
+  // (#cf-turnstile) and the hidden response input are. When only the
+  // hidden response input matches (no #cf-turnstile host and no visible
+  // iframe), the actual challenge widget is rendered inside a closed
+  // shadow DOM and cannot be auto-clicked. Return a sentinel so callers
+  // know to surface this as needs-human verification instead of wasting
+  // time on a doomed waitForSelector.
+  var cfTurnstileHost = document.querySelector('#cf-turnstile');
   if (cfTurnstileHost) {
     var r2 = cfTurnstileHost.getBoundingClientRect();
     return JSON.stringify({t:'xy',x:r2.left+r2.width/2,y:r2.top+r2.height/2});
+  }
+  // Hidden cf-chl-widget-*_response input present but no visible host:
+  // the widget is in closed shadow DOM. Signal this so handleVerification
+  // can return 'needs-human' rather than 'clear'.
+  var cfResponseInput = document.querySelector('input[name="cf-turnstile-response"], [id^="cf-chl-widget-"][id$="_response"]');
+  if (cfResponseInput && cfResponseInput.value === '') {
+    return 'cf-closed-shadow-dom';
   }
 
   // --- Cloudflare challenge page ---
@@ -327,16 +339,29 @@ export async function humanClickElement(tab, cdpFn, selector) {
 
 /**
  * Parse a detection result and perform a human click if it found something.
- * Returns true if a click was performed.
+ *
+ * Returns a tristate string:
+ *   - 'clicked'  — a click was successfully dispatched
+ *   - 'cant-click' — challenge was detected but we couldn't click it
+ *                    (zero-dimension element, OOPIF in closed shadow DOM, etc.)
+ *                    Caller should treat this as needs-human verification.
+ *   - 'no-challenge' — no challenge detected, nothing to click
  */
-async function tryHumanClick(tab, cdp, detectResult) {
+function tryHumanClick(tab, cdp, detectResult) {
 	if (
 		!detectResult ||
 		detectResult === "null" ||
 		detectResult === "cleared" ||
-		detectResult === "still-verifying"
+		detectResult === "still-verifying" ||
+		detectResult === "cf-closed-shadow-dom"
 	)
-		return false;
+		return "cant-click";
+
+	// Sentinel for closed-shadow-DOM Cloudflare Turnstile — explicitly
+	// distinguish from "nothing to click".
+	if (detectResult === "cf-closed-shadow-dom") {
+		return "cant-click";
+	}
 
 	// JSON format: {t:"sel",s:"...",txt:"..."} or {t:"xy",x:...,y:...}
 	try {
@@ -345,21 +370,21 @@ async function tryHumanClick(tab, cdp, detectResult) {
 			process.stderr.write(
 				`[greedysearch] Human-clicking "${info.txt}" via CDP...\n`,
 			);
-			const r = await humanClickElement(tab, cdp, info.s);
-			return r !== null;
+			return humanClickElement(tab, cdp, info.s).then((r) =>
+				r !== null ? "clicked" : "cant-click",
+			);
 		}
 		if (info.t === "xy") {
 			// Skip zero/invalid coordinates — element is off-screen or not rendered
-			if (!info.x && !info.y) return false;
+			if (!info.x && !info.y) return "cant-click";
 			process.stderr.write(
 				`[greedysearch] Human-clicking at (${info.x.toFixed(0)}, ${info.y.toFixed(0)})...\n`,
 			);
-			await humanClickXY(tab, cdp, info.x, info.y);
-			return true;
+			return humanClickXY(tab, cdp, info.x, info.y).then(() => "clicked");
 		}
 	} catch {}
 
-	return false;
+	return "no-challenge";
 }
 
 export async function detectVerificationChallenge(tab, cdp) {
@@ -389,9 +414,21 @@ export async function handleVerification(tab, cdp, waitMs = 30000) {
 		return "needs-human";
 	}
 
+	// Cloudflare Turnstile rendered in closed shadow DOM (e.g. chatgpt.com).
+	// The host element is opaque to JS queries — we cannot auto-click the
+	// checkbox. Tell the caller immediately so it can surface a clear
+	// "please solve in visible Chrome" message instead of burning time on
+	// a doomed waitForSelector.
+	if (result === "cf-closed-shadow-dom") {
+		process.stderr.write(
+			"[greedysearch] Cloudflare Turnstile challenge detected in closed shadow DOM — please solve it manually in the visible browser window.\n",
+		);
+		return "needs-human";
+	}
+
 	// Perform human click on detected element
-	const clicked = await tryHumanClick(tab, cdp, result);
-	if (clicked) {
+	const clickResult = await tryHumanClick(tab, cdp, result);
+	if (clickResult === "clicked") {
 		await new Promise((r) => setTimeout(r, 2000));
 
 		// Retry loop — keep checking until cleared or timeout
@@ -413,6 +450,18 @@ export async function handleVerification(tab, cdp, waitMs = 30000) {
 		}
 		process.stderr.write(
 			"[greedysearch] Verification may require manual intervention.\n",
+		);
+		return "needs-human";
+	}
+
+	// Challenge was detected but we couldn't auto-click it (zero-dimension
+	// element, OOPIF without coordinates, etc.). Surface this rather than
+	// silently returning 'clear' — the caller would otherwise proceed and
+	// fail downstream on a selector that won't appear until the challenge
+	// is solved.
+	if (clickResult === "cant-click") {
+		process.stderr.write(
+			"[greedysearch] Verification challenge detected but cannot be auto-clicked — please solve it manually in the visible browser window.\n",
 		);
 		return "needs-human";
 	}

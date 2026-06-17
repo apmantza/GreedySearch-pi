@@ -362,7 +362,14 @@ async function main() {
 		logStage(env, "consent", startTime);
 		await dismissConsent(tab, cdp);
 		logStage(env, "verification", startTime);
-		await handleVerification(tab, cdp, 10000);
+		const verificationResult = await handleVerification(tab, cdp, 10000);
+		env.verificationResult = verificationResult;
+		if (verificationResult === "needs-human") {
+			env.blockedBy = "cloudflare-closed-shadow-dom";
+			throw new Error(
+				"ChatGPT is showing a Cloudflare Turnstile challenge inside a closed shadow DOM that auto-clicking cannot reach — please solve it in the visible browser window",
+			);
+		}
 
 		logStage(env, "input-wait", startTime);
 		const inputReady = await waitForSelector(tab, PROSE_SELECTOR, 8000, 400);
