@@ -151,6 +151,16 @@ export function runSearch(
 						text: barMatch[1],
 					});
 				}
+				// Single-engine stage lines: "[perplexity] stage: nav (+563ms)"
+				const stageMatch = line.match(
+					/^\[(perplexity|google|chatgpt|bing|gemini|semantic-scholar|logically)\] stage: (.+) \(\+\d+ms\)$/,
+				);
+				if (stageMatch && onProgress) {
+					onProgress({
+						type: "text",
+						text: `${stageMatch[1]}: ${stageMatch[2]}`,
+					});
+				}
 			}
 		});
 
@@ -160,6 +170,15 @@ export function runSearch(
 			if (code !== 0) {
 				reject(new Error(err.trim() || `search.mjs exited with code ${code}`));
 			} else {
+				// For single-engine calls, signal completion so the progress
+				// tracker can mark the engine as done.
+				if (onProgress && engine !== "all") {
+					onProgress({
+						type: "engine",
+						engine,
+						status: "done" as const,
+					});
+				}
 				try {
 					resolve(JSON.parse(out.trim()));
 				} catch {
@@ -173,8 +192,35 @@ export function runSearch(
 }
 
 /**
+ * Render a Unicode progress bar.
+ * Example: [████████████░░░░] for 75%
+ */
+function renderBar(done: number, total: number): string {
+	if (total <= 0) return "";
+	const width = 16;
+	const filled = Math.round((done / total) * width);
+	return "[" + "█".repeat(Math.min(filled, width)) + "░".repeat(Math.max(0, width - filled)) + "]";
+}
+
+/**
+ * Format milliseconds as a short human duration.
+ * e.g. "—" / "45s" / "1m 30s"
+ */
+function fmtDuration(ms: number): string {
+	if (ms < 1000) return "—";
+	const s = Math.round(ms / 1000);
+	if (s < 60) return `${s}s`;
+	return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+/**
  * Build a progress callback that tracks completed engines.
  * Returns an onProgress function suitable for runSearch.
+ *
+ * For multi-engine calls (research or not) this shows a bar + ETA
+ * line that tracks fraction of engines completed.  The bar always
+ * appears; the research-path bar from `createProgressTracker` takes
+ * priority when present.
  */
 export function makeProgressTracker(
 	engines: readonly string[],
@@ -183,13 +229,29 @@ export function makeProgressTracker(
 	showSynthesis: boolean,
 	query?: string,
 ) {
+	const startedAt = Date.now();
 	const completed = new Map<string, "done" | "error" | "needs-human">();
 	let latestBarText = "";
 
 	function render() {
 		const lines: string[] = [];
 		lines.push(`**${suffix}...** ${query || ""}`.trim());
+
+		const done = completed.size;
+
+		// Multi-engine bar + ETA (unless research supplies its own bar)
+		if (engines.length > 1 && done > 0 && !latestBarText) {
+			const elapsed = Date.now() - startedAt;
+			const frac = Math.min(1, done / engines.length);
+			const etaMs = frac > 0.01 ? Math.round(elapsed / frac - elapsed) : null;
+			const bar = renderBar(done, engines.length);
+			const eta = etaMs != null && etaMs > 0 ? fmtDuration(etaMs) : "—";
+			lines.push(`${bar} ${done}/${engines.length} engines (ETA ${eta})`);
+		}
+
+		// Research mode bar from createProgressTracker has priority
 		if (latestBarText) lines.push(latestBarText);
+
 		const parts: string[] = [];
 		for (const e of engines) {
 			const s = completed.get(e);
@@ -199,9 +261,7 @@ export function makeProgressTracker(
 				parts.push(`🔓 ${e} needs manual verification`);
 			else parts.push(`⏳ ${e}`);
 		}
-		// Synthesis status is shown only when the caller explicitly requested
-		// Gemini synthesis for a multi-engine search.
-		if (showSynthesis && completed.size >= engines.length) {
+		if (showSynthesis && done >= engines.length) {
 			const synStatus = completed.get("synthesis");
 			if (synStatus === "done") parts.push("✅ synthesized");
 			else if (synStatus === "error") parts.push("❌ synthesis failed");

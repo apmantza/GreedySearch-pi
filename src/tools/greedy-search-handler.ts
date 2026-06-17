@@ -231,16 +231,13 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				flags.push("--synthesizer", params.synthesizer);
 			}
 
-			const onProgress =
-				effectiveEngine === "all"
-					? makeProgressTracker(
-							ALL_ENGINES,
-							onUpdate,
-							researchMode ? "Researching" : "Searching",
-							synthesize,
-							query,
-						)
-					: undefined;
+			const onProgress = makeProgressTracker(
+				effectiveEngine === "all" ? ALL_ENGINES : [effectiveEngine],
+				onUpdate,
+				researchMode ? "Researching" : "Searching",
+				synthesize && effectiveEngine === "all",
+				query,
+			);
 
 			try {
 				const data = await runSearch(
