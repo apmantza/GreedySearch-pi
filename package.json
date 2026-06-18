@@ -1,6 +1,6 @@
 {
 	"name": "@apmantza/greedysearch-pi",
-	"version": "2.0.0",
+	"version": "2.1.0",
 	"description": "Headless multi-engine AI search (Perplexity, Google AI, ChatGPT, Gemini) via browser automation. NO API KEYS needed. Grounded all-engine search fetches sources by default, with optional configurable synthesis and deep research.",
 	"type": "module",
 	"keywords": [
