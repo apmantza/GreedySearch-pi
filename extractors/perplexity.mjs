@@ -56,7 +56,7 @@ async function extractAnswerFromDom(tab, env) {
 	// short factual answer (>=5 chars and contains a word boundary or
 	// punctuation — i.e. it's a word/phrase, not a concatenated string).
 	function _looksLikeAnswerText(text) {
-		const t = (text || '').trim();
+		const t = (text || "").trim();
 		if (t.length > 50) return true;
 		return t.length >= 5 && /\s|[.,!?;:]/.test(t);
 	}
@@ -92,12 +92,19 @@ async function extractAnswerFromDom(tab, env) {
 
 	// Perplexity renders the answer in a prose container after the user message.
 	// First wait for the answer to actually appear (up to 5s), then extract it.
+	// Note: the looksLikeAnswerText helper is inlined into the browser-side
+	// eval string below (it can't reference a Node-side function via template).
 	const domExtract = await cdp(
 		[
 			"eval",
 			tab,
 			`new Promise((resolve) => {
 				const _deadline = Date.now() + 5000;
+				function _looksLikeAnswerText(text) {
+					const t = (text || '').trim();
+					if (t.length > 50) return true;
+					return t.length >= 5 && /\\s|[.,!?;:]/.test(t);
+				}
 				function _tryExtract() {
 					try {
 						// Strategy 1: Find .prose block that's NOT the question
@@ -106,7 +113,7 @@ async function extractAnswerFromDom(tab, env) {
 						const proseBlocks = Array.from(document.querySelectorAll('.prose, [class*="prose"]'));
 						const candidates = proseBlocks.filter(el => {
 							const text = el.innerText?.trim() || '';
-							if (!${looksLikeAnswerText.toString().replace(/^function[^{]*{|}$/g, '')}(text)) return false;
+							if (!_looksLikeAnswerText(text)) return false;
 							// Exclude sidebar/nav (they're usually in <nav> or <aside> or have specific classes)
 							if (el.closest('nav, aside, [role="navigation"], [class*="sidebar"], [class*="nav-"]')) return false;
 							return true;
@@ -119,7 +126,7 @@ async function extractAnswerFromDom(tab, env) {
 						// Strategy 2: Look for the answer container by data attributes
 						// Perplexity uses [data-testid*="answer"] or [class*="answer-content"]
 						const answerContainer = document.querySelector('[data-testid*="answer"], [class*="answer-content"], [class*="response-content"]');
-						if (answerContainer && ${looksLikeAnswerText.toString().replace(/^function[^{]*{|}$/g, '')}(answerContainer.innerText?.trim())) {
+						if (answerContainer && _looksLikeAnswerText(answerContainer.innerText?.trim())) {
 							return resolve(JSON.stringify({ answer: answerContainer.innerText.trim(), method: 'answer-container' }));
 						}
 
@@ -136,7 +143,7 @@ async function extractAnswerFromDom(tab, env) {
 								if (r.width === 0 || r.height === 0) return false; // not visible
 								if (d.closest('nav, aside, [role="navigation"], [class*="sidebar"]')) return false; // not in nav
 								const text = d.innerText?.trim() || '';
-								return ${looksLikeAnswerText.toString().replace(/^function[^{]*{|}$/g, '')}(text) && d.children.length < 20;
+								return _looksLikeAnswerText(text) && d.children.length < 20;
 							})
 							.sort((a, b) => (b.innerText?.length || 0) - (a.innerText?.length || 0));
 						if (blocks.length > 0) {
