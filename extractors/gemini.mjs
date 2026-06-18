@@ -139,6 +139,11 @@ async function extractAnswer(tab, query = "") {
 	// count >= 2, which is unreliable: the Gemini UI has many copy
 	// icons (copy link, copy code, etc.), and the last one on the page
 	// is not always the assistant response copy button.
+	//
+	// minLength: 60 — Gemini renders a streaming header/prefix
+	// ("Gemini said" + UI chrome = ~25 chars) before the body arrives.
+	// The old 20-char threshold often resolved at the header stage and
+	// the copy button click then captured a partial/header-only result.
 	let modelReady = false;
 	const modelDeadline = Date.now() + 12000;
 	while (Date.now() < modelDeadline) {
@@ -152,7 +157,7 @@ async function extractAnswer(tab, query = "") {
 				// Must have content beyond the locale-specific label
 				// ("Gemini said" / "Το Gemini είπε" / etc.) and ideally
 				// a copy button rendered on the response.
-				return t.length > 20;
+				return t.length > 60;
 			})()`,
 		]);
 		if (ready === "true") {
@@ -316,7 +321,11 @@ async function main() {
 			if (++pollTick % 10 === 0) scrollToBottom(tab).catch(() => null);
 		}, 6000);
 		try {
-			await waitForStreamComplete(tab, { timeout: 45000, minLength: 50 });
+			await waitForStreamComplete(tab, {
+				timeout: 45000,
+				stableRounds: 5,
+				minLength: 60,
+			});
 		} finally {
 			clearInterval(scrollInterval);
 		}

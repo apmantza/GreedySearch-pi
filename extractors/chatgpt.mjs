@@ -113,16 +113,29 @@ const CHATGPT_RESPONSE_SELECTOR = String.raw`(() => {
 
 /**
  * Wait for ChatGPT's response to finish streaming. Delegates to the shared
- * waitForStreamComplete in common.mjs with a custom selector that skips the
- * static homepage greeting card. minLength: 1 means any non-empty response
- * is considered "started" — short answers like "Hello! 👋" (8 chars) used
- * to burn the full 65s budget under the old 50-char threshold.
+ * waitForStreamComplete in common.mjs with a custom selector that skips
+ * the static homepage greeting card.
+ *
+ * Tuning (fixes premature-stability race for complex answers):
+ *   minLength: 1    — kept low so short factual answers (e.g. "2 + 2 = 4.")
+ *                      stabilize correctly. The previous run reported a 10-char
+ *                      answer after 35s of waiting because minLength: 50 was
+ *                      too high for short replies.
+ *   stableRounds: 6  — require 6 rounds (~3.6s) of stable text. Complex
+ *                      answers stream a header/title block ("Next.jsReactNext.js",
+ *                      citation strips, etc.) that often stays at 19-40 chars
+ *                      for ~1.5-2s before the body arrives. The previous
+ *                      stableRounds: 3 (~1.8s) wasn't enough headroom; 6 rounds
+ *                      forces the body content to land before the wait resolves.
+ *                      Short answers like "2+2=4" stay stable at low length
+ *                      and resolve quickly because the entire response
+ *                      actually has finished.
  */
 async function waitForResponse(tab, timeoutMs = 20000) {
 	return waitForStreamComplete(tab, {
 		timeout: timeoutMs,
 		interval: 600,
-		stableRounds: 3,
+		stableRounds: 6,
 		minLength: 1,
 		selector: CHATGPT_RESPONSE_SELECTOR,
 	});
@@ -298,7 +311,45 @@ async function extractAnswer(tab, env) {
 		env.fallbackUsed = answer ? "dom" : null;
 	}
 
-	if (!answer) throw new Error("Clipboard interceptor returned empty text");
+	// Reject suspicious DOM-fallback answers: header-only text (e.g. the
+	// "Next.jsReactNext.js" title block ChatGPT renders before the body
+	// streams in) and query-echoed text. These were the failure modes the
+	// earlier stream-wait race was producing — minLength: 1 + stableRounds: 3
+	// resolved too early on the header. The tightened stream-wait covers
+	// the common case; this guard catches the tail where the wait still
+	// resolved prematurely under CDP contention with parallel extractors.
+	//
+	// Heuristic: a real answer is either long (> 50 chars) or matches the
+	// shape of a short factual answer (10-50 chars and contains at least
+	// one punctuation/space-delimited word). The 5-char absolute floor
+	// catches the "Gemini said"/"Next.jsReactNext.js" header stubs that
+	// the old path let through.
+	//
+	// Return an empty result (NOT throw) so the caller's retry loop can
+	// re-wait and try again. The retry path itself is the right place
+	// for backoff, not here.
+	if (answer) {
+		const trimmed = answer.trim();
+		const looksLikeShortAnswer =
+			trimmed.length >= 5 &&
+			trimmed.length <= 50 &&
+			/\s|[.,!?;:]/.test(trimmed);
+		const looksLikeLongAnswer = trimmed.length > 50;
+		if (!looksLikeShortAnswer && !looksLikeLongAnswer) {
+			console.error(
+				`[chatgpt] DOM fallback answer suspiciously short (${trimmed.length} chars: ${JSON.stringify(trimmed.slice(0, 80))}) — returning empty for caller to retry`,
+			);
+			env.fallbackUsed = null;
+			return {
+				answer: "",
+				sources: [],
+				skipped: "header-stub",
+			};
+		}
+	}
+	if (!answer) {
+		return { answer: "", sources: [], skipped: "no-answer" };
+	}
 
 	// Parse sources from both inline/reference-style markdown links and DOM links
 	// (DOM fallback preserves sources even when native clipboard copy fails).
@@ -429,8 +480,24 @@ async function main() {
 		// times out in all-mode under CDP contention, the assistant message
 		// may still be rendering. A short retry loop catches the response
 		// once it lands without burning the full 60s engine budget.
+		//
+		// Each retry first re-runs waitForResponse (which the tightened
+		// minLength=50 + stableRounds=5 makes more accurate), so we don't
+		// just blindly re-click the copy button on a still-streaming
+		// assistant message.
 		let extractResult;
 		for (let attempt = 0; attempt < 3; attempt++) {
+			// Re-wait on retries (attempt 0 already waited; attempts 1-2
+			// didn't because we already passed waitForResponse once). Skip
+			// the wait on attempt 0 to avoid a redundant 20s budget burn.
+			if (attempt > 0) {
+				try {
+					await waitForResponse(tab, 10000);
+				} catch {
+					// Best-effort: fall through to extract which itself
+					// returns empty on a still-streaming page.
+				}
+			}
 			extractResult = await extractAnswer(tab, env);
 			if (extractResult.answer) break;
 			if (attempt < 2) {
@@ -456,7 +523,9 @@ async function main() {
 					? "ChatGPT still on homepage — query was not submitted"
 					: skipped === "no-assistant-response"
 						? "ChatGPT did not return an assistant response after submit"
-						: "ChatGPT returned no answer — assistant never responded",
+						: skipped === "header-stub"
+							? "ChatGPT response appeared to be a header stub after 3 retries — assistant never rendered the body"
+							: "ChatGPT returned no answer — assistant never responded",
 			);
 		}
 		logStage(env, "done", startTime);

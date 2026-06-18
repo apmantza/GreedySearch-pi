@@ -101,6 +101,7 @@ async function main() {
 
 		await waitForStreamComplete(tab, {
 			timeout: 30000,
+			stableRounds: 5,
 			selector: `document.querySelector('${S.answerContainer}')`,
 			minLength: MIN_ANSWER_LENGTH,
 		});

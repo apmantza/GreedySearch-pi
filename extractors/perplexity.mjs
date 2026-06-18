@@ -204,6 +204,26 @@ async function extractAnswer(tab, env) {
 		env.clipboardEmpty = !answer;
 	}
 
+	// Reject suspicious answers: the user's query echoed back, or a copy
+	// button click that landed on the question (not the answer) copy
+	// button. Both manifest as a clipboard write that contains the query
+	// text — the old path treated it as a valid answer and the synthesis
+	// would silently include a paraphrased-query result.
+	if (env.query && answer) {
+		const queryNorm = env.query.toLowerCase().trim();
+		const answerNorm = answer.toLowerCase().trim();
+		if (
+			answerNorm === queryNorm ||
+			answer.trim().length < Math.max(20, queryNorm.length * 0.5)
+		) {
+			console.error(
+				`[perplexity] Clipboard contains query echo or stub (${answer.length} chars), retrying with longer wait...`,
+			);
+			env.clipboardEmpty = true;
+			answer = "";
+		}
+	}
+
 	// DOM fallback: when clipboard interception fails (intermittent in headless),
 	// read the answer from the page DOM instead of triggering visible recovery.
 	if (!answer) {
@@ -246,6 +266,11 @@ async function main() {
 		blockedBy: null,
 		verificationResult: null,
 		inputReady: null,
+		// Carry the original query into extractAnswer so it can reject
+		// answers that look like query-echo (a copy button click on the
+		// question's icon instead of the answer's) without needing to
+		// thread query through every helper.
+		query,
 	};
 
 	try {
@@ -449,7 +474,8 @@ async function main() {
 		await waitForStreamComplete(tab, {
 			timeout: 20000,
 			interval: 600,
-			stableRounds: 3,
+			stableRounds: 5,
+			minLength: 50,
 			selector: "document.body",
 		});
 
