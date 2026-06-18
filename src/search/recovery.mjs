@@ -17,7 +17,7 @@ export const HEADLESS_RECOVERY_ENGINES = [
 const NON_RECOVERABLE_BLOCKED_BY = new Set(["rate-limit"]);
 
 const HEADLESS_BLOCKED_PATTERN =
-	/timed out|timeout|verification|captcha|cloudflare|turnstile|input not found|ask-input|clipboard|copy button hidden|sign.in|login required/i;
+	/timed out|timeout|verification|captcha|cloudflare|turnstile|input not found|ask-input|copy button hidden|sign.in|login required/i;
 
 const MANUAL_VERIFICATION_PATTERN =
 	/needs-human|verification required|please solve|captcha|cloudflare|turnstile|could not be completed automatically|manual intervention|sign.in|login required/i;

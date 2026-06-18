@@ -51,6 +51,16 @@ function findCopyButtonJsExpression() {
 // ============================================================================
 
 async function extractAnswerFromDom(tab, env) {
+	// Heuristic for what counts as a real answer text (not a header stub
+	// like "Next.jsReactNext.js"): either substantial (>50 chars) or a
+	// short factual answer (>=5 chars and contains a word boundary or
+	// punctuation — i.e. it's a word/phrase, not a concatenated string).
+	function _looksLikeAnswerText(text) {
+		const t = (text || '').trim();
+		if (t.length > 50) return true;
+		return t.length >= 5 && /\s|[.,!?;:]/.test(t);
+	}
+
 	// First wait for the page to navigate to a search results URL (perplexity.ai/search/...)
 	// The homepage has a sidebar with nav items that would be falsely picked up as the answer.
 	const navResult = await cdp(
@@ -96,7 +106,7 @@ async function extractAnswerFromDom(tab, env) {
 						const proseBlocks = Array.from(document.querySelectorAll('.prose, [class*="prose"]'));
 						const candidates = proseBlocks.filter(el => {
 							const text = el.innerText?.trim() || '';
-							if (text.length < 50) return false;
+							if (!${looksLikeAnswerText.toString().replace(/^function[^{]*{|}$/g, '')}(text)) return false;
 							// Exclude sidebar/nav (they're usually in <nav> or <aside> or have specific classes)
 							if (el.closest('nav, aside, [role="navigation"], [class*="sidebar"], [class*="nav-"]')) return false;
 							return true;
@@ -109,7 +119,7 @@ async function extractAnswerFromDom(tab, env) {
 						// Strategy 2: Look for the answer container by data attributes
 						// Perplexity uses [data-testid*="answer"] or [class*="answer-content"]
 						const answerContainer = document.querySelector('[data-testid*="answer"], [class*="answer-content"], [class*="response-content"]');
-						if (answerContainer && answerContainer.innerText?.trim().length > 50) {
+						if (answerContainer && ${looksLikeAnswerText.toString().replace(/^function[^{]*{|}$/g, '')}(answerContainer.innerText?.trim())) {
 							return resolve(JSON.stringify({ answer: answerContainer.innerText.trim(), method: 'answer-container' }));
 						}
 
@@ -126,7 +136,7 @@ async function extractAnswerFromDom(tab, env) {
 								if (r.width === 0 || r.height === 0) return false; // not visible
 								if (d.closest('nav, aside, [role="navigation"], [class*="sidebar"]')) return false; // not in nav
 								const text = d.innerText?.trim() || '';
-								return text.length > 100 && d.children.length < 20;
+								return ${looksLikeAnswerText.toString().replace(/^function[^{]*{|}$/g, '')}(text) && d.children.length < 20;
 							})
 							.sort((a, b) => (b.innerText?.length || 0) - (a.innerText?.length || 0));
 						if (blocks.length > 0) {
@@ -151,7 +161,7 @@ async function extractAnswerFromDom(tab, env) {
 
 	try {
 		const { answer, method } = JSON.parse(domExtract);
-		if (answer && answer.length > 50) {
+		if (answer && _looksLikeAnswerText(answer)) {
 			env.fallbackUsed = `dom:${method}`;
 			env.clipboardEmpty = true;
 			// Try to extract sources from links near the answer

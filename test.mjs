@@ -172,24 +172,24 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 		["VERIFICATION REQUIRED", true, 'legacy pattern: "VERIFICATION REQUIRED"'],
 		["verification failed", true, 'extended: "verification" in sentence'],
 		[
-			"Clipboard interceptor returned empty text",
+			"Cloudflare Turnstile challenge detected in closed shadow DOM",
 			true,
-			"new: clipboard error (headless Cloudflare block)",
+			"new: CF closed-shadow-dom block triggers visible retry",
 		],
 		[
-			"[bing] Clipboard empty, retrying in 2s...",
+			"Copilot verification required — please solve it manually in the browser window",
 			true,
-			"new: clipboard empty retry message",
-		],
-		[
-			"Cloudflare challenge detected — content blocked in headless",
-			true,
-			"new: Cloudflare detection triggers visible retry",
+			"new: per-engine 'verification required' triggers visible retry",
 		],
 		[
 			"Network timeout after 30000ms",
 			true,
 			"new: timeout triggers visible retry",
+		],
+		[
+			"Perplexity input not found — page may be blocked or in unexpected state",
+			true,
+			"new: 'input not found' triggers visible retry",
 		],
 		["", false, "empty string"],
 	];
@@ -223,7 +223,7 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	}
 
 	const retryEngines = findHeadlessBlockedEngines({
-		perplexity: { error: "Clipboard interceptor returned empty text" },
+		perplexity: { error: "Perplexity input not found — page may be blocked or in unexpected state" },
 		bing: { error: "Copilot verification required" },
 		google: { error: "Google verification required" },
 	});
@@ -238,11 +238,16 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	const pplxTestCases = [
 		["ask-input selector not found", true, 'legacy: "ask-input"'],
 		[
-			"Clipboard interceptor returned empty text",
+			"Perplexity input not found — page may be blocked or in unexpected state",
 			true,
-			"new: clipboard also triggers for perplexity",
+			"new: 'input not found' triggers for perplexity",
 		],
 		["Perplexity timeout", true, "timeout triggers visible retry"],
+		[
+			"Clipboard interceptor returned empty text",
+			false,
+			"new: 'clipboard' substring no longer triggers (was too broad — fired on routine DOM-fallback failures)",
+		],
 	];
 	for (const [error, expected, label] of pplxTestCases) {
 		const matched = isHeadlessBlockedError(error);

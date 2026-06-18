@@ -89,15 +89,28 @@ const VERIFY_DETECT_JS = `
   }
 
   // --- Generic verify/continue/proceed buttons (catch-all) ---
-  // IMPORTANT: exclude sign-in / OAuth buttons (e.g. "Continue with Google")
+  // IMPORTANT: exclude sign-in / OAuth buttons (e.g. "Continue with Google",
+  // "Continue with email", "Login or sign up for free"). These appear on
+  // many sites (Perplexity, ChatGPT, etc.) when the user isn't logged in,
+  // and clicking them triggers a sign-in flow that takes us to a login
+  // wall — a much worse outcome than the original search failure we were
+  // trying to recover from. The exclusion list must cover both OAuth
+  // providers AND generic "sign in / log in / with email" patterns.
   var btns = Array.from(document.querySelectorAll('button, input[type=submit], a[role=button]'));
   var verify = btns.find(b => {
     var t = (b.innerText?.trim() || b.value || '').toLowerCase();
-    var isVerifyLike = (t.includes('verify') || t.includes('human') || t.includes('robot') || t.includes('continue') || t.includes('proceed')) &&
+    var isVerifyLike = (t === 'continue' || t === 'proceed' || t === 'next' ||
+                       t.startsWith('verify ') || t.startsWith('human ') || t === 'i am human' || t.includes('robot check')) &&
            !t.includes('verified') && !document.querySelector('iframe[src*="recaptcha"]');
     if (!isVerifyLike) return false;
     // Exclude OAuth / sign-in buttons to prevent accidental login flows
-    var isSignIn = /sign.in|log.in|google|microsoft|apple|facebook|github|auth/i.test(t);
+    // — covers "Continue with Google", "Continue with Apple", "Continue
+    // with email", "Login or sign up", "Log in", "Sign in", "Sign up",
+    // "Single sign-on", and the visible panel "Login or sign up for free"
+    // text. The previous list missed "email" and "sso" which let the
+    // auto-click land on the email/SSO sign-in buttons on Perplexity's
+    // anonymous-mode homepage, navigating us into a login flow.
+    var isSignIn = new RegExp("sign.?in|log.?in|sign.?up|with\\s+(google|apple|email|github|facebook|microsoft|sso)|sso|auth", "i").test(t);
     return !isSignIn;
   });
   if (verify) { verify.setAttribute('data-gs-verify','1'); return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:verify.innerText?.trim()||verify.value}); }
