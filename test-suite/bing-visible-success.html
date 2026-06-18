@@ -1,52 +1,94 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Bing Copilot — Visible Success Scenario</title>
-<style>
-  body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
-  .composer { border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; margin-top: 20px; }
-  #userInput { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 4px; }
-  .response { background: #f9f9f9; padding: 16px; margin-top: 16px; border-radius: 8px; }
-  .copy-btn { background: #0078d4; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 10px; }
-</style>
-</head>
-<body>
-<h1>Microsoft Copilot</h1>
-<div class="composer">
-  <label for="userInput" class="sr-only">Ask Copilot</label>
-  <textarea id="userInput" placeholder="Ask me anything..."></textarea>
-</div>
-<div class="response" id="response">
-  <p><strong>Copilot said</strong></p>
-  <p>This is a simulated successful response from Bing Copilot in visible mode. The copy button is hydrated and functional. The clipboard interceptor captures the text when clicked.</p>
-  <button class="copy-btn" onclick="copyToClipboard()">Copy message</button>
-</div>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Bing Copilot — Visible Success Scenario</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        padding: 20px;
+        max-width: 800px;
+        margin: 0 auto;
+      }
+      .composer {
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 16px;
+        margin-top: 20px;
+      }
+      #userInput {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+      .response {
+        background: #f9f9f9;
+        padding: 16px;
+        margin-top: 16px;
+        border-radius: 8px;
+      }
+      .copy-btn {
+        background: #0078d4;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Microsoft Copilot</h1>
+    <div class="composer">
+      <label for="userInput" class="sr-only">Ask Copilot</label>
+      <textarea id="userInput" placeholder="Ask me anything..."></textarea>
+    </div>
+    <div class="response" id="response">
+      <p><strong>Copilot said</strong></p>
+      <p>
+        This is a simulated successful response from Bing Copilot in visible
+        mode. The copy button is hydrated and functional. The clipboard
+        interceptor captures the text when clicked.
+      </p>
+      <button class="copy-btn" onclick="copyToClipboard()">Copy message</button>
+    </div>
 
-<script>
-(function() {
-  window.__mode = 'visible';
-  window.__verdict = 'pass';
-  window.__reason = 'Visible Chrome loads Copilot without Cloudflare block. Copy button exists, clipboard interceptor captures answer on click.';
-  window.__events = ['navigate:copilot.microsoft.com', 'detect:input-ready', 'type:query', 'submit:enter', 'stream:complete', 'copy:success'];
-  window.__expectedEnvelope = {
-    engine: 'bing',
-    mode: 'visible',
-    blockedBy: null,
-    verificationResult: 'clear',
-    clipboardEmpty: false,
-    fallbackUsed: null
-  };
+    <script>
+      (function () {
+        window.__mode = "visible";
+        window.__verdict = "pass";
+        window.__reason =
+          "Visible Chrome loads Copilot without Cloudflare block. Copy button exists, clipboard interceptor captures answer on click.";
+        window.__events = [
+          "navigate:copilot.microsoft.com",
+          "detect:input-ready",
+          "type:query",
+          "submit:enter",
+          "stream:complete",
+          "copy:success",
+        ];
+        window.__expectedEnvelope = {
+          engine: "bing",
+          mode: "visible",
+          blockedBy: null,
+          verificationResult: "clear",
+          clipboardEmpty: false,
+          fallbackUsed: null,
+        };
 
-  // Simulate clipboard write for interceptor testing
-  window.__bingClipboard = null;
-  function copyToClipboard() {
-    const text = document.querySelector('#response p:nth-child(2)').innerText;
-    navigator.clipboard.writeText(text).then(() => {
-      window.__bingClipboard = text;
-    });
-  }
-})();
-</script>
-</body>
+        // Simulate clipboard write for interceptor testing
+        window.__bingClipboard = null;
+        function copyToClipboard() {
+          const text = document.querySelector(
+            "#response p:nth-child(2)",
+          ).innerText;
+          navigator.clipboard.writeText(text).then(() => {
+            window.__bingClipboard = text;
+          });
+        }
+      })();
+    </script>
+  </body>
 </html>

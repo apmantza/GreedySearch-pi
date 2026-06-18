@@ -65,7 +65,9 @@ function cdpSafeArgv(args) {
 
 function validateArg(value, index) {
 	if (typeof value !== "string") {
-		throw new Error(`cdp: argv[${index}] must be a string (got ${typeof value})`);
+		throw new Error(
+			`cdp: argv[${index}] must be a string (got ${typeof value})`,
+		);
 	}
 	if (value.includes("\0")) {
 		throw new Error(`cdp: argv[${index}] contains a null byte`);
