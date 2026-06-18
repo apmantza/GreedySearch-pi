@@ -55,12 +55,12 @@ function cdpSafeArgv(args) {
 		throw new Error("cdp: args must be a non-empty array");
 	}
 	// Allow test commands through without subcommand validation
-	if (args[0] === "test") return args.map(validateArg);
+	if (args[0] === "test") return args.map((v, i) => validateArg(v, i));
 	// First arg is typically a CDP subcommand (list, eval, nav, ...). Validate it.
 	if (!VALID_CDP_COMMANDS.has(args[0])) {
 		throw new Error(`cdp: unknown subcommand '${args[0]}'`);
 	}
-	return args.map(validateArg);
+	return args.map((v, i) => validateArg(v, i));
 }
 
 function validateArg(value, index) {
