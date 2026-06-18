@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+## [2.1.2] — 2026-06-18
+
+### Fixed
+
+- **TUI crash on multi-engine synthesis run with 5+ engines** (`src/tools/shared.ts`, `src/formatters/results.ts`) — The TUI crashed with `Rendered line N exceeds terminal width (W > W-4)` when the all-mode synthesis run produced a long engine-status line or a wide synthesis answer. Two coordinated fixes: (1) `formatResults` and `formatSingleEngineResult` in `src/formatters/results.ts` now wrap their output in a `_truncateLongLines()` safety net that caps any individual line at 800 chars — the TUI's `Text.render` cannot wrap a single line that has no `\n` break, and a chatgpt synthesis answer can contain a 14k+ char JSON-encoded `rawAnswer` line that crashed the TUI before the formatter could break it. (2) `makeProgressTracker` in `src/tools/shared.ts` now caps the engine-status line at 90 chars (88 + ellipsis) — the previous cap of 110 was insufficient because emoji (`✅`, `❌`, `🔄`, etc.) take 2 visible cols each, so a 110-char status line with 5 engines still produced ~116 visible cols, exceeding the 112-char terminal. Both fixes are safety nets; the underlying `Text.render` wrap and the engine status join are unchanged for normal-width content.
+
 ## [2.1.1] — 2026-06-18
 
 ### Fixed
