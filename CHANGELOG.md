@@ -1,10 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [2.1.1] — 2026-06-18
 
 ### Fixed
 
 - **Stream-stability race causing 19-char header stubs to be returned as answers** (`extractors/chatgpt.mjs`, `extractors/perplexity.mjs`, `extractors/gemini.mjs`, `extractors/google-ai.mjs`) — The `waitForStreamComplete` heuristic resolved too early on ChatGPT/Perplexity when the response stream paused briefly on a header/title block (e.g. "Next.jsReactNext.js", 19 chars) before the body arrived. The DOM fallback then returned that header as the "answer". Three changes fix it: (1) `stableRounds` increased from 3 to 5–6 across all extractors so the stream must hold stable for ~3.6s before resolving; (2) ChatGPT's `waitForResponse` minLength stays at 1 so short factual answers (e.g. "2 + 2 = 4.") still resolve quickly — the protection against the header-stub race comes from the longer stability window, not a higher length floor; (3) `extractAnswer` in chatgpt now rejects suspiciously short answers (< 50 chars without a word boundary / no punctuation) but returns a `skipped: "header-stub"` result instead of throwing, so the main retry loop can re-wait and try again. (4) Perplexity's `extractAnswer` now rejects query-echoed clipboard content (the old `.pop()` copy-button selector could click the question's icon instead of the answer's and copy the query text into the interceptor). End-to-end verified: complex question "What are the key differences between the new React Server Components and traditional SSR in Next.js, and what are the tradeoffs?" now returns a 4500+ char answer in 22s instead of a 19-char stub.
+
+- **False-positive visible-recovery cascade** (`src/search/recovery.mjs`, `extractors/consent.mjs`, `extractors/perplexity.mjs`) — Three coordinated fixes stop the recovery flow from kicking in on routine DOM-fallback failures and clicking the wrong sign-in button: (1) `HEADLESS_BLOCKED_PATTERN` no longer matches the substring "clipboard" — the pattern was too broad and triggered visible-recovery on every "Clipboard interceptor returned empty text" error, even when the real cause was just a too-strict DOM-fallback length filter. (2) `handleVerification` catch-all button match changed from `t.includes("continue")` to exact `t === "continue"` so the auto-click no longer lands on Perplexity's "Continue with Google/Apple/email" or "Single sign-on" sign-in buttons. (3) Perplexity's `extractAnswerFromDom` now accepts short factual answers (>=5 chars with a word boundary) in addition to long ones — old filter required `text.length > 50` which rejected "2 + 2 = 4." (9 chars). The cascade that was sending users to a sign-in wall is broken.
 
 ## [2.1.0] — 2026-06-18
 
