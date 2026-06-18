@@ -20,12 +20,12 @@ export const VISIBLE_RECOVERY_LOG = `${tmpdir().replaceAll("\\", "/")}/greedysea
 const CONFIG_DIR = join(homedir(), ".pi");
 const CONFIG_FILE = join(CONFIG_DIR, "greedyconfig");
 
-export const DEFAULT_ENGINES = [
-	"perplexity",
-	"google",
-	"chatgpt",
-	"semantic-scholar",
-];
+// Default engines that participate in the "all" fan-out for normal
+// (non-research) searches. Opt-in research/academic engines like
+// `semantic-scholar` are deliberately excluded — they belong in research
+// mode, not casual web search. Users who want them in normal `engine:all`
+// runs can add them via ~/.pi/greedyconfig (see ensureDefaultConfig()).
+export const DEFAULT_ENGINES = ["perplexity", "google", "chatgpt"];
 export const DEFAULT_SYNTHESIZER = "gemini";
 
 function loadUserEngines() {

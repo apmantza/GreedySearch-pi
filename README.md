@@ -94,12 +94,12 @@ Configure all-engine fan-out and synthesis in `~/.pi/greedyconfig`:
 
 ```json
 {
-  "engines": ["perplexity", "google", "chatgpt", "gemini", "semantic-scholar", "logically"],
+  "engines": ["perplexity", "google", "chatgpt", "gemini"],
   "synthesizer": "gemini"
 }
 ```
 
-Gemini is a normal search engine and can participate in `engine: "all"`. Semantic Scholar and Logically are opt-in research engines; include them in `~/.pi/greedyconfig` only when you want the all-engine fan-out to include academic paper discovery or research-assistant workflows. Deep research child searches reuse the same configured `engines` list and keep query text on stdin; Gemini remains the research planner/final-report synthesizer. If `synthesize: true` and `"synthesizer": "gemini"`, Gemini runs once as a search engine and again as the synthesizer; set `"synthesizer": "chatgpt"` to separate those roles for normal all-search synthesis.
+Gemini is a normal search engine and can participate in `engine: "all"`. `semantic-scholar` and `logically` are opt-in academic/research engines; include them in `~/.pi/greedyconfig` only when you want the all-engine fan-out to include academic paper discovery or research-assistant workflows. Default `engine: "all"` excludes them because their results are noisy for casual web search — they shine in `depth: "research"` mode instead. Deep research child searches reuse the same configured `engines` list and keep query text on stdin; Gemini remains the research planner/final-report synthesizer. If `synthesize: true` and `"synthesizer": "gemini"`, Gemini runs once as a search engine and again as the synthesizer; set `"synthesizer": "chatgpt"` to separate those roles for normal all-search synthesis.
 
 Research bundles are written by default to `.pi/greedysearch-research/<timestamp>_<query>/` and include:
 
