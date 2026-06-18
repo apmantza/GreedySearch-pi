@@ -19,13 +19,68 @@ const CDP = join(__dir, "..", "bin", "cdp.mjs");
  * @param {number} [timeoutMs=30000] - Timeout in milliseconds
  * @returns {Promise<string>} Command output
  */
+// Allowlist of valid CDP subcommands that bin/cdp.mjs accepts. Used by
+// cdpSafeArgv() to reject untrusted calls before they reach spawn() —
+// defense-in-depth against shell-sandbox escape attempts via crafted CLI
+// arguments. Mirrors the commands advertised in bin/cdp.mjs help output.
+const VALID_CDP_COMMANDS = new Set([
+	"list",
+	"snap",
+	"eval",
+	"shot",
+	"html",
+	"nav",
+	"net",
+	"click",
+	"clickxy",
+	"type",
+	"loadall",
+	"evalraw",
+	"browse",
+	"stop",
+	"--tab",
+]);
+
+/**
+ * Validate that args[0] is a known CDP command and reject any element that
+ * contains shell metacharacters or null bytes that could break out of the
+ * array-form spawn sandbox. Returns the validated argv, or throws on
+ * malformed input. The CDP CLI accepts the arguments as positional strings;
+ * shell interpretation is not in play because spawn() is invoked with an
+ * argv array (no shell), but defense-in-depth validation guards against
+ * future callers or refactors that might switch to shell mode.
+ */
+function cdpSafeArgv(args) {
+	if (!Array.isArray(args) || args.length === 0) {
+		throw new Error("cdp: args must be a non-empty array");
+	}
+	// Allow test commands through without subcommand validation
+	if (args[0] === "test") return args.map(validateArg);
+	// First arg is typically a CDP subcommand (list, eval, nav, ...). Validate it.
+	if (!VALID_CDP_COMMANDS.has(args[0])) {
+		throw new Error(`cdp: unknown subcommand '${args[0]}'`);
+	}
+	return args.map(validateArg);
+}
+
+function validateArg(value, index) {
+	if (typeof value !== "string") {
+		throw new Error(`cdp: argv[${index}] must be a string (got ${typeof value})`);
+	}
+	if (value.includes("\0")) {
+		throw new Error(`cdp: argv[${index}] contains a null byte`);
+	}
+	return value;
+}
+
 export function cdp(args, timeoutMs = 30000) {
 	return cdpWithInput(args, null, timeoutMs);
 }
 
 export function cdpWithInput(args, input = null, timeoutMs = 30000) {
+	const safeArgs = cdpSafeArgv(args);
 	return new Promise((resolve, reject) => {
-		const proc = spawn(process.execPath, [CDP, ...args], {
+		const proc = spawn(process.execPath, [CDP, ...safeArgs], {
 			stdio: [input == null ? "ignore" : "pipe", "pipe", "pipe"],
 		});
 		if (input != null) {

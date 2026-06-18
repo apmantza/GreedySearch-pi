@@ -195,6 +195,21 @@ export async function fetchSourceHttp(url, options = {}) {
 		const finalUrl = response.url;
 		const lastModified = response.headers.get("last-modified") || "";
 
+		// SSRF defense: re-validate the post-redirect finalUrl. A malicious
+		// server could redirect our fetch to a private IP, bypassing the
+		// initial isPrivateUrl() check on the original URL.
+		const finalPrivateCheck = isPrivateUrl(finalUrl);
+		if (finalPrivateCheck.blocked) {
+			return {
+				ok: false,
+				url,
+				finalUrl,
+				status: response.status,
+				error: `Blocked: ${finalPrivateCheck.reason}`,
+				needsBrowser: false,
+			};
+		}
+
 		// Handle raw text/plain from GitHub (raw file content)
 		let isRawGitHub = false;
 		try {
