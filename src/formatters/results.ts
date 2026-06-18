@@ -7,6 +7,28 @@ import { formatEngineName } from "../utils/helpers.js";
 import { renderSynthesis } from "./synthesis.js";
 
 /**
+ * Maximum line length for any text passed to the TUI. Lines longer than
+ * this are truncated with an ellipsis. The TUI's Text.render wraps at the
+ * terminal width, but it crashes with
+ *   "Rendered line N exceeds terminal width (W > W-4)"
+ * when a single line is wider than its own internal render width. Long
+ * lines (e.g. a markdown table row inside a chatgpt synthesis answer) that
+ * don't have a \n break would otherwise produce this crash. The safety
+ * net below trims individual lines before they reach the TUI.
+ */
+const MAX_LINE_WIDTH = 800;
+function _truncateLongLines(text: string): string {
+	return text
+		.split("\n")
+		.map((line) =>
+			line.length > MAX_LINE_WIDTH
+				? line.slice(0, MAX_LINE_WIDTH - 1) + "…"
+				: line,
+		)
+		.join("\n");
+}
+
+/**
  * Format search results based on engine type
  */
 export function formatResults(
@@ -16,10 +38,10 @@ export function formatResults(
 	const lines: string[] = [];
 
 	if (engine === "all") {
-		return formatAllEnginesResult(data, lines);
+		return _truncateLongLines(formatAllEnginesResult(data, lines));
 	}
 
-	return formatSingleEngineResult(data, lines);
+	return _truncateLongLines(formatSingleEngineResult(data, lines));
 }
 
 /**
