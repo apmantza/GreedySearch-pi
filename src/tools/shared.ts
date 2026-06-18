@@ -275,15 +275,17 @@ export function makeProgressTracker(
 		}
 		if (parts.length > 0) {
 			// Engine status line: 5 engines with emoji+separator runs ~110
-			// chars, which is right at the 112-char terminal width. Truncate
-			// with ellipsis if the join overflows — the TUI's Text.render
-			// can't wrap a single line and crashes with
+			// chars (visible width 116+ because emoji take 2 cols each),
+			// which is over the 112-char terminal width. The TUI's
+			// Text.render can't wrap a single line and crashes with
 			//   "Rendered line N exceeds terminal width (W > W-4)"
 			// if a single rendered line is wider than the terminal.
+			// Truncate at 90 chars (well under 100 visible-width to leave
+			// padding-room for variable emoji widths).
 			const statusLine = parts.join(" · ");
 			lines.push(
-				statusLine.length > 110
-					? statusLine.slice(0, 107) + "…"
+				statusLine.length > 90
+					? statusLine.slice(0, 88) + "…"
 					: statusLine,
 			);
 		}
