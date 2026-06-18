@@ -273,7 +273,20 @@ export function makeProgressTracker(
 			else if (synStatus === "needs-human") parts.push("⏭️ synthesis skipped");
 			else parts.push("🔄 synthesizing");
 		}
-		if (parts.length > 0) lines.push(parts.join(" · "));
+		if (parts.length > 0) {
+			// Engine status line: 5 engines with emoji+separator runs ~110
+			// chars, which is right at the 112-char terminal width. Truncate
+			// with ellipsis if the join overflows — the TUI's Text.render
+			// can't wrap a single line and crashes with
+			//   "Rendered line N exceeds terminal width (W > W-4)"
+			// if a single rendered line is wider than the terminal.
+			const statusLine = parts.join(" · ");
+			lines.push(
+				statusLine.length > 110
+					? statusLine.slice(0, 107) + "…"
+					: statusLine,
+			);
+		}
 
 		onUpdate?.({
 			content: [{ type: "text", text: lines.join("\n") }],
