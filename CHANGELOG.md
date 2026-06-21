@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [2.1.3] — 2026-06-21
+
+### Fixed
+
+- **Stale dependency resolution** — `jsdom` was installed at `24.1.3` despite `package.json` declaring `^29.1.1` (lockfile freeze). Fresh lockfile resolves all deps to latest within semver ranges. Updated `@sinclair/typebox` `^0.34.48` → `^0.34.49`.
+- **Peer dep pin** — `@earendil-works/pi-coding-agent` peer dep changed from wildcard `*` to `^0.79.0` to pin compatible range against Pi `0.79.9`.
+
+### Changed
+
+- **CI security audit** — Added `npm audit --omit=dev --audit-level=high` to GitHub Actions CI (matching pi-lens) to block pushes/PRs that introduce high/critical vulnerabilities in production dependencies.
+
 ## [2.1.2] — 2026-06-18
 
 ### Fixed
