@@ -26,6 +26,13 @@ jobs:
       - name: Check lockfile sync
         run: npm run check:lockfile
 
+      # Fail on known-vulnerable PRODUCTION deps (what ships to users).
+      # Scoped to high/critical to avoid blocking on fix-less moderate advisories;
+      # transitive moderate ones are handled by Dependabot security updates.
+      # DevDeps are excluded — they never reach users.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Lint (.mjs syntax check)
         run: npm run lint
 
@@ -76,13 +83,13 @@ jobs:
               const full = path.join(pkgDir, entry);
               if (entry.endsWith('/')) {
                 if (!fs.existsSync(full) || !fs.readdirSync(full).length) {
-                  console.error('ERROR: pi/files directory missing or empty in tarball: ' + entry);
+                  console.error('ERROR: dir missing or empty in tarball: ' + entry);
                   process.exit(1);
                 }
                 console.log('OK: dir -> ' + entry);
               } else {
                 if (!fs.existsSync(full)) {
-                  console.error('ERROR: pi/files entry missing from tarball: ' + entry);
+                  console.error('ERROR: entry missing from tarball: ' + entry);
                   process.exit(1);
                 }
                 console.log('OK: file -> ' + entry);
@@ -106,14 +113,14 @@ jobs:
       - name: Verify extension loads via jiti (catches missing deps)
         shell: bash
         run: |
-          # The scoped package installs to <global>/node_modules/@apmantza/greedysearch-pi
+          # The scoped package installs to <global>/node_modules under the scope
           INSTALL_DIR="$(npm root -g)/@apmantza/greedysearch-pi"
           # Simulate how pi loads extensions: jiti import index.ts
           # ERR_MODULE_NOT_FOUND = missing dep → fail
-          # pi-coding-agent is a host-provided peer dep; its absence is expected here
+          # pi-coding-agent is a host-provided peer dep; absence is expected here
           cd "$INSTALL_DIR"
           npx -y jiti ./index.ts 2>&1 | tee /tmp/jiti-output.txt || true
-          if grep -q "ERR_MODULE_NOT_FOUND\|Cannot find module" /tmp/jiti-output.txt \
+          if grep -q "ERR_MODULE_NOT_FOUND" /tmp/jiti-output.txt \
              && ! grep -q "pi-coding-agent" /tmp/jiti-output.txt; then
             echo "FAILED: missing module dependency detected"
             cat /tmp/jiti-output.txt
