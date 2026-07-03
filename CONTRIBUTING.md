@@ -7,9 +7,10 @@ design goals, and runtime conventions.
 ## Quick links
 
 - [AGENTS.md](./AGENTS.md) — architecture, stealth/recovery policy, testing
-- [README.md](./README.md) — user-facing tool, parameters, runtime commands
+- [README.md](./README.md) — concise project overview and install instructions
+- [docs/usage.md](./docs/usage.md) — user-facing tool parameters and modes
+- [docs/runtime.md](./docs/runtime.md) — runtime commands and Chrome/CDP safety
 - [CHANGELOG.md](./CHANGELOG.md) — release history (add an `[Unreleased]` entry)
-- [skills/greedy-search/skill.md](./skills/greedy-search/skill.md) — agent-facing tool description
 
 ## Setup
 
@@ -71,9 +72,10 @@ formatter. Engines are wired in three places:
 2. **Engine registration** in `src/search/constants.mjs`:
    - Add a `ENGINES["<name>"] = "<name>.mjs"` entry (and any aliases).
    - Add a `ENGINE_DOMAINS["<name>"] = "host.tld"` entry.
-   - Engines are opt-in: leave them out of `DEFAULT_ENGINES` and
-     document adding them to `~/.pi/greedyconfig.engines` in
-     the README.
+   - Research/academic engines are opt-in: leave them out of
+     `DEFAULT_ENGINES` unless they should participate in normal casual
+     `engine: "all"` searches, and document adding them to
+     `~/.pi/greedyconfig.engines` in `docs/usage.md`.
 
 3. **Pre-seeded homepage** in `bin/search.mjs` (`ENGINE_START_URLS`):
    - If the engine has a useful starting page (so extractors can
@@ -99,9 +101,8 @@ formatter. Engines are wired in three places:
 
 6. **Docs**:
    - Add an `[Unreleased]` entry to `CHANGELOG.md`.
-   - Update the engine list in `README.md` and the Pi tool/skill
-     description in `src/tools/greedy-search-handler.ts` and
-     `skills/greedy-search/skill.md`.
+   - Update the engine list in `README.md`, `docs/usage.md`, and the Pi
+     tool description/schema in `src/tools/greedy-search-handler.ts`.
 
 ## PR checklist
 
@@ -112,7 +113,7 @@ formatter. Engines are wired in three places:
       the pre-existing cyclomatic-complexity advisories on
       `greedy-search-handler.ts`.
 - [ ] `CHANGELOG.md` updated under `[Unreleased]`.
-- [ ] Skill/tool description mentions the new engine.
+- [ ] Tool description/schema and docs mention the new engine.
 
 ## Reporting issues
 

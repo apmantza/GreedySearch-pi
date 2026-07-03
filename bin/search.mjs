@@ -314,6 +314,8 @@ async function main() {
 		const ENGINE_START_URLS = {
 			perplexity: "https://www.perplexity.ai/",
 			google: "https://www.google.com/",
+			chatgpt: "https://chatgpt.com/",
+			gemini: "https://gemini.google.com/app",
 			"semantic-scholar": "https://www.semanticscholar.org/",
 			semanticscholar: "https://www.semanticscholar.org/",
 			s2: "https://www.semanticscholar.org/",

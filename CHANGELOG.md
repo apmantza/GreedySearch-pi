@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Changelog-driven release notes** (`scripts/changelog-extract.mjs`, `scripts/changelog-release.mjs`, `scripts/backfill-github-releases.mjs`, `.github/workflows/release.yml`) — GitHub releases now use curated CHANGELOG sections as the release body, with helper scripts for promoting `Unreleased`, extracting summary notes, and backfilling historical releases. The parser supports both current `## [x.y.z] — date` headings and legacy `## vx.y.z (date)` headings.
+
+### Changed
+
+- **README simplified like pi-lens and package skill removed** (`README.md`, `docs/*.md`, `package.json`) — The root README is now a concise project overview with installation, quick usage, and links to focused docs for usage, research mode, runtime/Chrome, source fetching, development, and releases. The duplicated Pi skill file was removed so docs live in one place.
+- **Normal all-engine config excludes Semantic Scholar** (`src/search/constants.mjs`, `~/.pi/greedyconfig`) — Default and local all-engine fan-out now use Perplexity, Google, ChatGPT, and Gemini while academic/research engines remain opt-in.
+
+### Fixed
+
+- **Headless ChatGPT and Gemini extraction in all-mode** (`extractors/chatgpt.mjs`, `extractors/gemini.mjs`, `bin/search.mjs`) — ChatGPT now keeps its tab foregrounded during headless streaming, waits for streaming indicators to clear, and rejects repeated-domain citation stubs. Gemini now targets the latest `model-response`, avoids nested code-block copy buttons, and prefers a complete DOM fallback when clipboard copy captures only a snippet.
+- **Research-mode floor and citation handling** (`src/search/research.mjs`, `src/search/simple-research.mjs`) — Explicit `breadth` / `iterations` values now bypass scale-aware overrides, duplicate fetch targets are skipped, cited-source URL checks only evaluate cited sources, and bot-protected HEAD responses are skipped instead of treated as dead links.
+
 ## [2.1.3] — 2026-06-21
 
 ### Fixed

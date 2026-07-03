@@ -223,12 +223,15 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	}
 
 	const retryEngines = findHeadlessBlockedEngines({
-		perplexity: { error: "Perplexity input not found — page may be blocked or in unexpected state" },
+		perplexity: {
+			error:
+				"Perplexity input not found — page may be blocked or in unexpected state",
+		},
 		bing: { error: "Copilot verification required" },
 		google: { error: "Google verification required" },
 	});
 	if (retryEngines.join(",") === "perplexity,bing") {
-		passMsg("visible retry engines: perplexity and bing only");
+		passMsg("visible retry engines: google excluded from recovery");
 	} else {
 		failMsg(
 			`visible retry engines: expected perplexity,bing, got ${retryEngines.join(",")}`,
@@ -715,7 +718,17 @@ proc.on('close', code => {
 			const tmp = join(resultsDir, `_synth_${synthesizer}.mjs`);
 			writeFileSync(tmp, script, "utf8");
 			await runNode([tmp], 240);
-			const data = JSON.parse(readFileSync(outFile, "utf8"));
+			let data;
+			try {
+				data = JSON.parse(readFileSync(outFile, "utf8"));
+			} catch (e) {
+				return {
+					synthesized: false,
+					synthesizedBy: null,
+					parseError: e.message,
+					rawOut: "",
+				};
+			}
 			let parsed = null;
 			try {
 				parsed = JSON.parse(data.out);

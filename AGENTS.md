@@ -1,6 +1,6 @@
 # GreedySearch-pi Agent Guide
 
-GreedySearch-pi is a Pi package/extension that registers the `greedy_search` tool. It automates a dedicated Chrome instance on port `9222` and queries AI/search engines through browser automation (Perplexity, Bing Copilot, Google AI, Gemini).
+GreedySearch-pi is a Pi package/extension that registers the `greedy_search` tool. It automates a dedicated Chrome instance on port `9222` and queries AI/search engines through browser automation (Perplexity, Google AI, ChatGPT, Gemini, Bing Copilot, and opt-in research engines).
 
 ## Design goals
 
@@ -10,20 +10,23 @@ GreedySearch-pi is a Pi package/extension that registers the `greedy_search` too
 - **Iterative research mode** — `depth: "research"` / `--depth research` performs a deep-research loop: plan focused queries, run fast multi-engine searches, fetch/dedupe sources, extract compact learnings/gaps/follow-ups with Gemini, and synthesize a final cited report. It should remain no-API-key and reuse GreedySearch engines/fetchers; do not reintroduce Firecrawl/OpenAI dependencies from the reference implementation.
 - **Stealth where it matters** — `Page.addScriptToEvaluateOnNewDocument` patches are awaited for Bing tabs (Copilot's Cloudflare blocks headless without them), but fire-and-forget for Perplexity/Google (Perplexity's anti-bot detects the aggressive canvas/console patches). Tabs are created blank → stealth injected → extractor navigates, ensuring stealth is active before page load. Keep Bing-oriented patches Chrome-like: `navigator.webdriver` should be `undefined`, patched functions should stringify as native code, canvas noise should be stable per page (not random per call), and navigator plugins/mimeTypes/mediaDevices/userAgentData should stay internally consistent with the launch UA.
 
-## Read the skill first
+## Read the docs first
 
-Before changing behavior or using the tool, read:
+Before changing behavior or using the tool, read the focused docs under `docs/`:
 
-- `skills/greedy-search/skill.md`
+- `docs/usage.md` — tool parameters, search modes, config
+- `docs/research.md` — research workflow and bundles
+- `docs/runtime.md` — Chrome lifecycle, visible mode, CDP safety
+- `docs/development.md` — checks and extractor guidance
+- `docs/releases.md` — changelog/release workflow
 
-That skill documents how agents should call `greedy_search`, including `visible: true` / `alwaysVisible: true` for captcha/login/cookie situations.
+There is intentionally no Pi skill file; the package exposes only the `greedy_search` tool and keeps agent-facing documentation in `README.md`, `docs/`, and this guide.
 
 ## Pi extension/runtime context
 
 - Pi loads extension TypeScript through jiti. Do **not** assume `.ts` files need precompiled `.js` output for Pi runtime.
 - `package.json` exposes this package via:
   - `pi.extensions: ["./index.ts"]`
-  - `pi.skills: ["./skills"]`
 - The main extension entrypoint is `index.ts`.
 - Tool registration lives in `src/tools/greedy-search-handler.ts`.
 - CLI orchestration lives in `bin/search.mjs`.
@@ -120,14 +123,14 @@ Important behavior:
 
 Recovery helpers live in `src/search/recovery.mjs`.
 
-Current automatic headless → visible recovery applies to **Bing** and **Perplexity** only. Google is intentionally not included unless requested.
+Current automatic headless → visible recovery applies to **Bing**, **Perplexity**, **ChatGPT**, **Semantic Scholar**, and **Logically**. Google is intentionally not included unless requested.
 
 Recovery triggers include timeout, verification/captcha/Cloudflare/Turnstile, missing input, ask-input, clipboard/copy failures.
 
 Important behavior:
 
-- `engine: "all"` retries blocked Bing/Perplexity in visible mode.
-- Single-engine `engine: "bing"` and `engine: "perplexity"` also retry visible when blocked.
+- `engine: "all"` retries blocked recovery engines in visible mode.
+- Single-engine calls to recovery engines also retry visible when blocked.
 - Recovery can run even in `fast` mode because a blocked search otherwise returns no result.
 - If manual verification is needed, leave visible Chrome open and return a clear rerun instruction instead of killing the browser.
 
@@ -164,7 +167,7 @@ Google AI Mode is not currently in automatic visible recovery. Respect this unle
 
 ### ChatGPT
 
-ChatGPT participates in headless → visible recovery because the typed query can succeed in headless while the assistant response never streams in (Cloudflare does not block, but the response just does not arrive under tab throttling). The visible-recovery path establishes a working session and caches cookies.
+ChatGPT participates in headless → visible recovery, but the normal goal is robust headless extraction. In `all` mode, keep the ChatGPT tab foregrounded during stream waits; background tabs can stall and leave only citation/header stubs in the DOM.
 
 Two subtle bugs to know about when modifying the extractor:
 
@@ -174,9 +177,10 @@ Two subtle bugs to know about when modifying the extractor:
 
 `extractors/chatgpt.mjs` uses:
 
-- `waitForStreamComplete(tab, { minLength: 1, timeout: 20000, ... })` from `common.mjs` — the same shared helper Perplexity and Gemini use.
-- 15s node-side fallback (`pollForResponseNodeSide`) for throttled `all`-mode tabs where the in-browser poll is clamped to 1Hz.
+- `Page.bringToFront` while waiting so headless all-mode tabs keep streaming.
+- A custom in-browser stream wait that finds the assistant message after the last user message and waits for streaming indicators to clear.
 - A DOM fallback that reads the assistant message's innerText (skipping the static greeting card by finding the message after the last user message).
+- Guards that reject header/citation stubs, including repeated-domain fragments like `typescriptlang.org` repeated without body text.
 - `extractAnswer` throws `blockedBy: "no-response"` when the assistant message never renders content.
 
 ### Gemini
@@ -185,9 +189,10 @@ Gemini uses a Material Design icon-based copy button (`button:has(mat-icon[data-
 
 `extractors/gemini.mjs` therefore:
 
-1. Waits for the `model-response` custom element to have content > 20 chars (not just the locale-specific "Gemini said" / "Το Gemini είπε" label).
-2. Clicks the copy button on the `model-response` element specifically.
-3. Falls back to the `model-response` innerText if the clipboard contains the user's query (echoed-query detection) or is empty.
+1. Waits for the latest `model-response` custom element to have substantive content (not just the locale-specific "Gemini said" / "Το Gemini είπε" label).
+2. Keeps the Gemini tab foregrounded while waiting in headless all-mode.
+3. Clicks a copy button on the latest `model-response`, preferring non-code-block copy buttons so code snippets are not mistaken for the full answer.
+4. Falls back to the latest `model-response` innerText when clipboard content is empty, echoed, or much shorter than the DOM answer.
 
 The same `[data-message-author-role]`-style "find the response after the last user message" pattern used by ChatGPT would not work on Gemini because Gemini does not use `data-message-author-role` attributes — it uses custom elements `<user-query-content>` and `<model-response>`.
 
@@ -258,8 +263,9 @@ Releases are fully automated via `.github/workflows/release.yml`. The flow mirro
 ### Cutting a release
 
 1. **Bump version** in `package.json` (e.g. `1.9.2` → `2.0.0`).
-2. **Add a CHANGELOG entry** under `## [X.Y.Z] — YYYY-MM-DD` in `CHANGELOG.md`. Move content from the `[Unreleased]` section into the new version section (the `[Unreleased]` section should be empty after the bump). The release workflow's `prepare` job greps for `^## \[$VERSION\]` and fails the release if the entry is missing.
-3. **Run local checks** before pushing:
+2. **Add CHANGELOG entries** under `## [Unreleased]` in `CHANGELOG.md`.
+3. **Promote the changelog** with `npm run changelog:release` (or `node scripts/changelog-release.mjs X.Y.Z --date YYYY-MM-DD`). This creates the `## [X.Y.Z] — YYYY-MM-DD` section and opens a fresh empty `[Unreleased]` section. The release workflow extracts GitHub release notes from this curated section.
+4. **Run local checks** before pushing:
 
    ```bash
    npm run check:lockfile  # package.json ↔ package-lock.json sync
@@ -267,15 +273,15 @@ Releases are fully automated via `.github/workflows/release.yml`. The flow mirro
    node test.mjs unit      # 86+ unit tests
    ```
 
-4. **Commit and push to master** with a clear conventional message (e.g. `release: 2.0.0`).
+5. **Commit and push to master** with a clear conventional message (e.g. `release: 2.0.0`).
 
 ### What the CI does on push to master
 
 - **`lint-and-lockfile` job** (Ubuntu, runs first): executes `check:lockfile` + `lint`. Must pass before `install-test` runs.
-- **`install-test` job** (matrix: ubuntu/windows/macos, needs `lint-and-lockfile`): packs the tarball, verifies all `pi.extensions` / `pi.skills` / `files` entries exist in it, installs globally, runs unit tests, and runs `npx jiti ./index.ts` to catch missing dependencies. The `pi-coding-agent` peer-dep absence is expected and ignored.
+- **`install-test` job** (matrix: ubuntu/windows/macos, needs `lint-and-lockfile`): packs the tarball, verifies all `pi.extensions` / `files` entries exist in it, installs globally, runs unit tests, and runs `npx jiti ./index.ts` to catch missing dependencies. The `pi-coding-agent` peer-dep absence is expected and ignored.
 - **`release` workflow** (runs in parallel with CI, triggered by every push to master):
   - **`prepare` job**: detects the new version by checking that the tag `vX.Y.Z` doesn't exist, verifies the CHANGELOG entry, runs `npm publish --dry-run` (if `NPM_TOKEN` is set). Outputs `should_release` and `has_npm_token` for the downstream jobs.
-  - **`release` job** (needs `prepare`, runs only if `should_release == 'true'`): creates the git tag `vX.Y.Z`, pushes it, creates a GitHub release with auto-generated notes via `softprops/action-gh-release@v3`.
+  - **`release` job** (needs `prepare`, runs only if `should_release == 'true'`): creates the git tag `vX.Y.Z`, pushes it, extracts curated release notes from `CHANGELOG.md`, and creates a GitHub release via `softprops/action-gh-release@v3`.
   - **`publish-npm` job** (needs `prepare` + `release`, runs only if `should_release && has_npm_token`): runs `npm publish` with `NODE_AUTH_TOKEN` from the `NPM_TOKEN` secret.
 
 ### Release gating
@@ -290,7 +296,7 @@ You can also trigger the release workflow manually via the GitHub Actions UI (`w
 
 ### Versioning guidelines
 
-- **Patch** (`X.Y.Z`): bug fixes, internal refactors, CI changes, dependency updates. The release workflow's auto-generated notes work best for these.
+- **Patch** (`X.Y.Z`): bug fixes, internal refactors, CI changes, dependency updates. The release workflow uses curated notes extracted from `CHANGELOG.md`.
 - **Minor** (`X.Y.0`): new features, new extractors, new research engines, new tool parameters. CHANGELOG entries should be detailed.
 - **Major** (`X.0.0`): breaking changes to the `greedy_search` tool API, major extractor rewrites, or any change that requires user action to upgrade. CHANGELOG entries should call out migration steps explicitly.
 
@@ -350,8 +356,7 @@ If the engine blocks headless and benefits from visible cookie caching, add it t
 
 ### 8. Update docs
 
-- `README.md` — engine list
-- `skills/greedy-search/skill.md` — skill description
+- `README.md` and focused docs under `docs/` — engine list and behavior
 - `src/tools/greedy-search-handler.ts` — tool `description` and `engine` parameter schema
 - `CHANGELOG.md` — under `[Unreleased]`
 
@@ -365,7 +370,7 @@ All extractors share these timeouts (kept tight — solo runs complete in 9-16s)
 | Post-nav settle     | 600ms                                      | React hydration buffer                                         |
 | Verification retry  | 10s                                        | Turnstile never clears in headless; longer = waste             |
 | Input selector wait | 8-15s                                      | In-browser polling, no CDP traffic                             |
-| Stream completion   | 20s (Perplexity/ChatGPT in-browser) + 15s (ChatGPT node-side fallback), 60s (Bing), 90s (Gemini) | Single `Runtime.evaluate` with in-browser poll loop. ChatGPT uses the shared `waitForStreamComplete` with `minLength: 1` (greeting-card skip lets us drop the old 50-char threshold). |
-| Engine hard kill    | 30s fast / 55s standard                    | `runExtractor` spawn timeout; accounts for CDP contention      |
+| Stream completion   | 20s Perplexity in-browser, 35s ChatGPT foregrounded custom wait, 60s Bing, 45s Gemini targeted `model-response` wait | Single in-browser polling loops where possible; ChatGPT/Gemini keep their tab foregrounded in headless all-mode to avoid background throttling and partial stubs. |
+| Engine hard kill    | 70s normal all-mode; fast mode 35s for most engines and 60s for ChatGPT | `runExtractor` spawn timeout; accounts for CDP contention      |
 
 CDP daemon internal `TIMEOUT`: **90s** (must exceed longest `Runtime.evaluate` call).

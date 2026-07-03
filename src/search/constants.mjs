@@ -25,7 +25,7 @@ const CONFIG_FILE = join(CONFIG_DIR, "greedyconfig");
 // `semantic-scholar` are deliberately excluded — they belong in research
 // mode, not casual web search. Users who want them in normal `engine:all`
 // runs can add them via ~/.pi/greedyconfig (see ensureDefaultConfig()).
-export const DEFAULT_ENGINES = ["perplexity", "google", "chatgpt"];
+export const DEFAULT_ENGINES = ["perplexity", "google", "chatgpt", "gemini"];
 export const DEFAULT_SYNTHESIZER = "gemini";
 
 function loadUserEngines() {

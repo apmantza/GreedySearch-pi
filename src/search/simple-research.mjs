@@ -387,7 +387,10 @@ export async function runSimpleResearchMode({
 	const citationAudit = auditCitations(synthesis.answer || "", combinedSources);
 
 	// Citation URL reachability check
-	const citationUrls = await runCitationUrlCheck(combinedSources);
+	const citationUrls = await runCitationUrlCheck(
+		combinedSources,
+		citationAudit,
+	);
 
 	reconcileQuestionsFromSynthesis(questions, synthesis, citationAudit);
 	const allGaps = uniqueStrings(synthesis.caveats || []);

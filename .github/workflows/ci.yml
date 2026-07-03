@@ -14,9 +14,9 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "22"
 
@@ -27,8 +27,8 @@ jobs:
         run: npm run check:lockfile
 
       # Fail on known-vulnerable PRODUCTION deps (what ships to users).
-      # Scoped to high/critical to avoid blocking on fix-less moderate advisories;
-      # transitive moderate ones are handled by Dependabot security updates.
+      # Scoped to high/critical to avoid blocking on fix-less moderate
+      # advisories; transitive moderate ones are handled by Dependabot.
       # DevDeps are excluded — they never reach users.
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
@@ -48,9 +48,9 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "22"
 
@@ -66,8 +66,8 @@ jobs:
           tar -xzf "$TARBALL" -C "$TMPDIR"
 
           # Verify all package.json files/pi entries exist in tarball
-          # (catches typos in pi.extensions / pi.skills / files whitelist
-          # that would cause "module not found" at runtime).
+          # (catches typos in pi.extensions / files whitelist that would
+          # cause "module not found" at runtime).
           export GS_PKG_DIR="$TMPDIR/package"
           node -e "
             const path = require('path');
@@ -77,13 +77,12 @@ jobs:
             const pi = pkg.pi || {};
             const entries = []
               .concat(pi.extensions || [])
-              .concat(pi.skills || [])
               .concat(pkg.files || []);
             for (const entry of entries) {
               const full = path.join(pkgDir, entry);
               if (entry.endsWith('/')) {
                 if (!fs.existsSync(full) || !fs.readdirSync(full).length) {
-                  console.error('ERROR: dir missing or empty in tarball: ' + entry);
+                  console.error('ERROR: missing/empty tarball dir: ' + entry);
                   process.exit(1);
                 }
                 console.log('OK: dir -> ' + entry);
@@ -117,7 +116,7 @@ jobs:
           INSTALL_DIR="$(npm root -g)/@apmantza/greedysearch-pi"
           # Simulate how pi loads extensions: jiti import index.ts
           # ERR_MODULE_NOT_FOUND = missing dep → fail
-          # pi-coding-agent is a host-provided peer dep; absence is expected here
+          # pi-coding-agent is host-provided; absence is expected here
           cd "$INSTALL_DIR"
           npx -y jiti ./index.ts 2>&1 | tee /tmp/jiti-output.txt || true
           if grep -q "ERR_MODULE_NOT_FOUND" /tmp/jiti-output.txt \

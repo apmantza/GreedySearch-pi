@@ -66,6 +66,17 @@ async function typeIntoGemini(tab, text) {
 	}
 }
 
+async function bringToFront(tab, { required = false } = {}) {
+	try {
+		await cdp(["evalraw", tab, "Page.bringToFront", "{}"], 5000);
+		return true;
+	} catch (error) {
+		console.error(`[gemini] bringToFront failed: ${error.message}`);
+		if (required) throw error;
+		return false;
+	}
+}
+
 async function scrollToBottom(tab) {
 	await cdp([
 		"eval",
@@ -93,7 +104,8 @@ async function extractAnswerFromDom(tab) {
 			new Promise((resolve) => {
 				const _deadline = Date.now() + 6000;
 				function _tryExtract() {
-					const resp = document.querySelector('model-response');
+					const responses = Array.from(document.querySelectorAll('model-response'));
+					const resp = responses[responses.length - 1];
 					if (resp) {
 						const text = (resp.innerText || resp.textContent || '').trim();
 						const idx = text.indexOf('\n');
@@ -126,9 +138,30 @@ async function extractAnswerFromDom(tab) {
 	);
 	try {
 		return JSON.parse(raw);
-	} catch {
+	} catch (error) {
+		console.error(
+			`[gemini] DOM fallback JSON parse failed (${raw.length} chars): ${error.message}`,
+		);
 		return { answer: "", sources: [] };
 	}
+}
+
+async function clickLatestModelResponseCopy(tab) {
+	return cdp([
+		"eval",
+		tab,
+		`(() => {
+			const responses = Array.from(document.querySelectorAll('model-response'));
+			const resp = responses[responses.length - 1];
+			if (!resp) return 'no-model-response';
+			const buttons = Array.from(resp.querySelectorAll('${S.copyButton}'));
+			const nonCodeButtons = buttons.filter((btn) => !btn.closest('pre, code, code-block, .code-block, .code-container'));
+			const btn = nonCodeButtons[nonCodeButtons.length - 1] || buttons[buttons.length - 1];
+			if (!btn) return 'no-copy-button';
+			btn.click();
+			return 'clicked';
+		})()`,
+	]);
 }
 
 async function extractAnswer(tab, query = "") {
@@ -151,7 +184,8 @@ async function extractAnswer(tab, query = "") {
 			"eval",
 			tab,
 			String.raw`(() => {
-				const r = document.querySelector('model-response');
+				const responses = Array.from(document.querySelectorAll('model-response'));
+				const r = responses[responses.length - 1];
 				if (!r) return false;
 				const t = (r.innerText || '').trim();
 				// Must have content beyond the locale-specific label
@@ -174,18 +208,7 @@ async function extractAnswer(tab, query = "") {
 	// not the absolute last copy button on the page. The page has many
 	// copy icons (copy link, copy code, etc.) and the last one is not
 	// always the assistant's response copy button.
-	await cdp([
-		"eval",
-		tab,
-		`(() => {
-			const resp = document.querySelector('model-response');
-			if (!resp) return 'no-model-response';
-			const btn = resp.querySelector('${S.copyButton}');
-			if (!btn) return 'no-copy-button';
-			btn.click();
-			return 'clicked';
-		})()`,
-	]);
+	await clickLatestModelResponseCopy(tab);
 	await new Promise((r) => setTimeout(r, 600));
 
 	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
@@ -200,35 +223,32 @@ async function extractAnswer(tab, query = "") {
 	) {
 		console.error("[gemini] Clipboard echoed query, retrying in 2s...");
 		await new Promise((r) => setTimeout(r, 2000));
-		await cdp([
-			"eval",
-			tab,
-			`(() => {
-				const resp = document.querySelector('model-response');
-				if (!resp) return 'no-model-response';
-				const btn = resp.querySelector('${S.copyButton}');
-				if (!btn) return 'no-copy-button';
-				btn.click();
-				return 'clicked';
-			})()`,
-		]);
+		await clickLatestModelResponseCopy(tab);
 		await new Promise((r) => setTimeout(r, 600));
 		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
 	}
 
-	// DOM fallback: if the clipboard is empty or still echoes the query,
-	// read the model-response innerText directly. This handles the case
-	// where the copy button never rendered (response never appeared) or
-	// the click didn't fire.
+	// DOM fallback: if clipboard is empty, echoes the query, or looks like a
+	// short snippet, read the model-response innerText directly. Skip the
+	// fallback when native copy already returned a substantial full answer.
 	let domFallback = null;
-	if (
-		!answer ||
-		(queryNorm &&
-			(answer.toLowerCase().trim() === queryNorm ||
-				answer.trim().length < queryNorm.length))
-	) {
+	const answerText = answer?.trim() || "";
+	const clipboardLooksEchoed =
+		queryNorm &&
+		(answerText.toLowerCase() === queryNorm ||
+			answerText.length < queryNorm.length);
+	const clipboardLooksComplete =
+		answerText.length > 500 && !clipboardLooksEchoed;
+	if (!clipboardLooksComplete) {
 		domFallback = await extractAnswerFromDom(tab);
-		if (domFallback.answer) {
+		const domExtendsClipboard =
+			answerText &&
+			domFallback.answer.includes(answerText) &&
+			domFallback.answer.length > answerText.length * 2;
+		if (
+			domFallback.answer &&
+			(!answerText || clipboardLooksEchoed || domExtendsClipboard)
+		) {
 			answer = domFallback.answer;
 		}
 	}
@@ -304,6 +324,7 @@ async function main() {
 		await waitForSelector(tab, S.input, 8000, TIMING.inputPoll);
 		await new Promise((r) => setTimeout(r, jitter(TIMING.postClick)));
 
+		await bringToFront(tab, { required: true });
 		await injectClipboardInterceptor(tab, GLOBAL_VAR);
 		await typeIntoGemini(tab, query);
 		await new Promise((r) => setTimeout(r, jitter(TIMING.postType)));
@@ -316,8 +337,10 @@ async function main() {
 
 		// Wait for Gemini's response to finish streaming before extracting.
 		// Periodic scrolling keeps lazy-loaded content triggered in the viewport.
+		await bringToFront(tab);
 		let pollTick = 0;
 		const scrollInterval = setInterval(() => {
+			bringToFront(tab).catch(() => null);
 			if (++pollTick % 10 === 0) scrollToBottom(tab).catch(() => null);
 		}, 6000);
 		try {
@@ -325,6 +348,8 @@ async function main() {
 				timeout: 45000,
 				stableRounds: 5,
 				minLength: 60,
+				selector:
+					"(() => { const responses = Array.from(document.querySelectorAll('model-response')); return responses[responses.length - 1]; })()",
 			});
 		} finally {
 			clearInterval(scrollInterval);

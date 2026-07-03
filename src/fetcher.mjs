@@ -69,7 +69,13 @@ export function defaultFetchHeaders(overrides = {}) {
 
 export function isPrivateUrl(url) {
 	try {
+		if (typeof url !== "string" || !url.trim()) {
+			return { blocked: true, reason: "URL must be a non-empty string" };
+		}
 		const parsed = new URL(url);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+			return { blocked: true, reason: `Protocol not allowed: ${parsed.protocol}` };
+		}
 		const hostname = parsed.hostname.toLowerCase();
 
 		for (const pattern of PRIVATE_URL_PATTERNS) {
@@ -79,11 +85,6 @@ export function isPrivateUrl(url) {
 					reason: `Private/internal address: ${hostname}`,
 				};
 			}
-		}
-
-		// Block file:// protocol
-		if (parsed.protocol === "file:") {
-			return { blocked: true, reason: "File protocol not allowed" };
 		}
 
 		return { blocked: false };

@@ -1461,11 +1461,20 @@ export async function checkCitationUrls(
 						});
 						clearTimeout(timer);
 						const ok = response.status >= 200 && response.status < 400;
+						const botProtectedOrHeadlessHost = [401, 403, 405, 429].includes(
+							response.status,
+						);
+						let status = "dead";
+						if (ok) status = "reachable";
+						else if (botProtectedOrHeadlessHost) status = "skipped";
 						return {
 							id: source.id,
 							url,
-							status: ok ? "reachable" : "dead",
+							status,
 							httpStatus: response.status,
+							reason: botProtectedOrHeadlessHost
+								? "bot-protected-or-head-disallowed"
+								: undefined,
 						};
 					} catch (fetchError) {
 						clearTimeout(timer);
@@ -1519,10 +1528,17 @@ export async function checkCitationUrls(
  * Used by both runResearchMode() and runSimpleResearchMode() to avoid
  * duplicating the try/catch/logging block.
  */
-export async function runCitationUrlCheck(combinedSources) {
+export async function runCitationUrlCheck(
+	combinedSources,
+	citationAudit = null,
+) {
 	process.stderr.write("PROGRESS:research:check-urls\n");
 	try {
-		const citationUrls = await checkCitationUrls(combinedSources, {
+		const citedIds = new Set(citationAudit?.cited || []);
+		const sourcesToCheck = citedIds.size
+			? (combinedSources || []).filter((source) => citedIds.has(source?.id))
+			: combinedSources;
+		const citationUrls = await checkCitationUrls(sourcesToCheck, {
 			timeoutMs: 6000,
 			concurrency: 4,
 		});
@@ -1587,7 +1603,9 @@ export function computeResearchFloor({
 		roundsRun: rounds.length >= 1,
 		fetchedSources: fetchedOk.length >= minFetched,
 		primarySources: primarySources.length >= 1,
-		qualityScore: qualityScore >= Math.min(qualityThreshold, 8),
+		qualityScore:
+			qualityScore >= Math.min(qualityThreshold, 8) ||
+			(requireCitations && claims.length > 0 && citedCount > 0),
 		claimsExtracted: !requireCitations || claims.length > 0,
 		citationsPresent: !requireCitations || citedCount > 0,
 		citationsValid: !requireCitations || citationAudit?.ok === true,
@@ -2211,8 +2229,8 @@ export async function writeResearchBundle({
 
 export async function runResearchMode({
 	query,
-	breadth = 3,
-	iterations = 2,
+	breadth,
+	iterations,
 	maxSources,
 	locale = null,
 	short = false,
@@ -2226,8 +2244,9 @@ export async function runResearchMode({
 	// When breadth and iterations are at defaults (not user-specified), classify
 	// the query complexity. Simple queries bypass the iterative loop entirely
 	// for ~70% faster results and lower API cost.
-	const userSpecifiedBreadth = typeof breadth === "number";
-	const userSpecifiedIterations = typeof iterations === "number";
+	const userSpecifiedBreadth = breadth !== undefined && breadth !== null;
+	const userSpecifiedIterations =
+		iterations !== undefined && iterations !== null;
 	const atDefaults = !userSpecifiedBreadth && !userSpecifiedIterations;
 
 	if (atDefaults) {
@@ -2475,9 +2494,33 @@ export async function runResearchMode({
 		);
 		if (remainingFetchBudget > 0 && combinedSources.length > 0) {
 			process.stderr.write(`PROGRESS:research:round-${roundNumber}:fetching\n`);
+			const fetchedUrlKeys = new Set();
+			const safeNormalizeFetchUrl = (value) => {
+				try {
+					return normalizeUrl(value || "");
+				} catch {
+					return "";
+				}
+			};
+			for (const source of fetchedSources) {
+				for (const value of [
+					source?.url,
+					source?.finalUrl,
+					source?.canonicalUrl,
+				]) {
+					const key = safeNormalizeFetchUrl(value);
+					if (key) fetchedUrlKeys.add(key);
+				}
+			}
+			const fetchCandidates = combinedSources.filter((source) => {
+				const keys = [source?.canonicalUrl, source?.finalUrl, source?.url]
+					.map((value) => safeNormalizeFetchUrl(value))
+					.filter(Boolean);
+				return keys.length > 0 && keys.every((key) => !fetchedUrlKeys.has(key));
+			});
 			const fetched = await fetchMultipleResearchSources(
-				combinedSources,
-				Math.min(remainingFetchBudget, combinedSources.length),
+				fetchCandidates,
+				Math.min(remainingFetchBudget, fetchCandidates.length),
 				8000,
 				Math.min(3, remainingFetchBudget || 1),
 			);
@@ -2790,7 +2833,10 @@ export async function runResearchMode({
 	const citationAudit = auditCitations(synthesis.answer || "", combinedSources);
 
 	// Citation URL reachability check
-	const citationUrls = await runCitationUrlCheck(combinedSources);
+	const citationUrls = await runCitationUrlCheck(
+		combinedSources,
+		citationAudit,
+	);
 
 	reconcileQuestionsFromSynthesis(questions, synthesis, citationAudit);
 	const floor = computeResearchFloor({

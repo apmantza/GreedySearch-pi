@@ -16,7 +16,7 @@ jobs:
       should_release: ${{ steps.meta.outputs.should_release }}
       has_npm_token: ${{ steps.meta.outputs.has_npm_token }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           fetch-depth: 0
 
@@ -69,7 +69,7 @@ jobs:
           TMPDIR=$(mktemp -d)
           tar -xzf "$TARBALL" -C "$TMPDIR"
 
-          # Verify the pi.extensions and pi.skills entry points exist
+          # Verify the pi.extensions and package files entries exist
           export GS_PKG_DIR="$TMPDIR/package"
           node -e "
             const path = require('path');
@@ -79,20 +79,19 @@ jobs:
             const pi = pkg.pi || {};
             const entries = []
               .concat(pi.extensions || [])
-              .concat(pi.skills || [])
               .concat(pkg.files || []);
             for (const entry of entries) {
               // directories end with / — just check the first file inside
               const full = path.join(pkgDir, entry);
               if (entry.endsWith('/')) {
                 if (!fs.existsSync(full) || !fs.readdirSync(full).length) {
-                  console.error('ERROR: pi/files directory missing or empty in tarball: ' + entry);
+                  console.error('ERROR: missing/empty tarball dir: ' + entry);
                   process.exit(1);
                 }
                 console.log('OK: dir -> ' + entry);
               } else {
                 if (!fs.existsSync(full)) {
-                  console.error('ERROR: pi/files entry missing from tarball: ' + entry);
+                  console.error('ERROR: missing tarball entry: ' + entry);
                   process.exit(1);
                 }
                 console.log('OK: file -> ' + entry);
@@ -101,14 +100,18 @@ jobs:
           "
           rm -rf "$TMPDIR"
 
-      - uses: actions/setup-node@v6
-        if: steps.meta.outputs.should_release == 'true' && steps.meta.outputs.has_npm_token == 'true'
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        if: >-
+          steps.meta.outputs.should_release == 'true' &&
+          steps.meta.outputs.has_npm_token == 'true'
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
       - name: Dry-run publish (validates tarball + registry auth)
-        if: steps.meta.outputs.should_release == 'true' && steps.meta.outputs.has_npm_token == 'true'
+        if: >-
+          steps.meta.outputs.should_release == 'true' &&
+          steps.meta.outputs.has_npm_token == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --dry-run
@@ -120,7 +123,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           fetch-depth: 0
 
@@ -130,23 +133,33 @@ jobs:
           git tag "${{ needs.prepare.outputs.tag }}"
           git push origin "${{ needs.prepare.outputs.tag }}"
 
+      - name: Extract CHANGELOG release notes
+        shell: bash
+        run: |
+          node scripts/changelog-extract.mjs \
+            "${{ needs.prepare.outputs.version }}" \
+            --summary \
+            -o RELEASE_NOTES.md
+
       - name: Create GitHub release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: ${{ needs.prepare.outputs.tag }}
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
 
   publish-npm:
     runs-on: ubuntu-latest
     needs: [prepare, release]
-    if: needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.has_npm_token == 'true'
+    if: >-
+      needs.prepare.outputs.should_release == 'true' &&
+      needs.prepare.outputs.has_npm_token == 'true'
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org

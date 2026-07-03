@@ -25,7 +25,6 @@ import {
 	prepareArgs,
 	validateQuery,
 	waitForSelector,
-	waitForStreamComplete,
 } from "./common.mjs";
 import { dismissConsent, handleVerification } from "./consent.mjs";
 
@@ -131,14 +130,96 @@ const CHATGPT_RESPONSE_SELECTOR = String.raw`(() => {
  *                      and resolve quickly because the entire response
  *                      actually has finished.
  */
-async function waitForResponse(tab, timeoutMs = 20000) {
-	return waitForStreamComplete(tab, {
-		timeout: timeoutMs,
-		interval: 600,
-		stableRounds: 6,
-		minLength: 1,
-		selector: CHATGPT_RESPONSE_SELECTOR,
-	});
+async function bringToFront(tab, { required = false } = {}) {
+	try {
+		await cdp(["evalraw", tab, "Page.bringToFront", "{}"], 5000);
+		return true;
+	} catch (error) {
+		console.error(`[chatgpt] bringToFront failed: ${error.message}`);
+		if (required) throw error;
+		return false;
+	}
+}
+
+async function waitForResponse(tab, timeoutMs = 35000) {
+	await bringToFront(tab, { required: true });
+	let foregroundAttempts = 0;
+	let foregroundInFlight = false;
+	const keepForeground = setInterval(() => {
+		if (foregroundInFlight) return;
+		if (foregroundAttempts >= 8) {
+			console.error("[chatgpt] stopping foreground keepalive after 8 attempts");
+			clearInterval(keepForeground);
+			return;
+		}
+		foregroundAttempts++;
+		foregroundInFlight = true;
+		bringToFront(tab).finally(() => {
+			foregroundInFlight = false;
+		});
+	}, 4000);
+	try {
+		const code = String.raw`
+		new Promise((resolve, reject) => {
+			const _deadline = Date.now() + ${timeoutMs};
+			const _baseInterval = 700;
+			const _stableRounds = 5;
+			let _lastLen = -1;
+			let _stableCount = 0;
+
+			function _jitter(ms) {
+				return Math.max(50, ms + (Math.random() * ms * 0.4 - ms * 0.2));
+			}
+
+			function _assistantAfterLastUser() {
+				const all = document.querySelectorAll('[data-message-author-role]');
+				let lastUserIdx = -1;
+				for (let i = 0; i < all.length; i++) {
+					if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
+				}
+				if (lastUserIdx < 0) return null;
+				let assistant = null;
+				for (let i = lastUserIdx + 1; i < all.length; i++) {
+					if (all[i].getAttribute('data-message-author-role') === 'assistant') assistant = all[i];
+				}
+				return assistant;
+			}
+
+			function _poll() {
+				try {
+					const el = _assistantAfterLastUser();
+					const text = (el?.innerText || '').trim();
+					const len = text.length;
+					const streaming = !!el?.querySelector('.streaming-animation,[data-is-streaming="true"]') ||
+						!!document.querySelector('button[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label*="Stop"]');
+					if (len >= 1 && !streaming) {
+						if (len === _lastLen) {
+							_stableCount++;
+							if (_stableCount >= _stableRounds) { resolve(len); return; }
+						} else {
+							_lastLen = len;
+							_stableCount = 0;
+						}
+					} else if (len !== _lastLen) {
+						_lastLen = len;
+						_stableCount = 0;
+					}
+					if (Date.now() < _deadline) setTimeout(_poll, _jitter(_baseInterval));
+					else if (_lastLen >= 1 && !streaming) resolve(_lastLen);
+					else reject(new Error('ChatGPT response did not finish streaming within ${timeoutMs}ms'));
+				} catch (e) { reject(e); }
+			}
+			_poll();
+		})`;
+		const lenStr = await cdp(["eval", tab, code], timeoutMs + 10000);
+		const len = parseInt(lenStr, 10) || 0;
+		if (len >= 1) return len;
+		throw new Error(
+			`ChatGPT response did not finish streaming within ${timeoutMs}ms`,
+		);
+	} finally {
+		clearInterval(keepForeground);
+	}
 }
 
 /**
@@ -211,6 +292,8 @@ async function extractAnswerFromDom(tab) {
 					skipped: 'no-assistant-response',
 				});
 			}
+			const streaming = !!assistant.querySelector('.streaming-animation,[data-is-streaming="true"]') ||
+				!!document.querySelector('button[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label*="Stop"]');
 			const answer = (assistant.innerText || assistant.textContent || '').trim();
 			const seen = new Set();
 			const sources = [];
@@ -222,13 +305,16 @@ async function extractAnswerFromDom(tab) {
 				sources.push({ title, url });
 				if (sources.length >= 10) break;
 			}
-			return JSON.stringify({ answer, sources });
+			return JSON.stringify({ answer, sources, streaming });
 		})()
 	`,
 	]);
 	try {
 		return JSON.parse(raw);
-	} catch {
+	} catch (error) {
+		console.error(
+			`[chatgpt] DOM fallback JSON parse failed (${raw.length} chars): ${error.message}`,
+		);
 		return { answer: "", sources: [], skipped: "parse-error" };
 	}
 }
@@ -307,6 +393,9 @@ async function extractAnswer(tab, env) {
 	let domFallback = null;
 	if (!answer) {
 		domFallback = await extractAnswerFromDom(tab);
+		if (domFallback.streaming) {
+			return { answer: "", sources: [], skipped: "still-streaming" };
+		}
 		answer = domFallback.answer;
 		env.fallbackUsed = answer ? "dom" : null;
 	}
@@ -335,15 +424,25 @@ async function extractAnswer(tab, env) {
 			trimmed.length <= 50 &&
 			/\s|[.,!?;:]/.test(trimmed);
 		const looksLikeLongAnswer = trimmed.length > 50;
-		if (!looksLikeShortAnswer && !looksLikeLongAnswer) {
+		const words = trimmed.split(/\s+/).filter(Boolean);
+		const domainRepeats = (
+			trimmed.match(/\b[a-z0-9-]+\.(?:com|org|net|dev|io)\b/gi) || []
+		).length;
+		const looksLikeCitationStub =
+			domainRepeats >= 4 &&
+			domainRepeats >= Math.max(3, Math.floor(words.length / 3));
+		if (
+			(!looksLikeShortAnswer && !looksLikeLongAnswer) ||
+			looksLikeCitationStub
+		) {
 			console.error(
-				`[chatgpt] DOM fallback answer suspiciously short (${trimmed.length} chars: ${JSON.stringify(trimmed.slice(0, 80))}) — returning empty for caller to retry`,
+				`[chatgpt] DOM fallback answer suspicious (${trimmed.length} chars, domainRepeats=${domainRepeats}: ${JSON.stringify(trimmed.slice(0, 80))}) — returning empty for caller to retry`,
 			);
 			env.fallbackUsed = null;
 			return {
 				answer: "",
 				sources: [],
-				skipped: "header-stub",
+				skipped: looksLikeCitationStub ? "citation-stub" : "header-stub",
 			};
 		}
 	}
@@ -518,15 +617,20 @@ async function main() {
 		if (!answer) {
 			env.blockedBy = "no-response";
 			env.skipped = skipped || null;
-			throw new Error(
-				skipped === "no-user-message"
-					? "ChatGPT still on homepage — query was not submitted"
-					: skipped === "no-assistant-response"
-						? "ChatGPT did not return an assistant response after submit"
-						: skipped === "header-stub"
-							? "ChatGPT response appeared to be a header stub after 3 retries — assistant never rendered the body"
-							: "ChatGPT returned no answer — assistant never responded",
-			);
+			let message = "ChatGPT returned no answer — assistant never responded";
+			if (skipped === "no-user-message") {
+				message = "ChatGPT still on homepage — query was not submitted";
+			} else if (skipped === "no-assistant-response") {
+				message = "ChatGPT did not return an assistant response after submit";
+			} else if (
+				skipped === "header-stub" ||
+				skipped === "citation-stub" ||
+				skipped === "still-streaming"
+			) {
+				message =
+					"ChatGPT response did not finish rendering after 3 retries — assistant never rendered the body";
+			}
+			throw new Error(message);
 		}
 		logStage(env, "done", startTime);
 

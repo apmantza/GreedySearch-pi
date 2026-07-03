@@ -22,7 +22,11 @@
 		"test:bash:quick": "./test.sh quick",
 		"test:bash:smoke": "./test.sh smoke",
 		"lint": "node scripts/lint.mjs",
-		"check:lockfile": "node scripts/check-lockfile.mjs"
+		"check:lockfile": "node scripts/check-lockfile.mjs",
+		"changelog:check": "node scripts/changelog-release.mjs --check",
+		"changelog:release": "node scripts/changelog-release.mjs",
+		"changelog:extract": "node scripts/changelog-extract.mjs",
+		"release:backfill-notes": "node scripts/backfill-github-releases.mjs"
 	},
 	"engines": {
 		"node": ">=20.11.0"
@@ -32,18 +36,15 @@
 		"test.mjs",
 		"bin/",
 		"src/",
-		"skills/",
 		"extractors/",
+		"scripts/",
 		"CHANGELOG.md",
 		"README.md",
-		"docs/banner.png"
+		"docs/"
 	],
 	"pi": {
 		"extensions": [
 			"./index.ts"
-		],
-		"skills": [
-			"./skills"
 		]
 	},
 	"dependencies": {
