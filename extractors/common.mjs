@@ -129,7 +129,18 @@ export async function getOrOpenTab(tabPrefix) {
 		"Target.createTarget",
 		'{"url":"about:blank"}',
 	]);
-	const { targetId } = JSON.parse(raw);
+	let createdTarget;
+	try {
+		createdTarget = JSON.parse(raw);
+	} catch (error) {
+		throw new Error(
+			`Target.createTarget returned invalid JSON: ${error.message}`,
+		);
+	}
+	const { targetId } = createdTarget;
+	if (!targetId) {
+		throw new Error("Target.createTarget did not return a targetId");
+	}
 	await cdp(["list"]); // refresh cache
 	const tid = targetId.slice(0, 8);
 	// Inject stealth patches for anti-detection coverage (both headless + visible).
@@ -221,34 +232,54 @@ export async function injectHeadlessStealth(tab) {
   try { delete window._phantom; } catch(_) {}
   try { delete window.Buffer; } catch(_) {}
 
-  // Real Chrome without automation does not expose a useful webdriver value.
-  // A literal false value is itself a common stealth tell; prefer undefined and
-  // make the descriptor configurable like native browser properties.
-  Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
+  // Real Chrome without automation should not expose navigator.webdriver at all.
+  // A literal false or an own-property getter returning undefined is itself a
+  // common stealth tell; remove both instance and prototype properties when the
+  // descriptor is configurable (as it is with --disable-blink-features).
+  try { delete navigator.webdriver; } catch(_) {}
+  try { delete Navigator.prototype.webdriver; } catch(_) {}
   Object.defineProperty(navigator, 'vendor', { get: () => 'Google Inc.', configurable: true });
   Object.defineProperty(navigator, 'platform', { get: () => 'Win32', configurable: true });
   Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0, configurable: true });
   Object.defineProperty(navigator, 'pdfViewerEnabled', { get: () => true, configurable: true });
+  var __greedyMimeTypes = null;
+  function __makeMimeTypes() {
+    var pdf = { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: null };
+    var textPdf = { type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: null };
+    try { Object.setPrototypeOf(pdf, MimeType.prototype); } catch(_) {}
+    try { Object.setPrototypeOf(textPdf, MimeType.prototype); } catch(_) {}
+    var m = [pdf, textPdf];
+    try { Object.setPrototypeOf(m, MimeTypeArray.prototype); } catch(_) {}
+    m.item = function item(i) { return this[i] || null; };
+    m.namedItem = function namedItem(name) { return Array.prototype.find.call(this, function(x) { return x && x.type === name; }) || null; };
+    return m;
+  }
   Object.defineProperty(navigator, 'plugins', {
     get: () => {
-      var p = [
-        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
-      ];
-      p.length = 3;
+      __greedyMimeTypes = __greedyMimeTypes || __makeMimeTypes();
+      var plugin0 = { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' };
+      var plugin1 = { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' };
+      var plugin2 = { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' };
+      try { Object.setPrototypeOf(plugin0, Plugin.prototype); } catch(_) {}
+      try { Object.setPrototypeOf(plugin1, Plugin.prototype); } catch(_) {}
+      try { Object.setPrototypeOf(plugin2, Plugin.prototype); } catch(_) {}
+      var p = [plugin0, plugin1, plugin2];
+      p.item = function item(i) { return this[i] || null; };
+      p.namedItem = function namedItem(name) { return Array.prototype.find.call(this, function(x) { return x && x.name === name; }) || null; };
+      p.refresh = function refresh() {};
+      try { Object.setPrototypeOf(p, PluginArray.prototype); } catch(_) {}
+      try {
+        __greedyMimeTypes[0].enabledPlugin = p[0];
+        __greedyMimeTypes[1].enabledPlugin = p[0];
+      } catch(_) {}
       return p;
     },
+    configurable: true,
   });
   Object.defineProperty(navigator, 'mimeTypes', {
     get: () => {
-      var m = [
-        { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: null },
-        { type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: null },
-      ];
-      m.item = function(i) { return m[i] || null; };
-      m.namedItem = function(name) { return m.find(function(x) { return x.type === name; }) || null; };
-      return m;
+      __greedyMimeTypes = __greedyMimeTypes || __makeMimeTypes();
+      return __greedyMimeTypes;
     },
     configurable: true,
   });
@@ -343,9 +374,15 @@ export async function injectHeadlessStealth(tab) {
   } catch(_) {}
 
   // ── screen properties ─────────────────────────────────
+  // Headless Chrome often reports an 800x600 screen even when the viewport is
+  // 1920x1080. Keep screen metrics internally consistent with our launch flags.
   try {
-    if (!screen.colorDepth) Object.defineProperty(screen, 'colorDepth', { get: () => 24, configurable: true });
-    if (!screen.pixelDepth) Object.defineProperty(screen, 'pixelDepth', { get: () => 24, configurable: true });
+    Object.defineProperty(screen, 'width', { get: () => 1920, configurable: true });
+    Object.defineProperty(screen, 'height', { get: () => 1080, configurable: true });
+    Object.defineProperty(screen, 'availWidth', { get: () => 1920, configurable: true });
+    Object.defineProperty(screen, 'availHeight', { get: () => 1040, configurable: true });
+    Object.defineProperty(screen, 'colorDepth', { get: () => 24, configurable: true });
+    Object.defineProperty(screen, 'pixelDepth', { get: () => 24, configurable: true });
   } catch(_) {}
 
   // ── navigator.userAgentData (UA Client Hints) ─────────

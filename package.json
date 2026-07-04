@@ -21,6 +21,8 @@
 		"test:bash": "./test.sh",
 		"test:bash:quick": "./test.sh quick",
 		"test:bash:smoke": "./test.sh smoke",
+		"stealth-check": "node scripts/stealth-check.mjs",
+		"stealth:check": "node scripts/stealth-check.mjs",
 		"lint": "node scripts/lint.mjs",
 		"check:lockfile": "node scripts/check-lockfile.mjs",
 		"changelog:check": "node scripts/changelog-release.mjs --check",
