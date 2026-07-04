@@ -50,8 +50,8 @@ const TESTS = [
 ];
 
 const BASELINE_DIR = join(
-  process.env.HOME || process.env.USERPROFILE || process.cwd(),
-  ".greedysearch",
+	process.env.HOME || process.env.USERPROFILE || process.cwd(),
+	".greedysearch",
 );
 const BASELINE_FILE = join(BASELINE_DIR, "stealth-baseline.json");
 const BASELINE_VERSION = 1;
@@ -187,13 +187,22 @@ function summarizeCreepjs(text) {
 		interesting: interesting.slice(0, 30),
 		scores: {
 			likeHeadless: likeHeadlessMatch
-				? { percent: parseInt(likeHeadlessMatch[1], 10), fingerprint: likeHeadlessMatch[2] }
+				? {
+						percent: parseInt(likeHeadlessMatch[1], 10),
+						fingerprint: likeHeadlessMatch[2],
+					}
 				: null,
 			headless: headlessMatch
-				? { percent: parseInt(headlessMatch[1], 10), fingerprint: headlessMatch[2] }
+				? {
+						percent: parseInt(headlessMatch[1], 10),
+						fingerprint: headlessMatch[2],
+					}
 				: null,
 			stealth: stealthMatch
-				? { percent: parseInt(stealthMatch[1], 10), fingerprint: stealthMatch[2] }
+				? {
+						percent: parseInt(stealthMatch[1], 10),
+						fingerprint: stealthMatch[2],
+					}
 				: null,
 			trust: trustMatch ? parseInt(trustMatch[1], 10) : null,
 			bot: botMatch ? parseInt(botMatch[1], 10) : null,
@@ -231,9 +240,7 @@ function createBaseline(results) {
 					intoliAdditions: sannysoft.summary.intoliAdditions,
 				}
 			: null,
-		creepjs: creepjs?.summary?.scores
-			? { ...creepjs.summary.scores }
-			: null,
+		creepjs: creepjs?.summary?.scores ? { ...creepjs.summary.scores } : null,
 	};
 }
 
@@ -300,7 +307,9 @@ function checkStrict(results) {
 			}
 			for (const [key, value] of Object.entries(s.intoliAdditions || {})) {
 				if (value && !/\bpassed\b/i.test(value)) {
-					failures.push(`Sannysoft Intoli: ${key}=${value} (expected "passed")`);
+					failures.push(
+						`Sannysoft Intoli: ${key}=${value} (expected "passed")`,
+					);
 				}
 			}
 		}
@@ -623,22 +632,26 @@ function printHuman(results) {
 			console.log(`  Text length: ${s.textLength}`);
 			if (s.scores) {
 				const parts = [];
-				if (s.scores.likeHeadless) parts.push(`like headless: ${s.scores.likeHeadless.percent}%`);
-				if (s.scores.headless) parts.push(`headless: ${s.scores.headless.percent}%`);
-				if (s.scores.stealth) parts.push(`stealth: ${s.scores.stealth.percent}%`);
-				if (s.scores.trust !== null && s.scores.trust !== undefined) parts.push(`trust: ${s.scores.trust}%`);
-				if (s.scores.bot !== null && s.scores.bot !== undefined) parts.push(`bot: ${s.scores.bot}%`);
+				if (s.scores.likeHeadless)
+					parts.push(`like headless: ${s.scores.likeHeadless.percent}%`);
+				if (s.scores.headless)
+					parts.push(`headless: ${s.scores.headless.percent}%`);
+				if (s.scores.stealth)
+					parts.push(`stealth: ${s.scores.stealth.percent}%`);
+				if (s.scores.trust !== null && s.scores.trust !== undefined)
+					parts.push(`trust: ${s.scores.trust}%`);
+				if (s.scores.bot !== null && s.scores.bot !== undefined)
+					parts.push(`bot: ${s.scores.bot}%`);
 				console.log(`  Scores: ${parts.join(" | ")}`);
 			}
 			if (s.interesting.length)
-				console.log(
-					`  Raw lines: ${s.interesting.slice(0, 5).join(" | ")}`,
-				);
+				console.log(`  Raw lines: ${s.interesting.slice(0, 5).join(" | ")}`);
 		}
 	}
 
 	const notes = [];
-	if (strictMode) notes.push("Strict mode enabled — exit code reflects pass/fail.");
+	if (strictMode)
+		notes.push("Strict mode enabled — exit code reflects pass/fail.");
 	if (diffMode) notes.push("Baseline comparison mode enabled.");
 	notes.push("Use --json for machine-readable output.");
 	console.log(`\nNote: ${notes.join(" ")}`);

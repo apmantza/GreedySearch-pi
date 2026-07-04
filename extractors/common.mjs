@@ -242,6 +242,8 @@ export async function injectHeadlessStealth(tab) {
   Object.defineProperty(navigator, 'platform', { get: () => 'Win32', configurable: true });
   Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0, configurable: true });
   Object.defineProperty(navigator, 'pdfViewerEnabled', { get: () => true, configurable: true });
+  Object.defineProperty(navigator, 'productSub', { get: () => '20030107', configurable: true });
+  Object.defineProperty(navigator, 'product', { get: () => 'Gecko', configurable: true });
   var __greedyMimeTypes = null;
   function __makeMimeTypes() {
     var pdf = { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: null };
@@ -285,7 +287,7 @@ export async function injectHeadlessStealth(tab) {
   });
   Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'], configurable: true });
   try {
-    Object.defineProperty(navigator, 'connection', { get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false }), configurable: true });
+    Object.defineProperty(navigator, 'connection', { get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, downlinkMax: Infinity, saveData: false }), configurable: true });
   } catch(_) {}
   if (!navigator.mediaDevices) {
     Object.defineProperty(navigator, 'mediaDevices', {
@@ -301,6 +303,18 @@ export async function injectHeadlessStealth(tab) {
       configurable: true,
     });
   }
+  // ── Missing platform APIs (headless often lacks these) ─
+  try {
+    if (!navigator.share) {
+      navigator.share = function() { return Promise.reject(new Error('NotAllowedError')); };
+    }
+  } catch(_) {}
+  try {
+    if (!navigator.contentIndex) {
+      Object.defineProperty(navigator, 'contentIndex', { get: () => ({ add: function() {}, delete: function() {}, getAll: function() { return Promise.resolve([]); } }), configurable: true });
+    }
+  } catch(_) {}
+
   if (!window.chrome) {
     window.chrome = {
       app: { isInstalled: false, InstallState: {}, RunningState: {} },
@@ -308,8 +322,8 @@ export async function injectHeadlessStealth(tab) {
         OnInstalledReason: {}, OnRestartRequiredReason: {}, PlatformArch: {}, PlatformNaclArch: {}, PlatformOs: {}, RequestUpdateCheckStatus: {},
         connect: () => ({}), sendMessage: () => {}, onMessage: { addListener: () => {} }
       },
-      loadTimes: () => ({}),
-      csi: () => ({}),
+      loadTimes: function() { return { requestTime: 0, startLoadTime: Date.now() - 5000, commitLoadTime: Date.now() - 3000, finishDocumentLoadTime: Date.now() - 2000, finishLoadTime: Date.now() - 1000, firstPaintTime: Date.now() - 800, navigationType: 'Other', wasFetchedViaSpdy: true, wasNpnNegotiated: true, npnNegotiatedProtocol: 'h2', wasAlternateProtocolAvailable: false, connectionInfo: 'http/2' }; },
+      csi: function() { var t = Date.now(); return { onloadT: t - 2000, startE: t - 5000, pageT: 'back', tran: 2 }; },
     };
   }
   var __greedyNativeFns = [];
@@ -330,6 +344,19 @@ export async function injectHeadlessStealth(tab) {
       return getParam.call(this, p);
     });
   } catch(_) {}
+  // ── WebGL readPixels noise ──────────────────────────
+  // CreepJS and other fingerprinters draw content with WebGL and read back the
+  // rendered pixels. Adding subtle noise breaks rendering-based fingerprinting.
+  try {
+    var origReadPixels = WebGLRenderingContext.prototype.readPixels;
+    WebGLRenderingContext.prototype.readPixels = __markNative(function readPixels(x, y, width, height, format, type, pixels) {
+      var result = origReadPixels.call(this, x, y, width, height, format, type, pixels);
+      if (pixels && pixels.length > 0) {
+        pixels[0] ^= 1;
+      }
+      return result;
+    });
+  } catch(_) {}
   Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true });
   Object.defineProperty(navigator, 'deviceMemory', { get: () => 8, configurable: true });
 
@@ -337,7 +364,7 @@ export async function injectHeadlessStealth(tab) {
   // Headless rendering engines produce slightly different canvas output
   // than headed Chrome. Subtle noise breaks hash-based fingerprinting.
   try {
-    var __canvasNoise = ((Date.now() % 997) + Math.floor(Math.random() * 997)) & 1;
+    var __canvasNoise = ((Date.now() & 0xFF) | 1);
     var origFill = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = __markNative(function fillText() {
       this.globalAlpha = 0.9995;
@@ -356,12 +383,36 @@ export async function injectHeadlessStealth(tab) {
     HTMLCanvasElement.prototype.toDataURL = __markNative(function toDataURL() {
       var ctx = this.getContext('2d');
       if (ctx) {
-        // Add 1px noise pixel in corner (invisible but changes hash)
-        var imgData = ctx.getImageData(0, 0, 1, 1);
-        if (imgData) imgData.data[0] ^= __canvasNoise;
-        ctx.putImageData(imgData, 0, 0);
+        // Spread noise across canvas to break hash-based fingerprinting.
+        // Uses a deterministic pattern so it's consistent per page load
+        // but varies between sessions.
+        var w = this.width, h = this.height;
+        if (w > 0 && h > 0) {
+          var imgData = ctx.getImageData(0, 0, Math.min(w, 4), Math.min(h, 4));
+          if (imgData && imgData.data) {
+            for (var __i = 0; __i < imgData.data.length; __i += 4) {
+              imgData.data[__i] ^= (__canvasNoise + __i) & 0xFF;
+            }
+            ctx.putImageData(imgData, 0, 0);
+          }
+        }
       }
       return origToDataURL.apply(this, arguments);
+    });
+  } catch(_) {}
+
+  // ── AudioContext fingerprint noise ────────────────────
+  // Headless Chrome's AudioContext produces slightly different output.
+  // Subtle noise breaks audio-based fingerprinting.
+  try {
+    var __audioSeed = ((Date.now() & 0x1F) | 1);
+    var origGetChannelData = AudioBuffer.prototype.getChannelData;
+    AudioBuffer.prototype.getChannelData = __markNative(function getChannelData(channel) {
+      var data = origGetChannelData.call(this, channel);
+      for (var __i = 0; __i < data.length; __i += 64) {
+        data[__i] *= 0.99999;
+      }
+      return data;
     });
   } catch(_) {}
 
