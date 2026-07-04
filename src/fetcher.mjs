@@ -74,7 +74,10 @@ export function isPrivateUrl(url) {
 		}
 		const parsed = new URL(url);
 		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-			return { blocked: true, reason: `Protocol not allowed: ${parsed.protocol}` };
+			return {
+				blocked: true,
+				reason: `Protocol not allowed: ${parsed.protocol}`,
+			};
 		}
 		const hostname = parsed.hostname.toLowerCase();
 
