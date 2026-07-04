@@ -8,6 +8,30 @@
 
 ### Fixed
 
+## [2.1.5] — 2026-07-04
+
+### Added
+
+- **Stealth-check script** (`scripts/stealth-check.mjs`) — Fires all three stealth test pages (Sannysoft, Intoli, CreepJS) and fingerprints `navigator.webdriver`, plugins, mimeTypes, screen, UA-CH, WebGL, and canvas in a single run. Supports `--strict` gating (exit 1 on any detection), `--diff` baseline comparison against `~/.greedysearch/stealth-baseline.json`, and structured CreepJS score extraction. Scripts: `npm run stealth-check`, `stealth:strict`, `stealth:diff`.
+- **`navigator.webdriver` fully deleted** (`extractors/common.mjs`) — Both `navigator.webdriver` and `Navigator.prototype.webdriver` are deleted instead of being set to `undefined`. Sannysoft: `webdriver present` → `missing (passed)`.
+- **PluginArray/MimeTypeArray shape** (`extractors/common.mjs`) — `navigator.plugins` returns a proper `PluginArray`-prototype object with `Plugin`-prototype entries; `navigator.mimeTypes` returns a `MimeTypeArray`-prototype object with `MimeType`-prototype entries. Sannysoft: `pluginsType` → `passed`.
+- **Screen metrics consistency** (`extractors/common.mjs`) — `screen.width/height/availWidth/availHeight` set to normal Windows desktop values (1920x1080) instead of headless 800x600.
+- **Canvas/WebGL/Audio fingerprint noise** (`extractors/common.mjs`) — Canvas `toDataURL` injects deterministic pixel noise; WebGL `readPixels` flips one bit; AudioBuffer `getChannelData` applies sub-perceptual noise. CreepJS cross-mode comparison: headless and visible modes now produce identical fingerprints.
+- **`chrome.loadTimes` and `chrome.csi` enriched** (`extractors/common.mjs`) — Returns realistic timing values instead of empty `{}`.
+- **`navigator.productSub` and `navigator.product`** (`extractors/common.mjs`) — Set to `20030107` and `Gecko` respectively (matching real Chrome).
+- **`navigator.share` and `navigator.contentIndex` stubs** (`extractors/common.mjs`) — Missing platform APIs in headless mode are now defined.
+- **`navigator.connection.downlinkMax`** (`extractors/common.mjs`) — Added `downlinkMax: Infinity` to the connection patch.
+- **Stealth assessment doc** (`docs/analysis.md`) — Full CreepJS breakdown with per-signal fixability classification, research-backed mitigation analysis, and the architectural ceiling conclusion.
+- **stealth-browser-mcp assessment** (`docs/stealthbrowsermcp.md`) — Code review and comparison of vibheksoni/stealth-browser-mcp vs GreedySearch's approach.
+
+### Changed
+
+- **Stealth injection refined** (`extractors/common.mjs`) — WebDriver now uses `delete` instead of `Object.defineProperty`; canvas noise uses deterministic per-session patterns; screen spoofing widened to cover all screen dimensions; `__markNative` patched functions now pass CreepJS `Function.prototype.toString` deep inspection.
+
+### Fixed
+
+- **CDP `Runtime.evaluate` JSON.parse crash** (`extractors/common.mjs` in `getOrOpenTab`) — `JSON.parse(raw)` wrapped in try/catch with descriptive error message.
+
 ## [2.1.4] — 2026-07-04
 
 ### Added

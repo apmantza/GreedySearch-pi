@@ -211,6 +211,26 @@ NODE
 npm pack --dry-run --json
 ```
 
+## Stealth checks
+
+Two dedicated tools validate anti-detection:
+
+- **`docs/analysis.md`** — Full CreepJS breakdown with per-signal fixability classification,
+  research-backed mitigation analysis, and the architectural ceiling conclusion (Worker UA,
+  SwiftShader, Linux fonts require a Chromium fork).
+- **`scripts/stealth-check.mjs`** — Automated fingerprint smoke check. Fires Sannysoft,
+  Intoli, and CreepJS; reports direct probes for navigator, WebGL, screen, canvas, UA-CH.
+
+```bash
+npm run stealth-check        # non-gating informational run
+npm run stealth:strict       # exit 1 on any detection
+npm run stealth:diff         # compare against stored baseline
+npm run stealth:baseline     # alias for --diff
+node scripts/stealth-check.mjs --json  # machine-readable output
+```
+
+Baseline is auto-saved on first normal run to `~/.greedysearch/stealth-baseline.json`.
+
 Useful live smoke checks:
 
 ```bash
