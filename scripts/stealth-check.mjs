@@ -11,7 +11,7 @@
 //   node scripts/stealth-check.mjs --json
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,8 @@ const PROFILE_DIR = join(tmpdir(), "greedysearch-chrome-profile");
 const args = new Set(process.argv.slice(2));
 const visible = args.has("--visible");
 const jsonOutput = args.has("--json");
+const strictMode = args.has("--strict");
+const diffMode = args.has("--diff") || args.has("--baseline-compare");
 
 process.env.CDP_PROFILE_DIR = PROFILE_DIR;
 if (visible) process.env.GREEDY_SEARCH_VISIBLE = "1";
@@ -46,6 +48,13 @@ const TESTS = [
 		settleMs: 9000,
 	},
 ];
+
+const BASELINE_DIR = join(
+  process.env.HOME || process.env.USERPROFILE || process.cwd(),
+  ".greedysearch",
+);
+const BASELINE_FILE = join(BASELINE_DIR, "stealth-baseline.json");
+const BASELINE_VERSION = 1;
 
 function runNode(script, scriptArgs = [], options = {}) {
 	const result = spawnSync(process.execPath, [script, ...scriptArgs], {
@@ -167,9 +176,28 @@ function summarizeCreepjs(text) {
 	const interesting = lines.filter((line) =>
 		/headless|stealth|webdriver|trust|bot|lie|lied|score|rating/i.test(line),
 	);
+	// Structured score extraction
+	const likeHeadlessMatch = text.match(/(\d+)%\s*like headless\s*:\s*(\w+)/i);
+	const headlessMatch = text.match(/(\d+)%\s*headless\s*:\s*(\w+)/i);
+	const stealthMatch = text.match(/(\d+)%\s*stealth\s*:\s*(\w+)/i);
+	const trustMatch = text.match(/trust[:\s]*(\d+)%/i);
+	const botMatch = text.match(/bot[:\s]*(\d+)%/i);
 	return {
 		textLength: text.length,
 		interesting: interesting.slice(0, 30),
+		scores: {
+			likeHeadless: likeHeadlessMatch
+				? { percent: parseInt(likeHeadlessMatch[1], 10), fingerprint: likeHeadlessMatch[2] }
+				: null,
+			headless: headlessMatch
+				? { percent: parseInt(headlessMatch[1], 10), fingerprint: headlessMatch[2] }
+				: null,
+			stealth: stealthMatch
+				? { percent: parseInt(stealthMatch[1], 10), fingerprint: stealthMatch[2] }
+				: null,
+			trust: trustMatch ? parseInt(trustMatch[1], 10) : null,
+			bot: botMatch ? parseInt(botMatch[1], 10) : null,
+		},
 	};
 }
 
@@ -178,6 +206,128 @@ function summarizeGeneric(testId, text) {
 	if (testId === "intoli") return summarizeIntoli(text);
 	if (testId === "creepjs") return summarizeCreepjs(text);
 	return { textLength: text.length, sample: text.slice(0, 1000) };
+}
+
+function loadBaseline() {
+	try {
+		const data = JSON.parse(readFileSync(BASELINE_FILE, "utf8"));
+		if (data && data.version === BASELINE_VERSION) return data;
+	} catch {}
+	return null;
+}
+
+function createBaseline(results) {
+	const creepjs = results.pages.find((p) => p.id === "creepjs");
+	const sannysoft = results.pages.find((p) => p.id === "sannysoft");
+	return {
+		version: BASELINE_VERSION,
+		createdAt: new Date().toISOString(),
+		sannysoft: sannysoft?.summary
+			? {
+					ok: sannysoft.summary.ok,
+					total: sannysoft.summary.total,
+					failed: sannysoft.summary.failed,
+					warning: sannysoft.summary.warning,
+					intoliAdditions: sannysoft.summary.intoliAdditions,
+				}
+			: null,
+		creepjs: creepjs?.summary?.scores
+			? { ...creepjs.summary.scores }
+			: null,
+	};
+}
+
+function saveBaseline(results) {
+	try {
+		if (!existsSync(BASELINE_DIR)) mkdirSync(BASELINE_DIR, { recursive: true });
+		const baseline = createBaseline(results);
+		writeFileSync(BASELINE_FILE, JSON.stringify(baseline, null, 2), "utf8");
+		return baseline;
+	} catch (error) {
+		console.error("Warning: could not save baseline:", error.message);
+		return null;
+	}
+}
+
+function diffBaseline(baseline, results) {
+	const changes = [];
+	const creepjs = results.pages.find((p) => p.id === "creepjs");
+	const sannysoft = results.pages.find((p) => p.id === "sannysoft");
+	if (baseline.creepjs && creepjs?.summary?.scores) {
+		for (const key of ["likeHeadless", "headless", "stealth"]) {
+			const before = baseline.creepjs[key];
+			const after = creepjs.summary.scores[key];
+			if (before && after && before.percent !== after.percent) {
+				changes.push({
+					metric: `creepjs.${key}`,
+					before: before.percent,
+					after: after.percent,
+					improved: after.percent < before.percent,
+				});
+			}
+		}
+	}
+	if (baseline.sannysoft && sannysoft?.summary) {
+		for (const key of ["ok", "failed", "warning"]) {
+			const before = baseline.sannysoft[key];
+			const after = sannysoft.summary[key];
+			if (before !== after) {
+				changes.push({
+					metric: `sannysoft.${key}`,
+					before,
+					after,
+					improved: key === "ok" ? after > before : after < before,
+				});
+			}
+		}
+	}
+	return changes;
+}
+
+function checkStrict(results) {
+	const failures = [];
+	for (const page of results.pages) {
+		if (!page.ok) {
+			failures.push(`${page.name}: page load failed — ${page.error}`);
+			continue;
+		}
+		if (page.id === "sannysoft") {
+			const s = page.summary;
+			if (s.failed > 0 || s.warning > 0) {
+				failures.push(
+					`Sannysoft: ${s.failed} failed, ${s.warning} warning scanner tests`,
+				);
+			}
+			for (const [key, value] of Object.entries(s.intoliAdditions || {})) {
+				if (value && !/\bpassed\b/i.test(value)) {
+					failures.push(`Sannysoft Intoli: ${key}=${value} (expected "passed")`);
+				}
+			}
+		}
+		if (page.id === "creepjs") {
+			const scores = page.summary?.scores;
+			if (!scores) {
+				failures.push("CreepJS: no scores extracted");
+				continue;
+			}
+			if (scores.likeHeadless && scores.likeHeadless.percent > 0) {
+				failures.push(
+					`CreepJS: likeHeadless=${scores.likeHeadless.percent}% (expected 0%)`,
+				);
+			}
+			if (scores.headless && scores.headless.percent > 0) {
+				failures.push(
+					`CreepJS: headless=${scores.headless.percent}% (expected 0%)`,
+				);
+			}
+			if (scores.stealth && scores.stealth.percent > 0) {
+				failures.push(
+					`CreepJS: stealth=${scores.stealth.percent}% (expected 0%)`,
+				);
+			}
+		}
+	}
+	return failures;
 }
 
 async function evalNoContext(cdp, tab, expression, timeoutMs = 20000) {
@@ -344,10 +494,51 @@ async function main() {
 
 	if (jsonOutput) {
 		console.log(JSON.stringify(results, null, 2));
+		if (strictMode) {
+			const sf = checkStrict(results);
+			if (sf.length) process.exit(1);
+		}
 		return;
 	}
 
 	printHuman(results);
+
+	// Baseline management
+	if (diffMode) {
+		const baseline = loadBaseline();
+		if (baseline) {
+			const changes = diffBaseline(baseline, results);
+			if (changes.length) {
+				console.log("\nBaseline comparison:");
+				for (const c of changes) {
+					const arrow = c.improved ? "\u2713" : "\u2717";
+					console.log(`  ${arrow} ${c.metric}: ${c.before} \u2192 ${c.after}`);
+				}
+			} else {
+				console.log("\nNo baseline changes detected.");
+			}
+		} else {
+			console.log("\nNo baseline found. Run without --diff to create one.");
+		}
+	} else if (!strictMode) {
+		// Auto-save baseline on normal runs when none exists yet
+		const baseline = loadBaseline();
+		if (!baseline) {
+			const saved = saveBaseline(results);
+			if (saved) console.log(`\nBaseline saved to ${BASELINE_FILE}`);
+		}
+	}
+
+	// Strict gating (after baseline so record is written on failures too)
+	if (strictMode) {
+		const sf = checkStrict(results);
+		if (sf.length) {
+			console.log("\n❌ Strict mode failures:");
+			for (const f of sf) console.log(`  - ${f}`);
+			process.exit(1);
+		}
+		console.log("\n✅ Strict mode: all checks passed");
+	}
 }
 
 function printHuman(results) {
@@ -430,16 +621,27 @@ function printHuman(results) {
 		} else if (page.id === "creepjs") {
 			const s = page.summary;
 			console.log(`  Text length: ${s.textLength}`);
+			if (s.scores) {
+				const parts = [];
+				if (s.scores.likeHeadless) parts.push(`like headless: ${s.scores.likeHeadless.percent}%`);
+				if (s.scores.headless) parts.push(`headless: ${s.scores.headless.percent}%`);
+				if (s.scores.stealth) parts.push(`stealth: ${s.scores.stealth.percent}%`);
+				if (s.scores.trust !== null && s.scores.trust !== undefined) parts.push(`trust: ${s.scores.trust}%`);
+				if (s.scores.bot !== null && s.scores.bot !== undefined) parts.push(`bot: ${s.scores.bot}%`);
+				console.log(`  Scores: ${parts.join(" | ")}`);
+			}
 			if (s.interesting.length)
 				console.log(
-					`  Interesting lines: ${s.interesting.slice(0, 8).join(" | ")}`,
+					`  Raw lines: ${s.interesting.slice(0, 5).join(" | ")}`,
 				);
 		}
 	}
 
-	console.log(
-		"\nNote: v1 is non-gating. Use --json for machine-readable output.",
-	);
+	const notes = [];
+	if (strictMode) notes.push("Strict mode enabled — exit code reflects pass/fail.");
+	if (diffMode) notes.push("Baseline comparison mode enabled.");
+	notes.push("Use --json for machine-readable output.");
+	console.log(`\nNote: ${notes.join(" ")}`);
 }
 
 main().catch((error) => {
