@@ -12,6 +12,7 @@
 import {
 	cdp,
 	cdpWithInput,
+	clickCopyAndAwaitClipboard,
 	formatAnswer,
 	getOrOpenTab,
 	handleError,
@@ -146,59 +147,71 @@ async function extractAnswerFromDom(tab) {
 	}
 }
 
-async function clickLatestModelResponseCopy(tab) {
-	return cdp([
-		"eval",
-		tab,
-		`(() => {
-			const responses = Array.from(document.querySelectorAll('model-response'));
-			const resp = responses[responses.length - 1];
-			if (!resp) return 'no-model-response';
-			const buttons = Array.from(resp.querySelectorAll('${S.copyButton}'));
-			const nonCodeButtons = buttons.filter((btn) => !btn.closest('pre, code, code-block, .code-block, .code-container'));
-			const btn = nonCodeButtons[nonCodeButtons.length - 1] || buttons[buttons.length - 1];
-			if (!btn) return 'no-copy-button';
-			btn.click();
-			return 'clicked';
-		})()`,
-	]);
-}
+const GEMINI_COPY_CLICK_EXPR = `(() => {
+	window.${GLOBAL_VAR} = '';
+	const responses = Array.from(document.querySelectorAll('model-response'));
+	const resp = responses[responses.length - 1];
+	if (!resp) return;
+	const buttons = Array.from(resp.querySelectorAll('${S.copyButton}'));
+	const nonCodeButtons = buttons.filter((btn) => !btn.closest('pre, code, code-block, .code-block, .code-container'));
+	const btn = nonCodeButtons[nonCodeButtons.length - 1] || buttons[buttons.length - 1];
+	if (btn) btn.click();
+})()`;
 
-async function extractAnswer(tab, query = "") {
+async function extractAnswer(tab, query = "", streamWaitOk = false) {
 	const queryNorm = query.toLowerCase().trim();
 
-	// Wait for the model-response element to have content (not just the
-	// "Gemini said" label). The old approach waited for copy button
-	// count >= 2, which is unreliable: the Gemini UI has many copy
-	// icons (copy link, copy code, etc.), and the last one on the page
-	// is not always the assistant response copy button.
-	//
-	// minLength: 60 — Gemini renders a streaming header/prefix
-	// ("Gemini said" + UI chrome = ~25 chars) before the body arrives.
-	// The old 20-char threshold often resolved at the header stage and
-	// the copy button click then captured a partial/header-only result.
+	// waitForStreamComplete in main() already polled this exact predicate
+	// (model-response innerText length > 60) until it stabilised. Re-running
+	// the same 800ms/tick loop here is redundant when that wait succeeded —
+	// do a single confirmation check instead. Only fall back to the full
+	// poll when the stream wait itself timed out (streamWaitOk === false),
+	// since the response may still be short/rendering in that case.
 	let modelReady = false;
-	const modelDeadline = Date.now() + 12000;
-	while (Date.now() < modelDeadline) {
+	if (streamWaitOk) {
 		const ready = await cdp([
 			"eval",
 			tab,
 			String.raw`(() => {
 				const responses = Array.from(document.querySelectorAll('model-response'));
 				const r = responses[responses.length - 1];
-				if (!r) return false;
-				const t = (r.innerText || '').trim();
-				// Must have content beyond the locale-specific label
-				// ("Gemini said" / "Το Gemini είπε" / etc.) and ideally
-				// a copy button rendered on the response.
-				return t.length > 60;
+				return !!r && (r.innerText || '').trim().length > 60;
 			})()`,
-		]);
-		if (ready === "true") {
-			modelReady = true;
-			break;
+		]).catch(() => "false");
+		modelReady = ready === "true";
+	} else {
+		// Wait for the model-response element to have content (not just the
+		// "Gemini said" label). The old approach waited for copy button
+		// count >= 2, which is unreliable: the Gemini UI has many copy
+		// icons (copy link, copy code, etc.), and the last one on the page
+		// is not always the assistant response copy button.
+		//
+		// minLength: 60 — Gemini renders a streaming header/prefix
+		// ("Gemini said" + UI chrome = ~25 chars) before the body arrives.
+		// The old 20-char threshold often resolved at the header stage and
+		// the copy button click then captured a partial/header-only result.
+		const modelDeadline = Date.now() + 12000;
+		while (Date.now() < modelDeadline) {
+			const ready = await cdp([
+				"eval",
+				tab,
+				String.raw`(() => {
+					const responses = Array.from(document.querySelectorAll('model-response'));
+					const r = responses[responses.length - 1];
+					if (!r) return false;
+					const t = (r.innerText || '').trim();
+					// Must have content beyond the locale-specific label
+					// ("Gemini said" / "Το Gemini είπε" / etc.) and ideally
+					// a copy button rendered on the response.
+					return t.length > 60;
+				})()`,
+			]);
+			if (ready === "true") {
+				modelReady = true;
+				break;
+			}
+			await new Promise((r) => setTimeout(r, 800));
 		}
-		await new Promise((r) => setTimeout(r, 800));
 	}
 	if (!modelReady) {
 		console.error("[gemini] Warning: model-response did not render content");
@@ -208,10 +221,12 @@ async function extractAnswer(tab, query = "") {
 	// not the absolute last copy button on the page. The page has many
 	// copy icons (copy link, copy code, etc.) and the last one is not
 	// always the assistant's response copy button.
-	await clickLatestModelResponseCopy(tab);
-	await new Promise((r) => setTimeout(r, 600));
-
-	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	let answer = await clickCopyAndAwaitClipboard(
+		tab,
+		GEMINI_COPY_CLICK_EXPR,
+		GLOBAL_VAR,
+		{ timeoutMs: 600, retryClick: 600 },
+	);
 
 	// Retry once if clipboard contains the user's query instead of the response.
 	// This can happen when the assistant response hasn't rendered its copy button yet.
@@ -223,9 +238,12 @@ async function extractAnswer(tab, query = "") {
 	) {
 		console.error("[gemini] Clipboard echoed query, retrying in 2s...");
 		await new Promise((r) => setTimeout(r, 2000));
-		await clickLatestModelResponseCopy(tab);
-		await new Promise((r) => setTimeout(r, 600));
-		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+		answer = await clickCopyAndAwaitClipboard(
+			tab,
+			GEMINI_COPY_CLICK_EXPR,
+			GLOBAL_VAR,
+			{ timeoutMs: 600, retryClick: 600 },
+		);
 	}
 
 	// DOM fallback: if clipboard is empty, echoes the query, or looks like a
@@ -343,6 +361,7 @@ async function main() {
 			bringToFront(tab).catch(() => null);
 			if (++pollTick % 10 === 0) scrollToBottom(tab).catch(() => null);
 		}, 6000);
+		let streamWaitOk = true;
 		try {
 			await waitForStreamComplete(tab, {
 				timeout: 45000,
@@ -351,11 +370,13 @@ async function main() {
 				selector:
 					"(() => { const responses = Array.from(document.querySelectorAll('model-response')); return responses[responses.length - 1]; })()",
 			});
+		} catch {
+			streamWaitOk = false;
 		} finally {
 			clearInterval(scrollInterval);
 		}
 
-		const { answer, sources } = await extractAnswer(tab, query);
+		const { answer, sources } = await extractAnswer(tab, query, streamWaitOk);
 		if (!answer) throw new Error("No answer captured from Gemini clipboard");
 
 		const finalUrl = await cdp(["eval", tab, "document.location.href"]).catch(

@@ -213,6 +213,56 @@ export async function injectClipboardInterceptor(tab, globalVar) {
 }
 
 // ============================================================================
+// Clipboard copy-click helper
+// ============================================================================
+
+/**
+ * Click a copy button and await the clipboard-interceptor global becoming
+ * non-empty, entirely inside the browser — a single Runtime.evaluate call
+ * instead of a node-side click+sleep+read cycle per attempt.
+ *
+ * @param {string} tab - Tab identifier
+ * @param {string} clickExpr - JS expression (no trailing semicolon) that,
+ *   when evaluated, clicks the copy button (e.g. `document.querySelector('x')?.click()`)
+ * @param {string} globalVar - Global variable name written by the clipboard interceptor
+ * @param {object} [options]
+ * @param {number} [options.timeoutMs=2600] - Total budget in ms
+ * @param {number} [options.retryClick] - Elapsed ms at which to re-click if still empty; defaults to 40% of timeoutMs
+ * @returns {Promise<string>} Captured clipboard text, or '' on timeout
+ */
+export async function clickCopyAndAwaitClipboard(
+	tab,
+	clickExpr,
+	globalVar,
+	options = {},
+) {
+	const { timeoutMs = 2600 } = options;
+	const retryClick =
+		options.retryClick != null ? options.retryClick : Math.floor(timeoutMs * 0.4);
+	const code = String.raw`
+	new Promise((resolve) => {
+		const _deadline = Date.now() + ${timeoutMs};
+		const _retryAt = Date.now() + ${retryClick};
+		let _retried = false;
+		function _click() { try { ${clickExpr}; } catch(_) {} }
+		function _poll() {
+			const val = window.${globalVar};
+			if (val) { resolve(val); return; }
+			if (!_retried && Date.now() >= _retryAt) {
+				_retried = true;
+				_click();
+			}
+			if (Date.now() < _deadline) { setTimeout(_poll, 100); }
+			else { resolve(window.${globalVar} || ''); }
+		}
+		_click();
+		_poll();
+	})
+	`;
+	return await cdp(["eval", tab, code], timeoutMs + 5000).catch(() => "");
+}
+
+// ============================================================================
 // Headless stealth injection
 // ============================================================================
 
@@ -663,17 +713,39 @@ export const TIMING = {
  */
 export async function waitForCopyButton(tab, selector, options = {}) {
 	const { timeout = 60000, onPoll } = options;
+
+	if (!onPoll) {
+		const code = String.raw`
+		new Promise((resolve) => {
+			const _deadline = Date.now() + ${timeout};
+			function _poll() {
+				if (document.querySelector('${selector}')) { resolve(true); return; }
+				if (Date.now() < _deadline) { setTimeout(_poll, 150); }
+				else { resolve(false); }
+			}
+			_poll();
+		})
+		`;
+		const found = await cdp(["eval", tab, code], timeout + 5000).catch(
+			() => "false",
+		);
+		if (found === "true") return;
+		throw new Error(
+			`Copy button ('${selector}') did not appear within ${timeout}ms`,
+		);
+	}
+
 	const deadline = Date.now() + timeout;
 	let tick = 0;
 	while (Date.now() < deadline) {
-		await new Promise((r) => setTimeout(r, jitter(TIMING.copyPoll)));
-		if (onPoll) await onPoll(++tick).catch(() => null);
 		const found = await cdp([
 			"eval",
 			tab,
 			`!!document.querySelector('${selector}')`,
 		]).catch(() => "false");
 		if (found === "true") return;
+		await onPoll(++tick).catch(() => null);
+		await new Promise((r) => setTimeout(r, jitter(TIMING.copyPoll)));
 	}
 	throw new Error(
 		`Copy button ('${selector}') did not appear within ${timeout}ms`,
@@ -691,7 +763,7 @@ export async function waitForCopyButton(tab, selector, options = {}) {
  * @returns {number} Jittered interval
  */
 export function jitter(ms) {
-	const variance = ms * 0.4;
+	const variance = ms * 0.2;
 	const offset = randomInt(-Math.floor(variance), Math.floor(variance) + 1);
 	return Math.max(50, Math.round(ms + offset));
 }
@@ -710,7 +782,7 @@ export function jitter(ms) {
  *
  * @param {string} tab - Tab identifier
  * @param {object} options - Options
- * @param {number} [options.timeout=30000] - Maximum wait time in ms
+ * @param {number} [options.timeout=20000] - Maximum wait time in ms
  * @param {number} [options.interval=600] - Polling interval in ms (jittered ±20%)
  * @param {number} [options.stableRounds=3] - Required stable rounds to consider complete
  * @param {string} [options.selector='document.body'] - Element to monitor (default: body)

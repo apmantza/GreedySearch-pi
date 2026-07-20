@@ -428,6 +428,8 @@ let _staleCleanupPerformed = false;
  * Called once on first use (idempotent via _staleCleanupPerformed flag).
  */
 export function cleanupStaleSessions() {
+	// Research children share the parent's Chrome — the parent owns cleanup.
+	if (process.env.GREEDY_SEARCH_RESEARCH_CHILD) return;
 	if (_staleCleanupPerformed) return;
 	_staleCleanupPerformed = true;
 
