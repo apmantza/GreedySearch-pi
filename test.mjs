@@ -1281,9 +1281,9 @@ if (["", "all", "flags", "quick", "smoke"].includes(mode)) {
 	}
 
 	subsection("Testing engine aliases...");
-	// "b" (Bing Copilot) excluded: routinely gated by Turnstile verification
-	// on fresh sessions, which makes the smoke run flaky for environmental
-	// reasons rather than code ones.
+	// "b" (Bing Copilot) excluded: copilot.microsoft.com is login-walled,
+	// so the alias can never pass on a fresh session — an environmental
+	// failure, not a code one.
 	for (const alias of ["p", "g"]) {
 		const aliasFile = join(resultsDir, `alias_${alias}.json`);
 		const { out: _aliasOut } = await runNode(
