@@ -1221,6 +1221,38 @@ trailing note`);
 	} else {
 		failMsg("progress: round tracking broken");
 	}
+
+	subsection("SSRF guard — isPrivateUrl obfuscated-host coverage");
+	const { isPrivateUrl } = await import("./src/fetcher.mjs");
+	const privateUrlCases = [
+		// [url, shouldBlock, label]
+		["http://2130706433/", true, "decimal-IP loopback obfuscation"],
+		["http://0x7f000001/", true, "hex-IP loopback obfuscation"],
+		["http://0177.0.0.1/", true, "octal-IP loopback obfuscation"],
+		[
+			"http://[::ffff:127.0.0.1]/",
+			true,
+			"IPv4-mapped IPv6 loopback (dotted form)",
+		],
+		[
+			"http://[::ffff:7f00:1]/",
+			true,
+			"IPv4-mapped IPv6 loopback (hex-group form)",
+		],
+		["http://[::1]/", true, "plain IPv6 loopback"],
+		["https://example.com/", false, "ordinary hostname"],
+		["https://93.184.216.34/", false, "ordinary public IPv4"],
+	];
+	for (const [testUrl, shouldBlock, label] of privateUrlCases) {
+		const result = isPrivateUrl(testUrl);
+		if (result.blocked === shouldBlock) {
+			passMsg(`isPrivateUrl: ${label}`);
+		} else {
+			failMsg(
+				`isPrivateUrl: ${label} — expected blocked=${shouldBlock}, got ${JSON.stringify(result)}`,
+			);
+		}
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
