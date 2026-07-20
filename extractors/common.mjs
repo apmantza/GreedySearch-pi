@@ -9,16 +9,6 @@ import { fileURLToPath } from "node:url";
 const __dir = dirname(fileURLToPath(import.meta.url));
 const CDP = join(__dir, "..", "bin", "cdp.mjs");
 
-// The module is cached after the first import, so the normal path stays
-// in-process without paying a Node startup cost. If loading the shared client
-// itself fails, retain the old CLI path as a narrow compatibility fallback.
-let cdpClientPromise;
-async function loadCdpCommand() {
-	if (!cdpClientPromise)
-		cdpClientPromise = import("../src/search/cdp-client.mjs");
-	return (await cdpClientPromise).cdpCommand;
-}
-
 // ============================================================================
 // CDP wrapper
 // ============================================================================
@@ -89,25 +79,8 @@ export function cdp(args, timeoutMs = 30000) {
 	return cdpWithInput(args, null, timeoutMs);
 }
 
-export async function cdpWithInput(args, input = null, timeoutMs = 30000) {
+export function cdpWithInput(args, input = null, timeoutMs = 30000) {
 	const safeArgs = cdpSafeArgv(args);
-	const commandArgs = safeArgs.slice();
-	if (input != null && commandArgs[0] === "type") {
-		// cdpWithInput's callers pass ["type", tab, "--stdin"]. Replace
-		// that marker before calling the in-process client.
-		commandArgs[2] = input;
-	}
-
-	try {
-		const command = await loadCdpCommand();
-		return (await command(commandArgs, timeoutMs)).trim();
-	} catch (error) {
-		// Do not retry command/daemon errors: a second command could duplicate a
-		// click or navigation. Only a failure loading the reusable module uses
-		// the legacy process-spawn path.
-		if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
-	}
-
 	return new Promise((resolve, reject) => {
 		const proc = spawn(process.execPath, [CDP, ...safeArgs], {
 			stdio: [input == null ? "ignore" : "pipe", "pipe", "pipe"],
