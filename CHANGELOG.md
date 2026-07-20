@@ -8,7 +8,6 @@
 
 ### Changed
 
-- **CDP commands run in-process** (`src/search/cdp-client.mjs`, `bin/cdp.mjs`, `extractors/common.mjs`, `src/search/chrome.mjs`) — The per-tab daemon client moved out of the CLI into an importable module; `cdp()` callers now send commands over the existing daemon socket in-process instead of spawning a fresh `node bin/cdp.mjs` (~80-150ms) per command, removing seconds of spawn overhead per search. `bin/cdp.mjs` remains as a thin CLI wrapper with identical output and exit codes; daemons stay independent processes. (#41)
 - **Stream waits scoped to answer containers** (`extractors/common.mjs`, `perplexity.mjs`, `bing-copilot.mjs`, `chatgpt.mjs`) — Perplexity and Bing no longer poll `document.body` innerText (full-page layout every ~600ms tick, stability resets from unrelated UI churn); waits scope to the engine's answer element with body fallback, using `textContent` for length checks. `waitForStreamComplete` gained an optional `isStreamingExpr` guard, and ChatGPT's hand-rolled `waitForResponse` now delegates to it (net −79 lines). (#46)
 - **Token sets memoized in dedupeFetchedSources** (`src/search/research.mjs`) — Per-source token sets are computed once per call and compared with set-based Jaccard, instead of re-tokenizing 4KB slices for every pair every round. (#47)
 
