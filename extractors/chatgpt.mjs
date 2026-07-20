@@ -26,6 +26,7 @@ import {
 	prepareArgs,
 	validateQuery,
 	waitForSelector,
+	waitForStreamComplete,
 } from "./common.mjs";
 import { dismissConsent, handleVerification } from "./consent.mjs";
 
@@ -34,24 +35,31 @@ const PROSE_SELECTOR = "div.ProseMirror";
 const SEND_SELECTOR = 'button[data-testid="send-button"]';
 const COPY_SELECTOR = 'button[data-testid="copy-turn-action-button"]';
 
-// Finds the copy button on the assistant message that comes AFTER the last
-// user message (not the absolute last copy button on the page, which is the
-// USER message's copy button when the assistant response is still empty).
-const CHATGPT_ASSISTANT_COPY_CLICK_EXPR = `(() => {
-	window.${GLOBAL_VAR} = '';
+const CHATGPT_RESPONSE_SELECTOR = String.raw`(() => {
 	const all = document.querySelectorAll('[data-message-author-role]');
 	let lastUserIdx = -1;
 	for (let i = 0; i < all.length; i++) {
 		if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
 	}
-	if (lastUserIdx < 0) return;
-	let assistantCopy = null;
+	if (lastUserIdx < 0) return null;
+	let bestEl = null;
+	let bestLen = 0;
 	for (let i = lastUserIdx + 1; i < all.length; i++) {
 		if (all[i].getAttribute('data-message-author-role') === 'assistant') {
-			const btn = all[i].querySelector('${COPY_SELECTOR}');
-			if (btn) assistantCopy = btn;
+			const len = (all[i].innerText || '').length;
+			if (len > bestLen) { bestLen = len; bestEl = all[i]; }
 		}
 	}
+	return bestEl;
+})()`;
+
+// Finds the copy button on the assistant message that comes AFTER the last
+// user message (not the absolute last copy button on the page, which is the
+// USER message's copy button when the assistant response is still empty).
+const CHATGPT_ASSISTANT_COPY_CLICK_EXPR = `(() => {
+	window.${GLOBAL_VAR} = '';
+	const assistant = ${CHATGPT_RESPONSE_SELECTOR};
+	const assistantCopy = assistant?.querySelector('${COPY_SELECTOR}');
 	if (assistantCopy) assistantCopy.click();
 })()`;
 
@@ -106,30 +114,10 @@ async function typeAndSubmit(tab, query) {
 	await new Promise((r) => setTimeout(r, jitter(300)));
 }
 
-/**
- * Inline selector for waitForStreamComplete: returns the assistant message
- * that comes AFTER the last user message, or null if none exists. This
- * skips chatgpt.com's static pre-rendered greeting card (which is
- * `data-turn-start-message="true"` and lives on the homepage before any
- * conversation) so short answers like "Hello! 👋" don't get confused with
- * the 32-char placeholder.
- */
-const CHATGPT_RESPONSE_SELECTOR = String.raw`(() => {
-	const all = document.querySelectorAll('[data-message-author-role]');
-	let lastUserIdx = -1;
-	for (let i = 0; i < all.length; i++) {
-		if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
-	}
-	if (lastUserIdx < 0) return null;
-	let bestEl = null;
-	let bestLen = 0;
-	for (let i = lastUserIdx + 1; i < all.length; i++) {
-		if (all[i].getAttribute('data-message-author-role') === 'assistant') {
-			const len = (all[i].innerText || '').length;
-			if (len > bestLen) { bestLen = len; bestEl = all[i]; }
-		}
-	}
-	return bestEl;
+const CHATGPT_STREAMING_EXPR = String.raw`(() => {
+	const el = ${CHATGPT_RESPONSE_SELECTOR};
+	return !!el?.querySelector('.streaming-animation,[data-is-streaming="true"]') ||
+		!!document.querySelector('button[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label*="Stop"]');
 })()`;
 
 /**
@@ -181,64 +169,14 @@ async function waitForResponse(tab, timeoutMs = 35000) {
 		});
 	}, 4000);
 	try {
-		const code = String.raw`
-		new Promise((resolve, reject) => {
-			const _deadline = Date.now() + ${timeoutMs};
-			const _baseInterval = 700;
-			const _stableRounds = 5;
-			let _lastLen = -1;
-			let _stableCount = 0;
-
-			function _jitter(ms) {
-				return Math.max(50, ms + (Math.random() * ms * 0.4 - ms * 0.2));
-			}
-
-			function _assistantAfterLastUser() {
-				const all = document.querySelectorAll('[data-message-author-role]');
-				let lastUserIdx = -1;
-				for (let i = 0; i < all.length; i++) {
-					if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
-				}
-				if (lastUserIdx < 0) return null;
-				let assistant = null;
-				for (let i = lastUserIdx + 1; i < all.length; i++) {
-					if (all[i].getAttribute('data-message-author-role') === 'assistant') assistant = all[i];
-				}
-				return assistant;
-			}
-
-			function _poll() {
-				try {
-					const el = _assistantAfterLastUser();
-					const text = (el?.innerText || '').trim();
-					const len = text.length;
-					const streaming = !!el?.querySelector('.streaming-animation,[data-is-streaming="true"]') ||
-						!!document.querySelector('button[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label*="Stop"]');
-					if (len >= 1 && !streaming) {
-						if (len === _lastLen) {
-							_stableCount++;
-							if (_stableCount >= _stableRounds) { resolve(len); return; }
-						} else {
-							_lastLen = len;
-							_stableCount = 0;
-						}
-					} else if (len !== _lastLen) {
-						_lastLen = len;
-						_stableCount = 0;
-					}
-					if (Date.now() < _deadline) setTimeout(_poll, _jitter(_baseInterval));
-					else if (_lastLen >= 1 && !streaming) resolve(_lastLen);
-					else reject(new Error('ChatGPT response did not finish streaming within ${timeoutMs}ms'));
-				} catch (e) { reject(e); }
-			}
-			_poll();
-		})`;
-		const lenStr = await cdp(["eval", tab, code], timeoutMs + 10000);
-		const len = parseInt(lenStr, 10) || 0;
-		if (len >= 1) return len;
-		throw new Error(
-			`ChatGPT response did not finish streaming within ${timeoutMs}ms`,
-		);
+		return await waitForStreamComplete(tab, {
+			timeout: timeoutMs,
+			interval: 700,
+			stableRounds: 5,
+			minLength: 1,
+			selector: CHATGPT_RESPONSE_SELECTOR,
+			isStreamingExpr: CHATGPT_STREAMING_EXPR,
+		});
 	} finally {
 		clearInterval(keepForeground);
 	}
@@ -279,39 +217,15 @@ async function extractAnswerFromDom(tab) {
 		tab,
 		String.raw`
 		(() => {
-			// Find the assistant message that comes AFTER the last user message,
-			// not the absolute last assistant element. The chatgpt.com homepage
-			// has a static pre-rendered greeting card that renders as a
-			// [data-message-author-role="assistant"] element with
-			// data-turn-start-message="true" — it must be skipped or the
-			// static "Hello! How can I help you today?" placeholder gets
-			// returned as the answer to a query the assistant never answered.
-			const all = Array.from(document.querySelectorAll('[data-message-author-role]'));
-			let lastUserIdx = -1;
-			for (let i = 0; i < all.length; i++) {
-				if (all[i].getAttribute('data-message-author-role') === 'user') {
-					lastUserIdx = i;
-				}
-			}
-			if (lastUserIdx < 0) {
-				// No user message at all — page is still on the homepage.
-				return JSON.stringify({
-					answer: '',
-					sources: [],
-					skipped: 'no-user-message',
-				});
-			}
-			let assistant = null;
-			for (let i = lastUserIdx + 1; i < all.length; i++) {
-				if (all[i].getAttribute('data-message-author-role') === 'assistant') {
-					assistant = all[i];
-				}
-			}
+			const assistant = ${CHATGPT_RESPONSE_SELECTOR};
 			if (!assistant) {
+				const skipped = document.querySelector('[data-message-author-role="user"]')
+					? 'no-assistant-response'
+					: 'no-user-message';
 				return JSON.stringify({
 					answer: '',
 					sources: [],
-					skipped: 'no-assistant-response',
+					skipped,
 				});
 			}
 			const streaming = !!assistant.querySelector('.streaming-animation,[data-is-streaming="true"]') ||

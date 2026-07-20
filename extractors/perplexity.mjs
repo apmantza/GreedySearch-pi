@@ -487,7 +487,7 @@ async function main() {
 			interval: 600,
 			stableRounds: 5,
 			minLength: 50,
-			selector: "document.body",
+			selector: `Array.from(document.querySelectorAll('.prose, [class*="prose"]')).pop() || document.querySelector('[data-testid*="answer"], [class*="answer-content"], [class*="response-content"]') || document.body`,
 		});
 
 		// Detect Perplexity's free-search-limit wall. Shown as a [dialog]

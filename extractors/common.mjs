@@ -813,6 +813,7 @@ export function jitter(ms) {
  * @param {number} [options.interval=600] - Polling interval in ms (jittered ±20%)
  * @param {number} [options.stableRounds=3] - Required stable rounds to consider complete
  * @param {string} [options.selector='document.body'] - Element to monitor (default: body)
+ * @param {string} [options.isStreamingExpr] - JS expression that is truthy while streaming
  * @returns {Promise<number>} Final text length
  */
 export async function waitForStreamComplete(tab, options = {}) {
@@ -822,6 +823,7 @@ export async function waitForStreamComplete(tab, options = {}) {
 		stableRounds = 3,
 		selector = "document.body",
 		minLength = 0,
+		isStreamingExpr = "false",
 	} = options;
 
 	// Single self-contained eval — polling runs in the browser, no CDP chatter.
@@ -843,8 +845,12 @@ export async function waitForStreamComplete(tab, options = {}) {
 			try {
 				// Re-query DOM each tick — element may not exist at eval start
 				const el = ${selector};
-				const cur = el?.innerText?.length ?? 0;
-				if (cur >= _minLength) {
+				const cur = el?.textContent?.length ?? 0;
+				const streaming = ${isStreamingExpr};
+				if (streaming) {
+					if (cur !== _lastLen) _lastLen = cur;
+					_stableCount = 0;
+				} else if (cur >= _minLength) {
 					if (cur === _lastLen) {
 						_stableCount++;
 						if (_stableCount >= _stableRounds) { resolve(cur); return; }
@@ -856,7 +862,7 @@ export async function waitForStreamComplete(tab, options = {}) {
 				if (Date.now() < _deadline) {
 					setTimeout(_poll, _jitter(_baseInterval));
 				} else {
-					if (_lastLen >= _minLength) { resolve(_lastLen); }
+					if (_lastLen >= _minLength && !streaming) { resolve(_lastLen); }
 					else { reject(new Error('Generation did not stabilise within ${timeout}ms')); }
 				}
 			} catch(e) { reject(e); }
