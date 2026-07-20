@@ -65,7 +65,7 @@ export async function fetchRedditContent(url, maxChars = 8000) {
 
 	try {
 		// Append .json to get API response
-		const jsonUrl = url.replaceAll(/\/?$/g, ".json");
+		const jsonUrl = url.replace(/\/+$/, "") + ".json";
 
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), 15000);

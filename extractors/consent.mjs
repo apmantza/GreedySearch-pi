@@ -395,17 +395,23 @@ function tryHumanClick(tab, cdp, detectResult) {
 }
 
 export async function detectVerificationChallenge(tab, cdp) {
-	// Run the CDP-pierce probe FIRST so we get real click coordinates for
-	// Cloudflare iframes hidden inside closed shadow roots (chatgpt.com,
-	// perplexity.ai, etc.). The page-context probe falls back to a
-	// cf-closed-shadow-dom sentinel when the iframe is opaque to JS DOM
-	// queries, but that sentinel can't be auto-clicked.
-	const cfIframe = await findCloudflareIframeViaPierce(tab, cdp).catch(
-		() => null,
-	);
-	if (cfIframe) return cfIframe;
-
+	// Run the cheap page-context probe first. It only falls back to the
+	// cf-closed-shadow-dom sentinel when a Cloudflare Turnstile widget is
+	// present but opaque to JS DOM queries (chatgpt.com, perplexity.ai,
+	// etc.) — that's the only case where the expensive CDP-pierce probe
+	// (DOM.getDocument({depth:-1, pierce:true}) over the whole page) is
+	// worth running, since it's needed to get real click coordinates for
+	// the iframe hidden inside the closed shadow root.
 	const result = await cdp(["eval", tab, VERIFY_DETECT_JS]).catch(() => null);
+
+	if (result === "cf-closed-shadow-dom") {
+		const cfIframe = await findCloudflareIframeViaPierce(tab, cdp).catch(
+			() => null,
+		);
+		if (cfIframe) return cfIframe;
+		return result;
+	}
+
 	if (result && result !== "null") return result;
 
 	return null;

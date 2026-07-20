@@ -191,14 +191,22 @@ async function installPapersDetailsInterceptor(tab) {
 					if (this.status === 200) {
 						try {
 							const parsed = JSON.parse(this.responseText);
-							// Stack responses: the last one wins (the .CSV
-							// request fires after Load More has settled).
-							window.__papersDetailsResps = window.__papersDetailsResps || [];
-							window.__papersDetailsResps.push({
+							// Keep only {largest, latest} instead of every
+							// partial Load-More response, to bound page
+							// memory. "latest" lets the caller detect the
+							// .CSV response fired after clickExportCsv;
+							// "largest" is the timeout fallback.
+							const entry = {
 								at: Date.now(),
 								count: Object.keys(parsed?.paperDetailsListByPaperId || {}).length,
 								data: parsed,
-							});
+							};
+							const store = window.__papersDetailsResps ||
+								(window.__papersDetailsResps = { largest: null, latest: null });
+							store.latest = entry;
+							if (!store.largest || entry.count > store.largest.count) {
+								store.largest = entry;
+							}
 						} catch (e) {
 							window.__papersDetailsErrors = window.__papersDetailsErrors || [];
 							window.__papersDetailsErrors.push(String(e.message || e));
@@ -214,24 +222,32 @@ async function installPapersDetailsInterceptor(tab) {
 	return r === "installed" || r === "already";
 }
 
-async function fetchPapersDetailsResponse(tab, timeoutMs = 10000) {
+async function fetchPapersDetailsResponse(tab, timeoutMs = 10000, afterTs = 0) {
 	// Single-eval poll for the captured /api/papers/details/ response. We
-	// wait for a response to land and then return the latest one. The
-	// timeout covers the worst case where the .CSV click never triggers
-	// the request (e.g., signed-out user, the button is gated).
+	// wait for a response captured strictly after `afterTs` (i.e. fired by
+	// the .CSV click, not a stale Load-More partial). If nothing new lands
+	// before the timeout, fall back to the largest response seen so far —
+	// covers the worst case where the .CSV click never triggers the
+	// request (e.g., signed-out user, the button is gated).
 	const code = `new Promise((resolve) => {
 		const _deadline = Date.now() + ${timeoutMs};
+		const _after = ${afterTs};
 		function _check() {
-			const resps = window.__papersDetailsResps || [];
-			if (resps.length > 0) {
-				const last = resps[resps.length - 1];
-				resolve(JSON.stringify({ ok: true, count: last.count, data: last.data }));
+			const store = window.__papersDetailsResps;
+			const latest = store && store.latest;
+			if (latest && latest.at > _after) {
+				resolve(JSON.stringify({ ok: true, count: latest.count, data: latest.data }));
 				return;
 			}
 			if (Date.now() < _deadline) {
 				setTimeout(_check, 200);
 			} else {
-				resolve(JSON.stringify({ ok: false, reason: 'timeout' }));
+				const largest = store && store.largest;
+				if (largest) {
+					resolve(JSON.stringify({ ok: true, count: largest.count, data: largest.data, stale: true }));
+				} else {
+					resolve(JSON.stringify({ ok: false, reason: 'timeout' }));
+				}
 			}
 		}
 		_check();
@@ -567,10 +583,12 @@ async function main() {
 
 		// Install the XHR interceptor BEFORE Load More clicks. Each Load
 		// More triggers its own /api/papers/details/ call (partial page).
-		// We capture every response and pick the largest one (which is the
-		// .CSV response after Load More has settled and the full list is
-		// in scope). This also covers the corner case where the user has
-		// fewer than 20 papers — .CSV still works on whatever is visible.
+		// We only keep {largest, latest} and wait for a response captured
+		// after the .CSV click (the "latest" that lands post-click, once
+		// Load More has settled and the full list is in scope), falling
+		// back to "largest" on timeout. This also covers the corner case
+		// where the user has fewer than 20 papers — .CSV still works on
+		// whatever is visible.
 		await installPapersDetailsInterceptor(tab);
 
 		logStage(env, "expand-refs", startTime);
@@ -588,6 +606,9 @@ async function main() {
 		await new Promise((r) => setTimeout(r, 1500));
 
 		logStage(env, "csv-click", startTime);
+		const preClickTs = Number(
+			(await cdp(["eval", tab, "Date.now()"]).catch(() => "0")) || 0,
+		);
 		const csvResult = await clickExportCsv(tab);
 		if (csvResult !== "clicked") {
 			console.error(
@@ -596,7 +617,7 @@ async function main() {
 		}
 
 		logStage(env, "wait-csv-resp", startTime);
-		const csvResp = await fetchPapersDetailsResponse(tab, 12000);
+		const csvResp = await fetchPapersDetailsResponse(tab, 12000, preClickTs);
 		let sources = [];
 		let sourcePath = "dom";
 		if (csvResp.ok) {

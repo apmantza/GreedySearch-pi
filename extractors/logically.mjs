@@ -592,14 +592,15 @@ async function main() {
 		if (!answer)
 			throw new Error("No answer extracted — Logically may not have responded");
 
-		logStage(env, "extract-inline-citations", startTime);
-		const inlineSources = await extractCitationSources(tab);
-
 		logStage(env, "extract-full-citations", startTime);
 		const fullCitations = await extractFullCitationSources(tab);
-		const sources = fullCitations.sources?.length
-			? fullCitations.sources
-			: inlineSources;
+		let inlineSources = [];
+		let sources = fullCitations.sources?.length ? fullCitations.sources : null;
+		if (!sources) {
+			logStage(env, "extract-inline-citations", startTime);
+			inlineSources = await extractCitationSources(tab);
+			sources = inlineSources;
+		}
 
 		const finalUrl = await cdp(["eval", tab, "document.location.href"]).catch(
 			() => "",

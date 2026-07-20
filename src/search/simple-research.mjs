@@ -219,18 +219,27 @@ export async function runSimpleResearchMode({
 	let fetchedSources = [];
 	const searchAngles = buildSearchAngles(query);
 	const searchResults = [];
-	for (const angle of searchAngles) {
-		try {
-			progressTracker.startAction("search", angle.slice(0, 50));
-			const result = await runFastAllSearch(angle, { locale, short: true });
-			progressTracker.endAction();
+	progressTracker.startAction(
+		"search",
+		`${searchAngles.length} angles in parallel`,
+	);
+	const angleOutcomes = await Promise.allSettled(
+		searchAngles.map((angle) =>
+			runFastAllSearch(angle, { locale, short: true }),
+		),
+	);
+	for (let i = 0; i < searchAngles.length; i++) {
+		const angle = searchAngles[i];
+		const outcome = angleOutcomes[i];
+		progressTracker.endAction();
+		if (outcome.status === "fulfilled") {
+			const result = outcome.value;
 			searchResults.push({ angle, result });
 			const sources = buildSourceRegistry(result, angle);
 			combinedSources = mergeSourcesByUrl(combinedSources, sources);
-		} catch (error) {
-			progressTracker.endAction();
+		} else {
 			process.stderr.write(
-				`[greedysearch] Simple search angle "${angle}" failed: ${error.message}\n`,
+				`[greedysearch] Simple search angle "${angle}" failed: ${outcome.reason.message}\n`,
 			);
 		}
 	}
