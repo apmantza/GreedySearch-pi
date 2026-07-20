@@ -249,11 +249,13 @@ export async function fetchGitHubContent(url) {
 
 		if (type === "blob" && path) {
 			let defaultBranch;
-			try {
-				const repoInfo = await apiGet(`/repos/${owner}/${repo}`);
-				defaultBranch = repoInfo.default_branch;
-			} catch {
-				defaultBranch = undefined;
+			if (!ref || ref === "HEAD") {
+				try {
+					const repoInfo = await apiGet(`/repos/${owner}/${repo}`);
+					defaultBranch = repoInfo.default_branch;
+				} catch {
+					defaultBranch = undefined;
+				}
 			}
 			const content = await fetchRawFile(
 				owner,
@@ -275,11 +277,13 @@ export async function fetchGitHubContent(url) {
 
 		if (type === "tree" && path) {
 			let defaultBranch;
-			try {
-				const repoInfo = await apiGet(`/repos/${owner}/${repo}`);
-				defaultBranch = repoInfo.default_branch;
-			} catch {
-				defaultBranch = undefined;
+			if (!ref || ref === "HEAD") {
+				try {
+					const repoInfo = await apiGet(`/repos/${owner}/${repo}`);
+					defaultBranch = repoInfo.default_branch;
+				} catch {
+					defaultBranch = undefined;
+				}
 			}
 			const treeItems = await fetchTree(
 				owner,
