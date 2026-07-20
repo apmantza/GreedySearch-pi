@@ -12,6 +12,7 @@
 import {
 	buildEnvelope,
 	cdp,
+	clickCopyAndAwaitClipboard,
 	formatAnswer,
 	getOrOpenTab,
 	handleError,
@@ -122,25 +123,15 @@ async function extractAnswer(tab, env, query = "") {
 }
 
 async function clickCopyAndPollClipboard(tab, timeoutMs) {
-	await cdp([
-		"eval",
-		tab,
-		`(() => {
-			window.${GLOBAL_VAR} = '';
-			const buttons = document.querySelectorAll('${S.copyButton}');
-			buttons[buttons.length - 1]?.click();
-		})()`,
-	]);
-
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		const answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]).catch(
-			() => "",
-		);
-		if (answer) return answer;
-		await new Promise((r) => setTimeout(r, 300));
-	}
-	return "";
+	const clickExpr = `(() => {
+		window.${GLOBAL_VAR} = '';
+		const buttons = document.querySelectorAll('${S.copyButton}');
+		buttons[buttons.length - 1]?.click();
+	})()`;
+	return clickCopyAndAwaitClipboard(tab, clickExpr, GLOBAL_VAR, {
+		timeoutMs,
+		retryClick: timeoutMs * 2,
+	});
 }
 
 /**

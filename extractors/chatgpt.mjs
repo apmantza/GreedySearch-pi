@@ -12,6 +12,7 @@
 import {
 	buildEnvelope,
 	cdp,
+	clickCopyAndAwaitClipboard,
 	formatAnswer,
 	getOrOpenTab,
 	handleError,
@@ -32,6 +33,27 @@ const GLOBAL_VAR = "__chatgptClipboard";
 const PROSE_SELECTOR = "div.ProseMirror";
 const SEND_SELECTOR = 'button[data-testid="send-button"]';
 const COPY_SELECTOR = 'button[data-testid="copy-turn-action-button"]';
+
+// Finds the copy button on the assistant message that comes AFTER the last
+// user message (not the absolute last copy button on the page, which is the
+// USER message's copy button when the assistant response is still empty).
+const CHATGPT_ASSISTANT_COPY_CLICK_EXPR = `(() => {
+	window.${GLOBAL_VAR} = '';
+	const all = document.querySelectorAll('[data-message-author-role]');
+	let lastUserIdx = -1;
+	for (let i = 0; i < all.length; i++) {
+		if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
+	}
+	if (lastUserIdx < 0) return;
+	let assistantCopy = null;
+	for (let i = lastUserIdx + 1; i < all.length; i++) {
+		if (all[i].getAttribute('data-message-author-role') === 'assistant') {
+			const btn = all[i].querySelector('${COPY_SELECTOR}');
+			if (btn) assistantCopy = btn;
+		}
+	}
+	if (assistantCopy) assistantCopy.click();
+})()`;
 
 // ============================================================================
 // ChatGPT-specific helpers
@@ -333,62 +355,13 @@ async function extractAnswer(tab, env) {
 	// copy button on the page. An empty clipboard routes us to the DOM
 	// fallback, which correctly targets the assistant message after the
 	// last user message and returns its innerText.
-	await cdp([
-		"eval",
+	let answer = await clickCopyAndAwaitClipboard(
 		tab,
-		`(() => {
-			const all = document.querySelectorAll('[data-message-author-role]');
-			let lastUserIdx = -1;
-			for (let i = 0; i < all.length; i++) {
-				if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
-			}
-			if (lastUserIdx < 0) return 'no-user';
-			let assistantCopy = null;
-			for (let i = lastUserIdx + 1; i < all.length; i++) {
-				if (all[i].getAttribute('data-message-author-role') === 'assistant') {
-					const btn = all[i].querySelector('${COPY_SELECTOR}');
-					if (btn) assistantCopy = btn;
-				}
-			}
-			if (assistantCopy) { assistantCopy.click(); return 'clicked'; }
-			return 'no-assistant-copy';
-		})()`,
-	]);
-	await new Promise((r) => setTimeout(r, 600));
-
-	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+		CHATGPT_ASSISTANT_COPY_CLICK_EXPR,
+		GLOBAL_VAR,
+		{ timeoutMs: 2600, retryClick: 600 },
+	);
 	env.clipboardEmpty = !answer;
-
-	// Retry once if clipboard is empty — the assistant message may have
-	// finished streaming and the copy button may have rendered in the
-	// meantime.
-	if (!answer) {
-		console.error("[chatgpt] Clipboard empty, retrying in 2s...");
-		await cdp([
-			"eval",
-			tab,
-			`(() => {
-				const all = document.querySelectorAll('[data-message-author-role]');
-				let lastUserIdx = -1;
-				for (let i = 0; i < all.length; i++) {
-					if (all[i].getAttribute('data-message-author-role') === 'user') lastUserIdx = i;
-				}
-				if (lastUserIdx < 0) return 'no-user';
-				let assistantCopy = null;
-				for (let i = lastUserIdx + 1; i < all.length; i++) {
-					if (all[i].getAttribute('data-message-author-role') === 'assistant') {
-						const btn = all[i].querySelector('${COPY_SELECTOR}');
-						if (btn) assistantCopy = btn;
-					}
-				}
-				if (assistantCopy) { assistantCopy.click(); return 'clicked'; }
-				return 'no-assistant-copy';
-			})()`,
-		]);
-		await new Promise((r) => setTimeout(r, 2000));
-		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
-		env.clipboardEmpty = !answer;
-	}
 
 	let domFallback = null;
 	if (!answer) {

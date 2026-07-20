@@ -285,47 +285,85 @@ async function expandReferences(tab, maxClicks = 8) {
 		);
 		return 0;
 	}
-	// Brief settle so the Load More button has time to mount after the
-	// initial 20 cards render.
-	await new Promise((r) => setTimeout(r, 800));
 
-	let clicks = 0;
-	for (let i = 0; i < maxClicks; i++) {
-		// Find the Load more button by its visible text. The text is
-		// "Load more results" in English UI; for non-English the structure
-		// is the same primary button below the paper list. Some pages
-		// also use a sidebar of references — same selector works because
-		// we query globally.
-		const hasMore = await cdp([
-			"eval",
-			tab,
-			`(() => {
-				const btns = Array.from(document.querySelectorAll('button'));
-				return btns.some(b => {
-					const t = (b.innerText || '').trim();
-					return /load more/i.test(t) || /more results/i.test(t) || /show more/i.test(t);
-				});
-			})()`,
-		]);
-		if (hasMore !== "true") break;
-		await cdp([
-			"eval",
-			tab,
-			`(() => {
-				const btns = Array.from(document.querySelectorAll('button'));
-				const btn = btns.find(b => {
-					const t = (b.innerText || '').trim();
-					return /load more/i.test(t) || /more results/i.test(t) || /show more/i.test(t);
-				});
-				btn?.click();
-				return 'clicked';
-			})()`,
-		]);
-		clicks++;
-		// 1.5s between clicks: each batch needs time to render.
-		await new Promise((r) => setTimeout(r, 1500));
+	// Single in-browser promise: finds the Load-more button by its visible
+	// text (same locale-agnostic patterns as before), clicks it, and waits
+	// for the paper-card count to increase before clicking again — up to
+	// maxClicks times. Resolves as soon as the button is absent/disabled.
+	const code = String.raw`
+	new Promise((resolve) => {
+		const _paperSel = '${SELECTORS.paperCard}';
+		const _maxClicks = ${maxClicks};
+		function _findLoadMore() {
+			const btns = Array.from(document.querySelectorAll('button'));
+			return btns.find(b => {
+				const t = (b.innerText || '').trim();
+				return /load more/i.test(t) || /more results/i.test(t) || /show more/i.test(t);
+			}) || null;
+		}
+		function _cardCount() { return document.querySelectorAll(_paperSel).length; }
+		let _clicks = 0;
+		function _waitButton(deadline, cb) {
+			const btn = _findLoadMore();
+			if (btn) { cb(btn); return; }
+			if (Date.now() < deadline) { setTimeout(() => _waitButton(deadline, cb), 200); }
+			else { cb(null); }
+		}
+		function _loop() {
+			if (_clicks >= _maxClicks) { resolve(JSON.stringify({ clicks: _clicks, cards: _cardCount() })); return; }
+			const mountDeadline = Date.now() + (_clicks === 0 ? 3000 : 500);
+			_waitButton(mountDeadline, (btn) => {
+				if (!btn || btn.disabled) { resolve(JSON.stringify({ clicks: _clicks, cards: _cardCount() })); return; }
+				const before = _cardCount();
+				btn.click();
+				_clicks++;
+				const clickDeadline = Date.now() + 4000;
+				(function _pollCards() {
+					if (_cardCount() > before || Date.now() >= clickDeadline) { _loop(); return; }
+					setTimeout(_pollCards, 200);
+				})();
+			});
+		}
+		_loop();
+	})
+	`;
+	const result = await cdp(["eval", tab, code], maxClicks * 5000 + 5000).catch(
+		() => null,
+	);
+	if (!result) return 0;
+	try {
+		const { clicks, cards } = JSON.parse(result);
+		console.error(
+			`[consensus] expandReferences: ${clicks} click(s), ${cards} card(s)`,
+		);
+		return clicks;
+	} catch {
+		return 0;
 	}
-	return clicks;
+}
+
+/**
+ * Poll for the paper-card count to stop changing, up to maxMs. Replaces a
+ * fixed post-expand sleep — resolves as soon as the DOM settles instead of
+ * always waiting the full budget.
+ */
+async function waitForCardsStable(tab, maxMs = 1200) {
+	const code = String.raw`
+	new Promise((resolve) => {
+		const _sel = '${SELECTORS.paperCard}';
+		const _deadline = Date.now() + ${maxMs};
+		let _last = document.querySelectorAll(_sel).length;
+		function _poll() {
+			const cur = document.querySelectorAll(_sel).length;
+			if (cur === _last) { resolve(cur); return; }
+			_last = cur;
+			if (Date.now() < _deadline) { setTimeout(_poll, 300); }
+			else { resolve(_last); }
+		}
+		setTimeout(_poll, 300);
+	})
+	`;
+	await cdp(["eval", tab, code], maxMs + 3000).catch(() => null);
 }
 
 // ============================================================================
@@ -603,7 +641,7 @@ async function main() {
 			);
 		}
 		// Brief settle for the last batch to render fully.
-		await new Promise((r) => setTimeout(r, 1500));
+		await waitForCardsStable(tab, 1200);
 
 		logStage(env, "csv-click", startTime);
 		const preClickTs = Number(

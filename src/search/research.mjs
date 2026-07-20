@@ -18,7 +18,7 @@ import {
 	trimText,
 } from "./sources.mjs";
 import { parseStructuredJson } from "./synthesis.mjs";
-import { RESEARCH_ENGINES } from "./constants.mjs";
+import { ALL_ENGINES, RESEARCH_ENGINES } from "./constants.mjs";
 import { runGeminiPrompt } from "./synthesis-runner.mjs";
 import { classifyResearchComplexity } from "./scale-aware.mjs";
 import { runSimpleResearchMode } from "./simple-research.mjs";
@@ -1233,13 +1233,14 @@ function dedupeSources(sourceLists) {
 		.map((source, index) => ({ ...source, id: `S${index + 1}` }));
 }
 
+const _enginePattern = ALL_ENGINES.join("|");
+const _engineRegex = new RegExp(`^\\[(${_enginePattern})\\]`);
+
 function shouldForwardChildStderr(line) {
 	return (
 		/^PROGRESS:/.test(line) ||
 		/^\[greedysearch\]/.test(line) ||
-		/^\[(bing|perplexity|google|gemini|chatgpt|logically|semantic-scholar)\]/.test(
-			line,
-		) ||
+		_engineRegex.test(line) ||
 		/^GreedySearch Chrome/.test(line) ||
 		/^Launching GreedySearch Chrome/.test(line) ||
 		/^Headless mode/.test(line) ||
@@ -2587,13 +2588,27 @@ export async function runResearchMode({
 		if (roundNumber < options.iterations) {
 			progressTracker.startRound(roundNumber + 1);
 		}
-		const evaluation = await evaluateResearchQuality(
-			query,
-			rounds,
-			allLearnings,
-			allGaps,
-			qualityHistory,
-		);
+		const isFinalRound = roundNumber === options.iterations;
+		const evaluation = isFinalRound
+			? {
+					score:
+						qualityHistory.length > 0
+							? qualityHistory[qualityHistory.length - 1]
+							: 5,
+					coverage: {},
+					knowledgeGaps: [],
+					shouldContinue: false,
+					nextActions: [],
+					terminationReason: null,
+					evaluationError: "",
+				}
+			: await evaluateResearchQuality(
+					query,
+					rounds,
+					allLearnings,
+					allGaps,
+					qualityHistory,
+				);
 		qualityHistory.push(evaluation.score);
 		allGaps = uniqueStrings([...allGaps, ...(evaluation.knowledgeGaps || [])]);
 		updateQuestionLedger(questions, {

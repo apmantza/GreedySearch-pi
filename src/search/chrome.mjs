@@ -468,6 +468,15 @@ export function probeGreedyChrome(timeoutMs = 3000) {
 	});
 }
 
+async function waitForPortDown(timeoutMs = 3000, intervalMs = 200) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (!(await probeGreedyChrome(300))) return true;
+		await new Promise((r) => setTimeout(r, intervalMs));
+	}
+	return !(await probeGreedyChrome(300));
+}
+
 export async function refreshPortFile() {
 	const LOCK_FILE = `${ACTIVE_PORT_FILE}.lock`;
 	const TEMP_FILE = `${ACTIVE_PORT_FILE}.tmp`;
@@ -561,6 +570,21 @@ export async function refreshPortFile() {
 }
 
 export async function ensureChrome() {
+	// Research children inherit a live Chrome from their parent — the parent
+	// owns the lifecycle (idle checks, mode switches), so a child only needs
+	// to confirm the port is up before proceeding.
+	if (process.env.GREEDY_SEARCH_RESEARCH_CHILD && (await probeGreedyChrome())) {
+		await refreshPortFile();
+		try {
+			const md = readMetadata();
+			if (md) {
+				touchActivityBL(md);
+				registerClient(md);
+			}
+		} catch {}
+		return;
+	}
+
 	// ── Stale session cleanup (once per process) + mode-specific idle check ──
 	cleanupStaleSessions();
 	const wasKilled = await checkAndKillIdle();
@@ -582,7 +606,7 @@ export async function ensureChrome() {
 				"[greedysearch] Visible Chrome detected — switching to headless mode...\n",
 			);
 			await killHeadlessChrome();
-			await new Promise((r) => setTimeout(r, 1000));
+			await waitForPortDown();
 			forceRelaunch = true;
 		} else if (wantsVisible && headless) {
 			// Visible requested but headless Chrome is running — switch
@@ -590,7 +614,7 @@ export async function ensureChrome() {
 				"[greedysearch] Headless Chrome detected — switching to visible mode...\n",
 			);
 			await killHeadlessChrome();
-			await new Promise((r) => setTimeout(r, 1000));
+			await waitForPortDown();
 			forceRelaunch = true;
 		}
 	}
@@ -612,9 +636,15 @@ export async function ensureChrome() {
 	// ── Cross-process launch lock: prevent race between concurrent ensureChrome calls ──
 	const lock = acquireLaunchLock();
 	if (!lock.acquired) {
-		// Another process is launching Chrome — wait and re-probe
-		await new Promise((r) => setTimeout(r, 3000));
-		const reReady = await probeGreedyChrome(5000);
+		// Another process is launching Chrome — poll until it comes up or we
+		// give up and conclude the other launcher crashed.
+		const deadline = Date.now() + 12000;
+		let reReady = false;
+		while (Date.now() < deadline) {
+			reReady = await probeGreedyChrome(500);
+			if (reReady) break;
+			await new Promise((r) => setTimeout(r, 250));
+		}
 		if (reReady) {
 			await refreshPortFile();
 			return;
