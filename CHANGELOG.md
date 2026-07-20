@@ -4,7 +4,17 @@
 
 ### Added
 
+- **MCP server** (`bin/mcp.mjs`, `.mcp.json`) — GreedySearch is now usable from Claude Code and any MCP client: a dependency-free stdio server exposing `greedy_search` (full search/research surface, mirroring the pi tool's parameters) and `greedy_fetch` (single-URL fetch/extract). Registered at project scope via `.mcp.json`; `npm run mcp` to run manually.
+
 ### Changed
+
+- **Stream waits scoped to answer containers** (`extractors/common.mjs`, `perplexity.mjs`, `bing-copilot.mjs`, `chatgpt.mjs`) — Perplexity and Bing no longer poll `document.body` innerText (full-page layout every ~600ms tick, stability resets from unrelated UI churn); waits scope to the engine's answer element with body fallback, using `textContent` for length checks. `waitForStreamComplete` gained an optional `isStreamingExpr` guard, and ChatGPT's hand-rolled `waitForResponse` now delegates to it (net −79 lines). (#46)
+- **Token sets memoized in dedupeFetchedSources** (`src/search/research.mjs`) — Per-source token sets are computed once per call and compared with set-based Jaccard, instead of re-tokenizing 4KB slices for every pair every round. (#47)
+
+### Security
+
+- **CI installs hardened** (`.github/workflows/ci.yml`) — Both install steps use `npm ci --ignore-scripts` (no dependency in the tree uses install scripts); the extension-load check pins `npx jiti@2.7.0`. Resolves the SonarCloud new-code findings S6505/S8543.
+- **SSRF guard covers obfuscated hosts** (`src/fetcher.mjs`) — `isPrivateUrl` now blocks IPv4-mapped IPv6 loopback/private forms (`::ffff:127.0.0.1`) and normalizes decimal/octal/hex numeric hosts (inet_aton semantics) before the private-range checks; 8 new unit tests.
 
 - **checkCitationUrls uses a worker pool** (`src/search/research.mjs`) — Citation URL reachability checks run through a shared-index worker pool (concurrency 4) instead of slice-by-slice `Promise.allSettled` batches, so one slow URL no longer stalls the whole batch behind it. (#43)
 - **GitHub fetching uses the repo's default branch** (`src/github.mjs`) — `fetchTree`/`fetchRawFile` accept the caller's `default_branch` and hit the right ref directly; when unknown they race `main`/`master` in parallel instead of sequential fallback. Fixes blob fetches for repos whose default branch is neither, removes the duplicated repo-info request inside `fetchTree`, and only resolves the default branch when the URL ref is `HEAD` (explicit-ref URLs skip the extra API call). (#44)
@@ -24,6 +34,7 @@
 
 ### Fixed
 
+- **Watchdog on the spawned search child** (`src/tools/shared.ts`) — A wedged child process (stuck tab daemon, stalled challenge polling) no longer hangs the pi tool indefinitely: 15-minute watchdog (override via `GREEDY_SEARCH_TIMEOUT_MS`) kills the child and errors cleanly; retained stderr is capped at ~50KB. (#42)
 - **Custom-config engines no longer muted in research progress output** (`src/search/research.mjs`) — `shouldForwardChildStderr` builds its engine regex from `ALL_ENGINES` instead of a hardcoded list, matching simple-research. (#37)
 - **Fetched-source ID matching normalized in simple-research** (`src/search/simple-research.mjs`) — `annotateFetchedSourcesWithIds` matches URLs via `normalizeUrl` instead of raw strings, so redirect/trailing-slash variants no longer fail citation-validity checks. (#37)
 - **Truncated daemon responses rejected cleanly** (`bin/cdp.mjs`) — `sendCommand` wraps its `JSON.parse` in try/catch and rejects with a descriptive error instead of throwing uncaught in the socket data handler. (#35)

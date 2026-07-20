@@ -2649,7 +2649,7 @@ export async function runResearchMode({
 			});
 		}
 
-		let learningPayload = combinedExtraction.learningPayload;
+		const learningPayload = combinedExtraction.learningPayload;
 		const learningError = combinedExtraction.learningError;
 		if (learningError) {
 			process.stderr.write(
@@ -3038,15 +3038,46 @@ function dedupeFetchedSources(sources) {
 		}
 	}
 
+	// Memoize token info per source so we don't re-tokenize the same 4KB slice
+	// on every pair comparison across rounds.
+	const tokenInfo = new Map();
+	function getTokenInfo(source) {
+		let info = tokenInfo.get(source);
+		if (!info) {
+			const content = String(source.content || source.snippet || "");
+			info = {
+				length: content.length,
+				tokens: tokenSet(content.slice(0, 4000)),
+			};
+			tokenInfo.set(source, info);
+		}
+		return info;
+	}
+
+	function jaccardSetSimilarity(a, b) {
+		let intersection = 0;
+		const smaller = a.size <= b.size ? a : b;
+		const larger = a.size <= b.size ? b : a;
+		for (const t of smaller) {
+			if (larger.has(t)) intersection++;
+		}
+		const union = a.size + b.size - intersection;
+		if (union === 0) return 1;
+		return intersection / union;
+	}
+
 	const out = [];
 	for (const source of byUrl.values()) {
-		const content = String(source.content || source.snippet || "");
+		const sourceInfo = getTokenInfo(source);
 		const duplicateIndex = out.findIndex((existing) => {
-			const other = String(existing.content || existing.snippet || "");
-			if (content.length < 400 || other.length < 400) return false;
-			return (
-				jaccardSimilarity(content.slice(0, 4000), other.slice(0, 4000)) >= 0.9
-			);
+			const existingInfo = tokenInfo.get(existing);
+			if (
+				sourceInfo.length < 400 ||
+				existingInfo.length < 400
+			) {
+				return false;
+			}
+			return jaccardSetSimilarity(sourceInfo.tokens, existingInfo.tokens) >= 0.9;
 		});
 		if (duplicateIndex === -1) {
 			out.push(source);

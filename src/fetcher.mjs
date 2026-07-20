@@ -68,6 +68,88 @@ const PRIVATE_URL_PATTERNS = [
 	/\.localhost$/i,
 ];
 
+/** Matches a dotted-quad IPv4-mapped IPv6 host, e.g. ::ffff:127.0.0.1 */
+const IPV4_MAPPED_DOTTED_RE = /^::ffff:(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/i;
+/** Matches the hex-group form Node/WHATWG normalize to, e.g. ::ffff:7f00:1 */
+const IPV4_MAPPED_HEX_RE = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i;
+
+/** inet_aton-style numeric segment: decimal, octal (0-prefixed), or hex (0x-prefixed) */
+const INET_ATON_SEGMENT_RE = /^(?:0x[0-9a-f]+|0[0-7]*|[1-9][0-9]*)$/i;
+
+/**
+ * Normalize a numeric/hex/octal IPv4 host obfuscation (e.g. "2130706433",
+ * "0x7f000001", "0177.0.0.1") to a dotted-quad string, following classic
+ * inet_aton semantics (1-4 parts, last part absorbs remaining bytes).
+ * Returns null if the host isn't a recognizable all-numeric IPv4 form.
+ * @param {string} hostname
+ * @returns {string|null}
+ */
+function normalizeNumericIPv4(hostname) {
+	if (!hostname || hostname.includes(":")) return null;
+	const parts = hostname.split(".");
+	if (parts.length < 1 || parts.length > 4) return null;
+	if (!parts.every((p) => INET_ATON_SEGMENT_RE.test(p))) return null;
+
+	const nums = parts.map((p) => {
+		if (/^0x/i.test(p)) return parseInt(p, 16);
+		if (/^0[0-7]+$/.test(p)) return parseInt(p, 8);
+		return parseInt(p, 10);
+	});
+	if (nums.some((n) => !Number.isFinite(n) || n < 0)) return null;
+
+	let bytes;
+	if (nums.length === 1) {
+		if (nums[0] > 0xffffffff) return null;
+		bytes = [
+			(nums[0] >>> 24) & 0xff,
+			(nums[0] >>> 16) & 0xff,
+			(nums[0] >>> 8) & 0xff,
+			nums[0] & 0xff,
+		];
+	} else if (nums.length === 2) {
+		if (nums[0] > 0xff || nums[1] > 0xffffff) return null;
+		bytes = [nums[0], (nums[1] >>> 16) & 0xff, (nums[1] >>> 8) & 0xff, nums[1] & 0xff];
+	} else if (nums.length === 3) {
+		if (nums[0] > 0xff || nums[1] > 0xff || nums[2] > 0xffff) return null;
+		bytes = [nums[0], nums[1], (nums[2] >>> 8) & 0xff, nums[2] & 0xff];
+	} else {
+		if (nums.some((n) => n > 0xff)) return null;
+		bytes = nums;
+	}
+	return bytes.join(".");
+}
+
+/**
+ * Extract the mapped IPv4 dotted-quad from an IPv4-mapped IPv6 host
+ * (e.g. "::ffff:127.0.0.1" or the normalized hex form "::ffff:7f00:1").
+ * @param {string} core - IPv6 host with brackets already stripped
+ * @returns {string|null}
+ */
+function extractMappedIPv4(core) {
+	const dottedMatch = core.match(IPV4_MAPPED_DOTTED_RE);
+	if (dottedMatch) {
+		return `${dottedMatch[1]}.${dottedMatch[2]}.${dottedMatch[3]}.${dottedMatch[4]}`;
+	}
+	const hexMatch = core.match(IPV4_MAPPED_HEX_RE);
+	if (hexMatch) {
+		const hi = parseInt(hexMatch[1], 16);
+		const lo = parseInt(hexMatch[2], 16);
+		if (hi > 0xffff || lo > 0xffff) return null;
+		return [
+			(hi >>> 8) & 0xff,
+			hi & 0xff,
+			(lo >>> 8) & 0xff,
+			lo & 0xff,
+		].join(".");
+	}
+	return null;
+}
+
+/** Test a normalized dotted-quad IPv4 string against the private/loopback patterns */
+function isPrivateIPv4(ip) {
+	return PRIVATE_URL_PATTERNS.some((pattern) => pattern.test(ip));
+}
+
 /**
  * Check if URL is a private/internal address that should not be fetched
  * @param {string} url - URL to check
@@ -98,6 +180,31 @@ export function isPrivateUrl(url) {
 					reason: `Private/internal address: ${hostname}`,
 				};
 			}
+		}
+
+		// Defense-in-depth: IPv4-mapped IPv6 forms (::ffff:127.0.0.1,
+		// bracketed [::ffff:7f00:1], etc.) that bypass the plain regex list.
+		if (hostname.startsWith("[") && hostname.endsWith("]")) {
+			const core = hostname.slice(1, -1);
+			const mapped = extractMappedIPv4(core);
+			if (mapped && isPrivateIPv4(mapped)) {
+				return {
+					blocked: true,
+					reason: `Private/internal address: ${hostname} (maps to ${mapped})`,
+				};
+			}
+		}
+
+		// Defense-in-depth: numeric/hex/octal IPv4 obfuscation
+		// (e.g. http://2130706433/, http://0x7f000001/, http://0177.0.0.1/).
+		// Modern URL parsers already normalize these before we see `hostname`,
+		// but normalize explicitly too so the check doesn't depend on that.
+		const normalized = normalizeNumericIPv4(hostname);
+		if (normalized && isPrivateIPv4(normalized)) {
+			return {
+				blocked: true,
+				reason: `Private/internal address: ${hostname} (normalizes to ${normalized})`,
+			};
 		}
 
 		return { blocked: false };

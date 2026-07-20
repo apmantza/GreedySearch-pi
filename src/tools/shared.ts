@@ -102,8 +102,34 @@ export function runSearch(
 		proc.stdin.end();
 		let out = "";
 		let err = "";
+		const MAX_ERR = 50 * 1024;
+		let finished = false;
+		const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
+		const parsedTimeout = parseInt(
+			process.env.GREEDY_SEARCH_TIMEOUT_MS || "",
+			10,
+		);
+		const timeoutMs = Number.isNaN(parsedTimeout)
+			? DEFAULT_TIMEOUT_MS
+			: parsedTimeout;
+		const timer = setTimeout(() => {
+			if (finished) return;
+			finished = true;
+			signal?.removeEventListener("abort", onAbort);
+			if (process.platform === "win32") proc.kill();
+			else proc.kill("SIGTERM");
+			reject(
+				new Error(
+					`greedy-search child timed out after ${timeoutMs}ms (watchdog)`,
+				),
+			);
+		}, timeoutMs);
+		timer.unref();
 
 		const onAbort = () => {
+			if (finished) return;
+			finished = true;
+			clearTimeout(timer);
 			proc.kill("SIGTERM");
 			reject(new Error("Aborted"));
 		};
@@ -111,6 +137,7 @@ export function runSearch(
 
 		proc.stderr.on("data", (d: Buffer) => {
 			err += d;
+			if (err.length > MAX_ERR) err = err.slice(-MAX_ERR);
 			// Match PROGRESS lines for any known engine.
 			const ENGINE_PROGRESS_RE =
 				/^PROGRESS:(perplexity|google|chatgpt|bing|gemini|semantic-scholar|semanticscholar|s2|logically):(done|error|needs-human)$/;
@@ -166,6 +193,9 @@ export function runSearch(
 
 		proc.stdout.on("data", (d: Buffer) => (out += d));
 		proc.on("close", (code: number) => {
+			if (finished) return;
+			finished = true;
+			clearTimeout(timer);
 			signal?.removeEventListener("abort", onAbort);
 			if (code !== 0) {
 				reject(new Error(err.trim() || `search.mjs exited with code ${code}`));

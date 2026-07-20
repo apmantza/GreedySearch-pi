@@ -21,6 +21,7 @@
 		"test:bash": "./test.sh",
 		"test:bash:quick": "./test.sh quick",
 		"test:bash:smoke": "./test.sh smoke",
+		"mcp": "node bin/mcp.mjs",
 		"stealth-check": "node scripts/stealth-check.mjs",
 		"stealth:check": "node scripts/stealth-check.mjs",
 		"stealth:strict": "node scripts/stealth-check.mjs --strict",

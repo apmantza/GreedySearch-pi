@@ -21,7 +21,7 @@ jobs:
           node-version: "22"
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund --ignore-scripts
 
       - name: Check lockfile sync
         run: npm run check:lockfile
@@ -104,7 +104,7 @@ jobs:
           npm install -g "$TARBALL"
 
       - name: Install dependencies (for test imports)
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund --ignore-scripts
 
       - name: Run unit tests
         run: node test.mjs unit
@@ -118,7 +118,7 @@ jobs:
           # ERR_MODULE_NOT_FOUND = missing dep → fail
           # pi-coding-agent is host-provided; absence is expected here
           cd "$INSTALL_DIR"
-          npx -y jiti ./index.ts 2>&1 | tee /tmp/jiti-output.txt || true
+          npx -y jiti@2.7.0 ./index.ts 2>&1 | tee /tmp/jiti-output.txt || true
           if grep -q "ERR_MODULE_NOT_FOUND" /tmp/jiti-output.txt \
              && ! grep -q "pi-coding-agent" /tmp/jiti-output.txt; then
             echo "FAILED: missing module dependency detected"

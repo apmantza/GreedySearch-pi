@@ -485,6 +485,7 @@ async function main() {
 		await waitForStreamComplete(tab, {
 			timeout: short ? 25000 : 60000,
 			minLength: 50,
+			selector: "document.querySelector('article') || document.body",
 		});
 
 		const { answer, sources } = await extractAnswer(tab, env, query);

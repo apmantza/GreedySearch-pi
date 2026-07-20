@@ -49,6 +49,53 @@ session, solve a challenge, or inspect the browser:
 greedy_search({ query: "Visible setup", engine: "perplexity", visible: true });
 ```
 
+## MCP server
+
+GreedySearch also ships a dependency-free MCP stdio server (`bin/mcp.mjs`)
+so Claude Code — or any MCP client — can call it directly, outside of Pi.
+It exposes two tools:
+
+- `greedy_search` — same parameters as the Pi `greedy_search` tool
+  (`query`, `engine`, `synthesize`, `synthesizer`, `depth`, `breadth`,
+  `iterations`, `maxSources`, `researchOutDir`, `writeResearchBundle`,
+  `fullAnswer`, `locale`, `visible`). Spawns `bin/search.mjs` under the
+  hood; searches take roughly 1-5 minutes.
+- `greedy_fetch` — fetch a single URL and return its extracted
+  title/byline/content (`url`, `maxChars`).
+
+### Register with Claude Code
+
+This repo includes a project-scope `.mcp.json` at the repo root, so running
+Claude Code from inside a checkout picks up the `greedysearch` server
+automatically (you'll be prompted to approve project-scoped servers on
+first use).
+
+To register it manually (e.g. from outside the repo, or in user scope):
+
+```bash
+claude mcp add greedysearch -- node /absolute/path/to/greedysearch-pi/bin/mcp.mjs
+```
+
+Or run the server directly for testing:
+
+```bash
+npm run mcp
+```
+
+### Sample `tools/call`
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "greedy_search",
+    "arguments": { "query": "React 19 changes", "engine": "perplexity" }
+  }
+}
+```
+
 ## Documentation
 
 - [Usage guide](docs/usage.md) — tool parameters, search modes, and config
