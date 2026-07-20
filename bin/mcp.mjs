@@ -306,11 +306,26 @@ function formatSummary(engine, data) {
 		return lines.join("\n").trim();
 	}
 
-	// Fallback: per-engine answer + sources.
-	for (const [key, value] of Object.entries(data)) {
-		if (key.startsWith("_")) continue;
-		const eng = value && typeof value === "object" ? value : {};
-		if (Object.keys(data).filter((k) => !k.startsWith("_")).length > 1) {
+	// Single-engine results are flat: {query, url, answer, sources, ...}.
+	if (typeof data.answer === "string") {
+		lines.push(data.answer);
+		const sources = Array.isArray(data.sources) ? data.sources : [];
+		if (sources.length > 0) {
+			lines.push("\nSources:");
+			for (const s of sources.slice(0, 8)) {
+				lines.push(`- [${s.title || s.url}](${s.url})`);
+			}
+		}
+		return lines.join("\n").trim();
+	}
+
+	// Fallback: all-engine results keyed by engine name.
+	const engineKeys = Object.keys(data).filter(
+		(k) => !k.startsWith("_") && data[k] && typeof data[k] === "object",
+	);
+	for (const key of engineKeys) {
+		const eng = data[key];
+		if (engineKeys.length > 1) {
 			lines.push(`\n## ${key}`);
 		}
 		if (eng.error) {
