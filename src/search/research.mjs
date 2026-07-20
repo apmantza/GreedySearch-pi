@@ -1096,7 +1096,7 @@ export async function extractEvidenceAndLearnings({
 				fetchedSources,
 				evidenceItems,
 			),
-			{ timeoutMs: 120000 },
+			{ timeoutMs: 180000 },
 		);
 		const parsed = parseGeminiJson(raw, {});
 		evidence = normalizeEvidenceExtractions(parsed, pending);
