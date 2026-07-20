@@ -1463,27 +1463,35 @@ export async function checkCitationUrls(
 	const reachable = [];
 	const dead = [];
 	const skipped = [];
+	const results = new Array(citedSources.length);
+	let nextIndex = 0;
 
-	// Process in batches to avoid overwhelming
-	for (let i = 0; i < citedSources.length; i += safeConcurrency) {
-		const batch = citedSources.slice(i, i + safeConcurrency);
-		const results = await Promise.allSettled(
-			batch.map(async (source) => {
+	async function worker() {
+		while (true) {
+			const i = nextIndex++;
+			if (i >= citedSources.length) return;
+
+			const source = citedSources[i];
+			try {
 				const url =
 					source.fetch?.finalUrl ||
 					source.canonicalUrl ||
 					source.finalUrl ||
 					source.url;
-				if (!url) return { id: source.id, url: "", status: "skipped" };
+				if (!url) {
+					results[i] = { id: source.id, url: "", status: "skipped" };
+					continue;
+				}
 
-				// Skip non-HTTP URLs and known-unreachable patterns
 				try {
 					const parsed = new URL(url);
 					if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-						return { id: source.id, url, status: "skipped" };
+						results[i] = { id: source.id, url, status: "skipped" };
+						continue;
 					}
 				} catch {
-					return { id: source.id, url, status: "skipped" };
+					results[i] = { id: source.id, url, status: "skipped" };
+					continue;
 				}
 
 				try {
@@ -1507,7 +1515,7 @@ export async function checkCitationUrls(
 						let status = "dead";
 						if (ok) status = "reachable";
 						else if (botProtectedOrHeadlessHost) status = "skipped";
-						return {
+						results[i] = {
 							id: source.id,
 							url,
 							status,
@@ -1518,7 +1526,7 @@ export async function checkCitationUrls(
 						};
 					} catch (fetchError) {
 						clearTimeout(timer);
-						return {
+						results[i] = {
 							id: source.id,
 							url,
 							status: "dead",
@@ -1529,30 +1537,31 @@ export async function checkCitationUrls(
 						};
 					}
 				} catch (error) {
-					return {
+					results[i] = {
 						id: source.id,
 						url,
 						status: "dead",
 						error: error.message,
 					};
 				}
-			}),
-		);
-
-		for (const result of results) {
-			const value =
-				result.status === "fulfilled"
-					? result.value
-					: {
-							id: "?",
-							url: "",
-							status: "dead",
-							error: result.reason?.message || "unknown",
-						};
-			if (value.status === "reachable") reachable.push(value);
-			else if (value.status === "dead") dead.push(value);
-			else skipped.push(value);
+			} catch (error) {
+				results[i] = {
+					id: "?",
+					url: "",
+					status: "dead",
+					error: error?.message || "unknown",
+				};
+			}
 		}
+	}
+
+	const workerCount = Math.min(citedSources.length, safeConcurrency);
+	await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+	for (const value of results) {
+		if (value.status === "reachable") reachable.push(value);
+		else if (value.status === "dead") dead.push(value);
+		else skipped.push(value);
 	}
 
 	return {
