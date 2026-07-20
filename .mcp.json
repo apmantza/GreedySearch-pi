@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "greedysearch": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["bin/mcp.mjs"]
+    }
+  }
+}
