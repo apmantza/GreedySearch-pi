@@ -18,6 +18,7 @@ import {
 import http from "node:http";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
+import { minimizeViaCDP } from "../src/search/minimize.mjs";
 
 const PORT = 9222;
 const PROFILE_DIR = join(tmpdir(), "greedysearch-chrome-profile");
@@ -104,69 +105,6 @@ function httpGet(url, timeoutMs = 1000) {
 			resolve({ ok: false });
 		});
 	});
-}
-
-async function minimizeViaCDP(port) {
-	try {
-		const version = await httpGet(`http://localhost:${port}/json/version`).then(
-			(r) => JSON.parse(r.body),
-		);
-		const targets = await httpGet(`http://localhost:${port}/json/list`).then(
-			(r) => JSON.parse(r.body),
-		);
-		const targetId = targets.find((t) => t.type === "page")?.id;
-		if (!targetId) return;
-
-		// Validate browser WebSocket URL to prevent SSRF (SonarCloud javasecurity:S5335)
-		const wsUrlStr = version.webSocketDebuggerUrl;
-		if (typeof wsUrlStr !== "string") return;
-		const wsUrl = new URL(wsUrlStr);
-		if (wsUrl.hostname !== "localhost" && wsUrl.hostname !== "127.0.0.1")
-			return;
-		if (!/^ws:\/\/localhost:\d+/.test(`ws://${wsUrl.host}`)) return;
-		const wsPath = wsUrl.pathname;
-		const ws = new WebSocket(`ws://localhost:${port}${wsPath}`);
-		await new Promise((resolve) => {
-			ws.onopen = () =>
-				ws.send(
-					JSON.stringify({
-						id: 1,
-						method: "Browser.getWindowForTarget",
-						params: { targetId },
-					}),
-				);
-			ws.onmessage = (ev) => {
-				const msg = JSON.parse(ev.data);
-				if (msg.id === 1 && msg.result?.windowId) {
-					ws.send(
-						JSON.stringify({
-							id: 2,
-							method: "Browser.setWindowBounds",
-							params: {
-								windowId: msg.result.windowId,
-								bounds: { windowState: "minimized" },
-							},
-						}),
-					);
-				} else if (msg.id === 2) {
-					ws.close();
-					resolve();
-				}
-			};
-			ws.onerror = () => {
-				ws.close();
-				resolve();
-			};
-			setTimeout(() => {
-				try {
-					ws.close();
-				} catch {}
-				resolve();
-			}, 5000);
-		});
-	} catch {
-		// best-effort — Chrome is still usable if minimize fails
-	}
 }
 
 async function waitForPort(timeoutMs = 15000) {
