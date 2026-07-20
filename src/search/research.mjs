@@ -813,6 +813,49 @@ function sourceKey(source) {
 	);
 }
 
+function normalizeEvidenceExtractions(payload, fetchedSources) {
+	const raw = Array.isArray(payload?.extractions) ? payload.extractions : [];
+	const byUrl = new Map();
+	const byId = new Map();
+	for (const source of fetchedSources || []) {
+		if (source?.id) byId.set(String(source.id), source);
+		const key = sourceKey(source);
+		if (key) byUrl.set(key, source);
+	}
+	return raw
+		.map((item) => {
+			const source =
+				byId.get(String(item?.sourceId || "")) ||
+				byUrl.get(normalizeUrl(item?.url || "") || "");
+			const sourceId = String(item?.sourceId || source?.id || "");
+			const url = normalizeUrl(
+				item?.url || source?.finalUrl || source?.url || "",
+			);
+			const answers = Array.isArray(item?.answers)
+				? item.answers
+						.map((answer) => ({
+							id: String(answer?.id || ""),
+							evidence: trimText(answer?.evidence || "", 500),
+							sourceIds: [sourceId].filter(Boolean),
+						}))
+						.filter((answer) => answer.id)
+				: [];
+			return {
+				sourceId,
+				url,
+				title: source?.title || item?.title || "",
+				rational: trimText(item?.rational || "", 700),
+				evidence: trimText(item?.evidence || "", 1600),
+				summary: trimText(item?.summary || "", 700),
+				answers,
+				newQuestions: uniqueStrings(item?.newQuestions || [], 6),
+			};
+		})
+		.filter(
+			(item) => item.sourceId || item.url || item.summary || item.evidence,
+		);
+}
+
 function buildEvidenceExtractionPrompt(
 	originalQuery,
 	questions,
@@ -874,49 +917,12 @@ function buildEvidenceExtractionPrompt(
 	].join("\n");
 }
 
-function normalizeEvidenceExtractions(payload, fetchedSources) {
-	const raw = Array.isArray(payload?.extractions) ? payload.extractions : [];
-	const byUrl = new Map();
-	const byId = new Map();
-	for (const source of fetchedSources || []) {
-		if (source?.id) byId.set(String(source.id), source);
-		const key = sourceKey(source);
-		if (key) byUrl.set(key, source);
-	}
-	return raw
-		.map((item) => {
-			const source =
-				byId.get(String(item?.sourceId || "")) ||
-				byUrl.get(normalizeUrl(item?.url || "") || "");
-			const sourceId = String(item?.sourceId || source?.id || "");
-			const url = normalizeUrl(
-				item?.url || source?.finalUrl || source?.url || "",
-			);
-			const answers = Array.isArray(item?.answers)
-				? item.answers
-						.map((answer) => ({
-							id: String(answer?.id || ""),
-							evidence: trimText(answer?.evidence || "", 500),
-							sourceIds: [sourceId].filter(Boolean),
-						}))
-						.filter((answer) => answer.id)
-				: [];
-			return {
-				sourceId,
-				url,
-				title: source?.title || item?.title || "",
-				rational: trimText(item?.rational || "", 700),
-				evidence: trimText(item?.evidence || "", 1600),
-				summary: trimText(item?.summary || "", 700),
-				answers,
-				newQuestions: uniqueStrings(item?.newQuestions || [], 6),
-			};
-		})
-		.filter(
-			(item) => item.sourceId || item.url || item.summary || item.evidence,
-		);
-}
-
+/**
+ * Single-pass evidence extraction (used by the non-iterative "simple"
+ * research mode in simple-research.mjs, which has no separate learning
+ * phase to merge this with). The iterative round flow in runResearchMode
+ * uses the merged extractEvidenceAndLearnings below instead.
+ */
 export async function extractEvidenceFromSources({
 	query,
 	questions,
@@ -951,15 +957,38 @@ export async function extractEvidenceFromSources({
 	}
 }
 
-function buildLearningPrompt(
+/**
+ * Merged evidence-extraction + learning-extraction prompt. Combines the two
+ * prior sequential Gemini prompts (goal-based per-source evidence extraction
+ * and compact round-learning extraction) into a single request/response so
+ * an iterative research round only needs one browser round-trip for both,
+ * instead of two. Field semantics/formats are unchanged from the two
+ * originals; only source-snippet context is shared between the two "tasks"
+ * embedded in the same prompt.
+ */
+function buildEvidenceAndLearningPrompt(
 	originalQuery,
+	questions,
 	roundQueries,
 	searchSummaries,
+	pendingSources,
 	fetchedSources,
-	questions = [],
 	evidenceItems = [],
 ) {
-	const sourceSnippets = fetchedSources
+	const openQuestions = (questions || [])
+		.filter((q) => q.status !== "closed")
+		.slice(0, 12)
+		.map((q) => ({ id: q.id, question: q.question }));
+	const extractionSourceSnippets = (pendingSources || [])
+		.filter((source) => source?.content || source?.snippet)
+		.slice(0, 6)
+		.map((source, index) => ({
+			id: source.id || `F${index + 1}`,
+			title: source.title || "",
+			url: source.finalUrl || source.url || source.canonicalUrl || "",
+			content: trimText(source.content || source.snippet || "", 5000),
+		}));
+	const learningSourceSnippets = (fetchedSources || [])
 		.filter((source) => source?.content || source?.snippet)
 		.slice(0, 10)
 		.map((source, index) => ({
@@ -970,21 +999,48 @@ function buildLearningPrompt(
 		}));
 
 	return [
-		"You are extracting compact research state from live multi-engine search results.",
-		"Create dense, non-overlapping learnings with exact names, numbers, dates, limitations, and caveats where available.",
+		"You are doing two combined research tasks for one round of an iterative research run. Perform BOTH tasks and return a single combined JSON object.",
+		"",
+		"TASK A — Goal-based evidence extraction:",
+		"For each source under 'Sources for evidence extraction', extract only information that helps answer the open questions.",
+		"Use original wording/details where useful. Do not invent answers; leave questions open if evidence is insufficient.",
+		"If a source answers one or more tracked questions, identify those question IDs explicitly.",
+		"Also propose genuinely new sub-questions discovered from the evidence.",
+		"",
+		"TASK B — Compact research-state learning extraction:",
+		"Using the round queries, question ledger, extracted source evidence, engine summaries, and fetched source snippets below, create dense, non-overlapping learnings with exact names, numbers, dates, limitations, and caveats where available.",
 		"Also propose follow-up search queries that would most improve confidence or fill gaps.",
 		"",
 		`Original research question: ${originalQuery}`,
+		`Open question ledger: ${JSON.stringify(openQuestions, null, 2)}`,
 		`Round queries: ${JSON.stringify(roundQueries, null, 2)}`,
 		`Question ledger: ${JSON.stringify(questions, null, 2)}`,
-		`Extracted source evidence: ${JSON.stringify(evidenceItems.slice(-12), null, 2)}`,
+		`Extracted source evidence so far: ${JSON.stringify(evidenceItems.slice(-12), null, 2)}`,
 		`Engine summaries: ${JSON.stringify(searchSummaries, null, 2)}`,
-		`Fetched source snippets: ${JSON.stringify(sourceSnippets, null, 2)}`,
+		`Sources for evidence extraction (Task A): ${JSON.stringify(extractionSourceSnippets, null, 2)}`,
+		`Fetched source snippets (Task B context): ${JSON.stringify(learningSourceSnippets, null, 2)}`,
 		"",
-		"Respond ONLY with JSON wrapped in BEGIN_JSON / END_JSON markers:",
+		"Respond ONLY with JSON wrapped in BEGIN_JSON / END_JSON markers, combining both tasks into one object:",
 		"BEGIN_JSON",
 		JSON.stringify(
 			{
+				extractions: [
+					{
+						sourceId: "S1",
+						url: "https://example.com/source",
+						rational: "why this source matters for the goal",
+						evidence:
+							"specific quoted/paraphrased evidence with numbers, dates, caveats",
+						summary: "concise contribution to the research question",
+						answers: [
+							{
+								id: "Q1",
+								evidence: "brief evidence that closes the question",
+							},
+						],
+						newQuestions: ["new sub-question raised by this source"],
+					},
+				],
 				learnings: ["concise, information-dense learning"],
 				answeredQuestions: [
 					{
@@ -1002,6 +1058,59 @@ function buildLearningPrompt(
 		),
 		"END_JSON",
 	].join("\n");
+}
+
+/**
+ * Run the merged evidence + learning extraction prompt once per round and
+ * split the parsed result back into the two shapes downstream code expects:
+ * an evidence-extraction result ({ evidence, error }) and a learning
+ * payload/error pair, matching what `extractEvidenceFromSources` and the
+ * old standalone learning-extraction call used to return separately.
+ */
+export async function extractEvidenceAndLearnings({
+	query,
+	questions,
+	fetchedSources,
+	extractedSourceKeys,
+	roundQueries,
+	searchSummaries,
+	evidenceItems = [],
+}) {
+	const pending = (fetchedSources || []).filter(
+		(source) =>
+			(source?.content || source?.snippet) &&
+			!extractedSourceKeys.has(sourceKey(source)),
+	);
+	let evidence = [];
+	let evidenceError = "";
+	let learningPayload = { learnings: [], followUpQueries: [], gaps: [] };
+	let learningError = "";
+	try {
+		const raw = await runGeminiPrompt(
+			buildEvidenceAndLearningPrompt(
+				query,
+				questions,
+				roundQueries,
+				searchSummaries,
+				pending,
+				fetchedSources,
+				evidenceItems,
+			),
+			{ timeoutMs: 180000 },
+		);
+		const parsed = parseGeminiJson(raw, {});
+		evidence = normalizeEvidenceExtractions(parsed, pending);
+		for (const source of pending) {
+			const key = sourceKey(source);
+			if (key) extractedSourceKeys.add(key);
+		}
+		learningPayload = { ...learningPayload, ...parsed };
+	} catch (error) {
+		const message = error.message || String(error);
+		evidenceError = message;
+		learningError = message;
+	}
+	return { evidence, evidenceError, learningPayload, learningError };
 }
 
 export function buildFinalReportPrompt(
@@ -2485,13 +2594,36 @@ export async function runResearchMode({
 			combinedSources,
 		);
 
+		// Build round query summary for the merged evidence + learning prompt.
+		const roundQueries = actionRuns.map((run) => ({
+			query: run.action.query || run.action.url || "",
+			researchGoal: run.action.researchGoal || "",
+		}));
+
+		// Evidence extraction and learning extraction are merged into a single
+		// Gemini prompt/response (one browser round-trip instead of two) since
+		// they consume largely overlapping inputs (fetched sources + question
+		// ledger). See buildEvidenceAndLearningPrompt / extractEvidenceAndLearnings.
 		process.stderr.write(`PROGRESS:research:round-${roundNumber}:evidence\n`);
-		const evidenceRun = await extractEvidenceFromSources({
+		process.stderr.write(`PROGRESS:research:round-${roundNumber}:learning\n`);
+		const combinedExtraction = await extractEvidenceAndLearnings({
 			query,
 			questions,
 			fetchedSources,
 			extractedSourceKeys,
+			roundQueries,
+			searchSummaries: searchActionRuns.map((run) => ({
+				query: run.action.query,
+				researchGoal: run.action.researchGoal,
+				error: run.error || "",
+				engines: summarizeEngineAnswers(run.result),
+			})),
+			evidenceItems,
 		});
+		const evidenceRun = {
+			evidence: combinedExtraction.evidence,
+			error: combinedExtraction.evidenceError,
+		};
 		if (evidenceRun.error) {
 			process.stderr.write(
 				`[greedysearch] Evidence extraction failed: ${evidenceRun.error}\n`,
@@ -2508,40 +2640,11 @@ export async function runResearchMode({
 			});
 		}
 
-		// Build round query summary for learning extraction
-		const roundQueries = actionRuns.map((run) => ({
-			query: run.action.query || run.action.url || "",
-			researchGoal: run.action.researchGoal || "",
-		}));
-
-		process.stderr.write(`PROGRESS:research:round-${roundNumber}:learning\n`);
-		let learningPayload = { learnings: [], followUpQueries: [], gaps: [] };
-		let learningError = "";
-		try {
-			const rawLearning = await runGeminiPrompt(
-				buildLearningPrompt(
-					query,
-					roundQueries,
-					searchActionRuns.map((run) => ({
-						query: run.action.query,
-						researchGoal: run.action.researchGoal,
-						error: run.error || "",
-						engines: summarizeEngineAnswers(run.result),
-					})),
-					fetchedSources,
-					questions,
-					evidenceItems,
-				),
-				{ timeoutMs: 120000 },
-			);
-			learningPayload = {
-				...learningPayload,
-				...parseGeminiJson(rawLearning, learningPayload),
-			};
-		} catch (error) {
-			learningError = error.message;
+		let learningPayload = combinedExtraction.learningPayload;
+		const learningError = combinedExtraction.learningError;
+		if (learningError) {
 			process.stderr.write(
-				`[greedysearch] Learning extraction failed: ${error.message}\n`,
+				`[greedysearch] Learning extraction failed: ${learningError}\n`,
 			);
 		}
 
