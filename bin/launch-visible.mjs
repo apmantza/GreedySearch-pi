@@ -15,10 +15,9 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import http from "node:http";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { minimizeViaCDP } from "../src/search/minimize.mjs";
+import { httpGet, minimizeViaCDP } from "../src/search/minimize.mjs";
 
 const PORT = 9222;
 const PROFILE_DIR = join(tmpdir(), "greedysearch-chrome-profile");
@@ -90,21 +89,6 @@ function killProcess(pid) {
 	} catch {
 		return false;
 	}
-}
-
-function httpGet(url, timeoutMs = 1000) {
-	return new Promise((resolve) => {
-		const req = http.get(url, (res) => {
-			let body = "";
-			res.on("data", (d) => (body += d));
-			res.on("end", () => resolve({ ok: res.statusCode === 200, body }));
-		});
-		req.on("error", () => resolve({ ok: false }));
-		req.setTimeout(timeoutMs, () => {
-			req.destroy();
-			resolve({ ok: false });
-		});
-	});
 }
 
 async function waitForPort(timeoutMs = 15000) {

@@ -1,6 +1,6 @@
 import http from "node:http";
 
-function httpGet(url, timeoutMs = 1000) {
+export function httpGet(url, timeoutMs = 1000) {
 	return new Promise((resolve) => {
 		const req = http.get(url, (res) => {
 			let body = "";
