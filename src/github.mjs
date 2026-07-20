@@ -90,30 +90,36 @@ async function fetchReadme(owner, repo) {
 /**
  * Fetch top-level file tree (non-recursive)
  */
-async function fetchTree(owner, repo, ref = "HEAD", subPath = "") {
+async function fetchTree(owner, repo, ref = "HEAD", subPath = "", defaultBranch) {
 	try {
-		// Resolve ref to a tree SHA first when using HEAD or a branch name
-		const refData = await apiGet(
-			`/repos/${owner}/${repo}/git/ref/heads/${ref === "HEAD" ? "main" : ref}`,
-		).catch(() =>
-			apiGet(`/repos/${owner}/${repo}/git/ref/heads/master`).catch(() => null),
-		);
-
-		let treeSha;
-		if (refData?.object?.sha) {
-			// Get commit to get tree SHA
-			const commit = await apiGet(
-				`/repos/${owner}/${repo}/git/commits/${refData.object.sha}`,
-			);
-			treeSha = commit.tree.sha;
+		let refData;
+		if (ref === "HEAD") {
+			if (defaultBranch) {
+				refData = await apiGet(
+					`/repos/${owner}/${repo}/git/ref/heads/${defaultBranch}`,
+				).catch(() => null);
+			} else {
+				refData = await Promise.any([
+					apiGet(`/repos/${owner}/${repo}/git/ref/heads/main`),
+					apiGet(`/repos/${owner}/${repo}/git/ref/heads/master`),
+				]).catch(() => null);
+			}
 		} else {
-			// Fall back to repo default branch info
-			const repoInfo = await apiGet(`/repos/${owner}/${repo}`);
-			const branch = await apiGet(
-				`/repos/${owner}/${repo}/branches/${repoInfo.default_branch}`,
+			refData = await apiGet(
+				`/repos/${owner}/${repo}/git/ref/heads/${ref}`,
+			).catch(() =>
+				apiGet(`/repos/${owner}/${repo}/git/ref/heads/master`).catch(() => null),
 			);
-			treeSha = branch.commit.commit.tree.sha;
 		}
+
+		if (!refData?.object?.sha) {
+			return [];
+		}
+
+		const commit = await apiGet(
+			`/repos/${owner}/${repo}/git/commits/${refData.object.sha}`,
+		);
+		const treeSha = commit.tree.sha;
 
 		const treeData = await apiGet(
 			`/repos/${owner}/${repo}/git/trees/${treeSha}`,
@@ -138,14 +144,8 @@ async function fetchTree(owner, repo, ref = "HEAD", subPath = "") {
 /**
  * Fetch a specific file via raw.githubusercontent.com
  */
-async function fetchRawFile(owner, repo, ref, filePath, timeoutMs = 10000) {
-	const ref_ = ref && ref !== "HEAD" ? ref : "main";
-	const urls = [
-		`https://raw.githubusercontent.com/${owner}/${repo}/${ref_}/${filePath}`,
-		`https://raw.githubusercontent.com/${owner}/${repo}/master/${filePath}`,
-	];
-
-	for (const url of urls) {
+async function fetchRawFile(owner, repo, ref, filePath, timeoutMs = 10000, defaultBranch) {
+	const fetchOne = async (url) => {
 		const controller = new AbortController();
 		const tid = setTimeout(() => controller.abort(), timeoutMs);
 		try {
@@ -157,8 +157,46 @@ async function fetchRawFile(owner, repo, ref, filePath, timeoutMs = 10000) {
 			if (res.ok) {
 				return await res.text();
 			}
+			throw new Error("not ok");
 		} catch {
 			clearTimeout(tid);
+			throw new Error("failed");
+		}
+	};
+
+	if (!ref || ref === "HEAD") {
+		if (defaultBranch) {
+			try {
+				return await fetchOne(
+					`https://raw.githubusercontent.com/${owner}/${repo}/${defaultBranch}/${filePath}`,
+				);
+			} catch {
+				return null;
+			}
+		}
+		try {
+			return await Promise.any([
+				fetchOne(
+					`https://raw.githubusercontent.com/${owner}/${repo}/main/${filePath}`,
+				),
+				fetchOne(
+					`https://raw.githubusercontent.com/${owner}/${repo}/master/${filePath}`,
+				),
+			]);
+		} catch {
+			return null;
+		}
+	}
+
+	const urls = [
+		`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${filePath}`,
+		`https://raw.githubusercontent.com/${owner}/${repo}/master/${filePath}`,
+	];
+	for (const url of urls) {
+		try {
+			return await fetchOne(url);
+		} catch {
+			// continue
 		}
 	}
 	return null;
@@ -179,22 +217,12 @@ export async function fetchGitHubContent(url) {
 
 	try {
 		if (type === "root" || (type === "tree" && !path)) {
-			// Fetch repo info + README + top-level tree in parallel
-			const [repoInfo, readme, tree] = await Promise.allSettled([
-				apiGet(`/repos/${owner}/${repo}`),
+			const info = await apiGet(`/repos/${owner}/${repo}`);
+			const [readme, tree] = await Promise.allSettled([
 				fetchReadme(owner, repo),
-				fetchTree(owner, repo, ref || "HEAD"),
+				fetchTree(owner, repo, ref || "HEAD", "", info.default_branch),
 			]);
 
-			// If repo info failed (e.g. 404 — repo doesn't exist), bail out
-			if (repoInfo.status === "rejected") {
-				return {
-					ok: false,
-					error: repoInfo.reason?.message || "Repo not found",
-				};
-			}
-
-			const info = repoInfo.value;
 			const readmeText = readme.status === "fulfilled" ? readme.value : "";
 			const treeItems = tree.status === "fulfilled" ? tree.value : [];
 
@@ -220,8 +248,23 @@ export async function fetchGitHubContent(url) {
 		}
 
 		if (type === "blob" && path) {
-			// Fetch specific file via raw URL
-			const content = await fetchRawFile(owner, repo, ref, path);
+			let defaultBranch;
+			if (!ref || ref === "HEAD") {
+				try {
+					const repoInfo = await apiGet(`/repos/${owner}/${repo}`);
+					defaultBranch = repoInfo.default_branch;
+				} catch {
+					defaultBranch = undefined;
+				}
+			}
+			const content = await fetchRawFile(
+				owner,
+				repo,
+				ref,
+				path,
+				10000,
+				defaultBranch,
+			);
 			if (content === null) {
 				return { ok: false, error: `File not found: ${path}` };
 			}
@@ -233,8 +276,22 @@ export async function fetchGitHubContent(url) {
 		}
 
 		if (type === "tree" && path) {
-			// Directory listing via API tree
-			const treeItems = await fetchTree(owner, repo, ref || "HEAD", path);
+			let defaultBranch;
+			if (!ref || ref === "HEAD") {
+				try {
+					const repoInfo = await apiGet(`/repos/${owner}/${repo}`);
+					defaultBranch = repoInfo.default_branch;
+				} catch {
+					defaultBranch = undefined;
+				}
+			}
+			const treeItems = await fetchTree(
+				owner,
+				repo,
+				ref || "HEAD",
+				path,
+				defaultBranch,
+			);
 			const listing = treeItems
 				.map((t) => `  ${t.type === "dir" ? "📁" : "📄"} ${t.path}`)
 				.join("\n");

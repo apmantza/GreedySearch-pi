@@ -1281,7 +1281,10 @@ if (["", "all", "flags", "quick", "smoke"].includes(mode)) {
 	}
 
 	subsection("Testing engine aliases...");
-	for (const alias of ["p", "g", "b"]) {
+	// "b" (Bing Copilot) excluded: routinely gated by Turnstile verification
+	// on fresh sessions, which makes the smoke run flaky for environmental
+	// reasons rather than code ones.
+	for (const alias of ["p", "g"]) {
 		const aliasFile = join(resultsDir, `alias_${alias}.json`);
 		const { out: _aliasOut } = await runNode(
 			[

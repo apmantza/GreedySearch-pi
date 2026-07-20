@@ -64,6 +64,7 @@ import {
 } from "../src/search/synthesis-runner.mjs";
 import { normalizeQuery } from "../src/search/query.mjs";
 import { runResearchMode } from "../src/search/research.mjs";
+import { minimizeViaCDP } from "../src/search/minimize.mjs";
 
 const CONFIG_DIR = join(homedir(), ".config", "greedysearch");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -910,82 +911,7 @@ function pickTopSource(out) {
 async function minimizeChrome() {
 	// In headless mode (default), there's no window to minimize
 	if (process.env.GREEDY_SEARCH_HEADLESS === "1") return;
-
-	try {
-		const http = await import("node:http");
-		const version = await new Promise((resolve, reject) => {
-			http
-				.get(`http://localhost:9222/json/version`, (res) => {
-					let body = "";
-					res.on("data", (d) => (body += d));
-					res.on("end", () => resolve(JSON.parse(body)));
-				})
-				.on("error", reject);
-		});
-
-		const wsUrl = version.webSocketDebuggerUrl;
-		const WebSocket = globalThis.WebSocket;
-		if (!WebSocket) return;
-
-		const ws = new WebSocket(wsUrl);
-		let requestId = 0;
-		const pending = new Map();
-
-		ws.onopen = () => {
-			const id = ++requestId;
-			pending.set(id, {
-				resolve: (result) => {
-					const targets = result.targetInfos || [];
-					const pageTarget = targets.find((t) => t.type === "page");
-					if (!pageTarget) {
-						ws.close();
-						return;
-					}
-
-					const winId = ++requestId;
-					pending.set(winId, {
-						resolve: (winResult) => {
-							const windowId = winResult.windowId;
-							const minId = ++requestId;
-							pending.set(minId, { resolve: () => {}, reject: () => {} });
-							ws.send(
-								JSON.stringify({
-									id: minId,
-									method: "Browser.setWindowBounds",
-									params: { windowId, bounds: { windowState: "minimized" } },
-								}),
-							);
-							setTimeout(() => ws.close(), 500);
-						},
-						reject: () => ws.close(),
-					});
-					ws.send(
-						JSON.stringify({
-							id: winId,
-							method: "Browser.getWindowForTarget",
-							params: { targetId: pageTarget.targetId },
-						}),
-					);
-				},
-				reject: () => ws.close(),
-			});
-			ws.send(JSON.stringify({ id, method: "Target.getTargets", params: {} }));
-		};
-
-		ws.onmessage = (event) => {
-			const msg = JSON.parse(event.data);
-			if (msg.id && pending.has(msg.id)) {
-				const { resolve, reject } = pending.get(msg.id);
-				pending.delete(msg.id);
-				if (msg.error) reject?.(msg.error);
-				else resolve?.(msg.result);
-			}
-		};
-
-		setTimeout(() => ws.close(), 3000);
-	} catch {
-		// Best-effort
-	}
+	await minimizeViaCDP(9222);
 }
 
 main().finally(async () => {

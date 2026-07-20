@@ -27,9 +27,9 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import http from "node:http";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
+import { httpGet, minimizeViaCDP } from "../src/search/minimize.mjs";
 
 const PORT = 9222;
 const PROFILE_DIR = join(tmpdir(), "greedysearch-chrome-profile");
@@ -139,94 +139,6 @@ function isModeFileHeadless() {
 }
 
 // ---------------------------------------------------------------------------
-// CDP Window Minimization
-// ---------------------------------------------------------------------------
-
-async function minimizeViaCDP() {
-	if (isHeadless()) return;
-
-	try {
-		// Get browser WebSocket URL
-		const version = await new Promise((resolve, reject) => {
-			http
-				.get(`http://localhost:${PORT}/json/version`, (res) => {
-					let body = "";
-					res.on("data", (d) => (body += d));
-					res.on("end", () => resolve(JSON.parse(body)));
-				})
-				.on("error", reject);
-		});
-
-		const wsPath = new URL(version.webSocketDebuggerUrl).pathname;
-
-		const WebSocket = globalThis.WebSocket;
-		if (!WebSocket) return;
-
-		const ws = new WebSocket(`ws://localhost:${PORT}${wsPath}`);
-		let requestId = 0;
-		const pending = new Map();
-
-		ws.onopen = () => {
-			// Step 1: Get targets
-			const id = ++requestId;
-			pending.set(id, {
-				resolve: (result) => {
-					const targets = result.targetInfos || [];
-					const pageTarget = targets.find((t) => t.type === "page");
-					if (!pageTarget) {
-						ws.close();
-						return;
-					}
-
-					// Step 2: Get windowId for target
-					const winId = ++requestId;
-					pending.set(winId, {
-						resolve: (winResult) => {
-							const windowId = winResult.windowId;
-							// Step 3: Minimize window
-							const minId = ++requestId;
-							pending.set(minId, { resolve: () => {}, reject: () => {} });
-							ws.send(
-								JSON.stringify({
-									id: minId,
-									method: "Browser.setWindowBounds",
-									params: { windowId, bounds: { windowState: "minimized" } },
-								}),
-							);
-							setTimeout(() => ws.close(), 500);
-						},
-						reject: () => ws.close(),
-					});
-					ws.send(
-						JSON.stringify({
-							id: winId,
-							method: "Browser.getWindowForTarget",
-							params: { targetId: pageTarget.targetId },
-						}),
-					);
-				},
-				reject: () => ws.close(),
-			});
-			ws.send(JSON.stringify({ id, method: "Target.getTargets", params: {} }));
-		};
-
-		ws.onmessage = (event) => {
-			const msg = JSON.parse(event.data);
-			if (msg.id && pending.has(msg.id)) {
-				const { resolve, reject } = pending.get(msg.id);
-				pending.delete(msg.id);
-				if (msg.error) reject?.(msg.error);
-				else resolve?.(msg.result);
-			}
-		};
-
-		setTimeout(() => ws.close(), 5000);
-	} catch {
-		// Best-effort
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Chrome process management
 // ---------------------------------------------------------------------------
 
@@ -297,21 +209,6 @@ function cleanupGhostChrome() {
 	try {
 		unlinkSync(MODE_FILE);
 	} catch {}
-}
-
-function httpGet(url, timeoutMs = 1000) {
-	return new Promise((resolve) => {
-		const req = http.get(url, (res) => {
-			let body = "";
-			res.on("data", (d) => (body += d));
-			res.on("end", () => resolve({ ok: res.statusCode === 200, body }));
-		});
-		req.on("error", () => resolve({ ok: false }));
-		req.setTimeout(timeoutMs, () => {
-			req.destroy();
-			resolve({ ok: false });
-		});
-	});
 }
 
 async function writePortFile(timeoutMs = 15000) {
@@ -443,7 +340,7 @@ async function main() {
 		console.log("Ready (headless).");
 	} else {
 		// Minimize window via CDP
-		await minimizeViaCDP();
+		await minimizeViaCDP(PORT);
 		console.log("Ready.");
 	}
 }

@@ -6,6 +6,10 @@
 
 ### Changed
 
+- **checkCitationUrls uses a worker pool** (`src/search/research.mjs`) — Citation URL reachability checks run through a shared-index worker pool (concurrency 4) instead of slice-by-slice `Promise.allSettled` batches, so one slow URL no longer stalls the whole batch behind it. (#43)
+- **GitHub fetching uses the repo's default branch** (`src/github.mjs`) — `fetchTree`/`fetchRawFile` accept the caller's `default_branch` and hit the right ref directly; when unknown they race `main`/`master` in parallel instead of sequential fallback. Fixes blob fetches for repos whose default branch is neither, removes the duplicated repo-info request inside `fetchTree`, and only resolves the default branch when the URL ref is `HEAD` (explicit-ref URLs skip the extra API call). (#44)
+- **Single shared window minimizer** (`src/search/minimize.mjs`) — The three drifted raw-WebSocket minimizer copies in `bin/search.mjs`, `bin/launch.mjs`, and `bin/launch-visible.mjs` are replaced by one `minimizeViaCDP(port)` that always closes its socket and caps at 5s (net −132 lines). (#45)
+
 - **Evidence and learning extraction merged into one Gemini prompt per research round** (`src/search/research.mjs`) — The iterative round flow's two sequential Gemini browser prompts (goal-based evidence extraction; research-state learning extraction) are now a single combined prompt returning both structured payloads, saving one ~20-60s browser round-trip per round. Same 120s budget, same downstream structures, and each side degrades on failure exactly as before; simple-research's evidence-only call is unchanged. (#38)
 
 - **Research children skip OS-level Chrome probing** (`src/search/chrome.mjs`, `src/search/browser-lifecycle.mjs`) — When `GREEDY_SEARCH_RESEARCH_CHILD=1` is set and the Chrome port probe succeeds, `ensureChrome` short-circuits and `cleanupStaleSessions` no-ops, skipping the netstat + PowerShell process checks (~1-2s each) in every spawned child; the parent owns Chrome lifecycle. Saves 10-30s per research run. (#33)
