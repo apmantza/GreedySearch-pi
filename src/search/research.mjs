@@ -696,78 +696,8 @@ async function executeResearchAction(
 }
 
 async function fetchSingleResearchSource(url, maxChars) {
-	return await fetchSourceContentDirect(url, maxChars);
-}
-
-async function fetchSourceContentDirect(url, maxChars = 8000) {
-	const start = Date.now();
-
-	// GitHub URL — use API for rich content
-	try {
-		const { parseGitHubUrl, fetchGitHubContent } = await import(
-			"../github.mjs"
-		);
-		const parsed = parseGitHubUrl(url);
-		if (
-			parsed &&
-			(parsed.type === "root" ||
-				parsed.type === "tree" ||
-				(parsed.type === "blob" && !parsed.path?.includes(".")))
-		) {
-			const ghResult = await fetchGitHubContent(url);
-			if (ghResult.ok) {
-				const { trimContentHeadTail } = await import("../utils/content.mjs");
-				const content = trimContentHeadTail(ghResult.content, maxChars);
-				return {
-					url,
-					finalUrl: url,
-					status: 200,
-					title: ghResult.title,
-					snippet: content.slice(0, 320),
-					content,
-					contentChars: content.length,
-					source: "github-api",
-					duration: Date.now() - start,
-				};
-			}
-		}
-	} catch {
-		// Not a GitHub URL or API failed — fall through to HTTP
-	}
-
-	// Standard HTTP fetch
-	try {
-		const { fetchSourceHttp } = await import("../fetcher.mjs");
-		const { trimContentHeadTail } = await import("../utils/content.mjs");
-		const httpResult = await fetchSourceHttp(url, { timeoutMs: 10000 });
-		if (httpResult.ok) {
-			const content = trimContentHeadTail(httpResult.markdown, maxChars);
-			return {
-				url,
-				finalUrl: httpResult.finalUrl,
-				status: httpResult.status,
-				title: httpResult.title,
-				snippet: httpResult.excerpt,
-				content,
-				contentChars: content.length,
-				source: "http",
-				duration: Date.now() - start,
-			};
-		}
-	} catch {
-		// HTTP failed — return error
-	}
-
-	return {
-		url,
-		title: "",
-		content: "",
-		contentChars: 0,
-		snippet: "",
-		error: "HTTP fetch failed",
-		source: "error",
-		duration: Date.now() - start,
-	};
+	const { fetchSourceContent } = await import("./fetch-source.mjs");
+	return await fetchSourceContent(url, maxChars);
 }
 
 function getDomainFromUrl(rawUrl) {
@@ -2422,27 +2352,46 @@ export async function runResearchMode({
 			);
 		}
 
+		const actionResults = new Array(roundActions.length);
+		const actionWorkerCount = Math.min(3, roundActions.length);
+		let nextActionIndex = 0;
+
+		async function actionWorker() {
+			while (true) {
+				const i = nextActionIndex++;
+				if (i >= roundActions.length) return;
+
+				const action = roundActions[i];
+				process.stderr.write(
+					`PROGRESS:research:round-${roundNumber}:action-${i + 1}/${roundActions.length}\n`,
+				);
+				process.stderr.write(
+					`[greedysearch] Action ${i + 1}/${roundActions.length} [${action.type}]: ${(action.query || action.url).slice(0, 80)}\n`,
+				);
+				progressTracker.startAction(
+					action.type,
+					(action.query || action.url || "").slice(0, 60),
+				);
+				const run = await executeResearchAction(action, {
+					locale,
+					short,
+					usedQueries,
+					usedUrls,
+					maxChars: 8000,
+				});
+				progressTracker.endAction();
+				actionResults[i] = run;
+			}
+		}
+
+		await Promise.all(
+			Array.from({ length: actionWorkerCount }, () => actionWorker()),
+		);
+
 		const actionRuns = [];
 		for (let i = 0; i < roundActions.length; i++) {
 			const action = roundActions[i];
-			process.stderr.write(
-				`PROGRESS:research:round-${roundNumber}:action-${i + 1}/${roundActions.length}\n`,
-			);
-			process.stderr.write(
-				`[greedysearch] Action ${i + 1}/${roundActions.length} [${action.type}]: ${(action.query || action.url).slice(0, 80)}\n`,
-			);
-			progressTracker.startAction(
-				action.type,
-				(action.query || action.url || "").slice(0, 60),
-			);
-			const run = await executeResearchAction(action, {
-				locale,
-				short,
-				usedQueries,
-				usedUrls,
-				maxChars: 8000,
-			});
-			progressTracker.endAction();
+			const run = actionResults[i];
 			actionRuns.push(run);
 			totalActionsRun++;
 			if (action.type === "search") totalSearches++;

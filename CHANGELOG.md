@@ -6,7 +6,16 @@
 
 ### Changed
 
+- **Simple-research search angles run in parallel** (`src/search/simple-research.mjs`) — The fast path's 3 search angles now run concurrently via `Promise.allSettled` instead of serially, roughly cutting the search phase to the duration of the slowest angle. (#26)
+- **Research round actions use a worker pool** (`src/search/research.mjs`) — Round actions (searches/fetches, breadth up to 5) execute through a concurrency-3 worker pool instead of one-by-one, with results collected in deterministic order. (#26)
+- **Cheap challenge probe runs before the DOM pierce** (`extractors/consent.mjs`) — `detectVerificationChallenge` now runs the in-page `VERIFY_DETECT_JS` eval first and only falls back to the expensive full-page `DOM.getDocument({pierce:true})` walk when the probe reports `cf-closed-shadow-dom`, eliminating a multi-MB DOM serialization on every extractor startup. (#27)
+- **Logically fast citations path first** (`extractors/logically.mjs`) — `extractFullCitationSources` (single click) now runs first; the slow inline popover walk (10-30s) only runs as a fallback when the full result is empty. (#28)
+
 ### Fixed
+
+- **Reddit trailing-slash URLs no longer 404** (`src/reddit.mjs`) — `replaceAll(/\/?$/g, ".json")` matched twice on trailing-slash URLs, producing `.json.json`; trailing slashes are now stripped before appending `.json` once. (#29)
+- **Consensus no longer returns stale partial sources** (`extractors/consensus.mjs`) — The `/api/papers/details` poll waits for a response captured after the CSV-export click instead of taking the last Load-More partial, falling back to the largest capture on timeout; the interceptor now keeps only `{largest, latest}` instead of every partial response. (#30)
+- **`fetchUrl` research actions handle PDFs, Reddit, and bot-blocked pages** (`src/search/research.mjs`) — Removed `fetchSourceContentDirect`, a degraded HTTP/GitHub-only duplicate; planned fetch actions now use the full `fetchSourceContent` pipeline (PDF extraction, Reddit JSON API, TLS and browser fallbacks). (#31)
 
 ## [2.1.5] — 2026-07-04
 
