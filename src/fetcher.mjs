@@ -1,21 +1,31 @@
 // src/fetcher.mjs — HTTP source fetching with Readability extraction
 
-import { Readability } from "@mozilla/readability";
-import { JSDOM } from "jsdom";
-import TurndownService from "turndown";
+let _deps = null;
+async function loadDeps() {
+	if (_deps) return _deps;
+	const [{ Readability }, { JSDOM }, { default: TurndownService }] =
+		await Promise.all([
+			import("@mozilla/readability"),
+			import("jsdom"),
+			import("turndown"),
+		]);
 
-const turndown = new TurndownService({
-	headingStyle: "atx",
-	bulletListMarker: "-",
-	codeBlockStyle: "fenced",
-});
+	const turndown = new TurndownService({
+		headingStyle: "atx",
+		bulletListMarker: "-",
+		codeBlockStyle: "fenced",
+	});
 
-// Strip data URLs from markdown
-turndown.addRule("removeDataUrls", {
-	filter: (node) =>
-		node.tagName === "IMG" && node.getAttribute("src")?.startsWith("data:"),
-	replacement: () => "",
-});
+	// Strip data URLs from markdown
+	turndown.addRule("removeDataUrls", {
+		filter: (node) =>
+			node.tagName === "IMG" && node.getAttribute("src")?.startsWith("data:"),
+		replacement: () => "",
+	});
+
+	_deps = { Readability, JSDOM, turndown };
+	return _deps;
+}
 
 const DEFAULT_USER_AGENT =
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -271,7 +281,7 @@ export async function fetchSourceHttp(url, options = {}) {
 		}
 
 		// Extract content with Readability
-		const extracted = extractContent(html, finalUrl);
+		const extracted = await extractContent(html, finalUrl);
 
 		// Quality check: if content looks suspicious or too short, recommend browser
 		const quality = checkContentQuality(extracted);
@@ -511,64 +521,69 @@ function extractMetaDate(document) {
 /**
  * Extract readable content using Mozilla Readability + Turndown
  */
-export function extractContent(html, url) {
+export async function extractContent(html, url) {
+	const { Readability, JSDOM, turndown } = await loadDeps();
 	const dom = new JSDOM(html, { url });
-	const document = dom.window.document;
+	try {
+		const document = dom.window.document;
 
-	// Try Readability first
-	const reader = new Readability(document);
-	const article = reader.parse();
+		// Try Readability first
+		const reader = new Readability(document);
+		const article = reader.parse();
 
-	if (article && article.content) {
-		const markdown = turndown.turndown(article.content);
-		const cleanMarkdown = markdown.replaceAll(/\n{3,}/g, "\n\n").trim();
+		if (article && article.content) {
+			const markdown = turndown.turndown(article.content);
+			const cleanMarkdown = markdown.replaceAll(/\n{3,}/g, "\n\n").trim();
 
-		const publishedTime =
-			article.publishedTime || extractMetaDate(document) || "";
+			const publishedTime =
+				article.publishedTime || extractMetaDate(document) || "";
 
+			return {
+				title: article.title || document.title || url,
+				byline: article.byline || "",
+				siteName: article.siteName || "",
+				lang: article.lang || "",
+				publishedTime,
+				markdown: cleanMarkdown,
+				excerpt: cleanMarkdown.slice(0, 300).replaceAll(/\n/g, " "),
+			};
+		}
+
+		// Fallback: extract body text
+		const body = document.body;
+		if (body) {
+			// Remove script/style/nav/footer
+			const clone = body.cloneNode(true);
+			clone
+				.querySelectorAll("script, style, nav, footer, header, aside")
+				.forEach((el) => el.remove());
+			const text = clone.textContent || "";
+			const cleanText = text.replaceAll(/\s+/g, " ").trim();
+
+			return {
+				title: document.title || url,
+				byline: "",
+				siteName: "",
+				lang: "",
+				publishedTime: extractMetaDate(document),
+				markdown: cleanText,
+				excerpt: cleanText.slice(0, 300),
+			};
+		}
+
+		// Last resort
 		return {
-			title: article.title || document.title || url,
-			byline: article.byline || "",
-			siteName: article.siteName || "",
-			lang: article.lang || "",
-			publishedTime,
-			markdown: cleanMarkdown,
-			excerpt: cleanMarkdown.slice(0, 300).replaceAll(/\n/g, " "),
-		};
-	}
-
-	// Fallback: extract body text
-	const body = document.body;
-	if (body) {
-		// Remove script/style/nav/footer
-		const clone = body.cloneNode(true);
-		clone
-			.querySelectorAll("script, style, nav, footer, header, aside")
-			.forEach((el) => el.remove());
-		const text = clone.textContent || "";
-		const cleanText = text.replaceAll(/\s+/g, " ").trim();
-
-		return {
-			title: document.title || url,
+			title: url,
 			byline: "",
 			siteName: "",
 			lang: "",
-			publishedTime: extractMetaDate(document),
-			markdown: cleanText,
-			excerpt: cleanText.slice(0, 300),
+			publishedTime: "",
+			markdown: "",
+			excerpt: "",
 		};
+	} finally {
+		dom.window.close();
 	}
-
-	// Last resort
-	return {
-		title: url,
-		byline: "",
-		siteName: "",
-		lang: "",
-		publishedTime: "",
-		markdown: "",
-		excerpt: "",
-	};
 }
 
 /**

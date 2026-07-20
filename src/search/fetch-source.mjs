@@ -115,7 +115,7 @@ async function fetchSourceViaChrome(tab, url, maxChars = 8000) {
 			};
 		}
 
-		const extracted = extractContent(body, url);
+		const extracted = await extractContent(body, url);
 		const quality = checkContentQuality(extracted);
 		if (!quality.ok) {
 			return {
@@ -390,6 +390,21 @@ export async function fetchSourceContent(url, maxChars = 8000) {
 	return await fetchSourceContentBrowser(url, maxChars);
 }
 
+async function waitForPageReady(tab, timeoutMs = 4000, intervalMs = 200) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			const ready = await cdp([
+				"eval",
+				tab,
+				`document.readyState === "complete" && !!document.body && document.body.innerText.length > 500`,
+			]);
+			if (ready.trim() === "true") return;
+		} catch {}
+		await new Promise((r) => setTimeout(r, intervalMs));
+	}
+}
+
 async function fetchSourceContentBrowser(url, maxChars = 8000) {
 	const start = Date.now();
 	let tab;
@@ -411,7 +426,7 @@ async function fetchSourceContentBrowser(url, maxChars = 8000) {
 
 	try {
 		await cdp(["nav", tab, url], 30000);
-		await new Promise((r) => setTimeout(r, 800));
+		await waitForPageReady(tab);
 
 		const content = await cdp([
 			"eval",
@@ -542,10 +557,9 @@ export async function fetchMultipleSources(
 
 export async function fetchTopSource(url) {
 	const tab = await openNewTab();
-	await cdp(["list"]); // refresh cache
 	try {
 		await cdp(["nav", tab, url], 30000);
-		await new Promise((r) => setTimeout(r, 800));
+		await waitForPageReady(tab);
 		const content = await cdp([
 			"eval",
 			tab,

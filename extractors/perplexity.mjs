@@ -14,6 +14,7 @@
 import {
 	buildEnvelope,
 	cdp,
+	clickCopyAndAwaitClipboard,
 	formatAnswer,
 	getOrOpenTab,
 	handleError,
@@ -206,20 +207,13 @@ async function extractAnswerFromDom(tab, env) {
 async function extractAnswer(tab, env) {
 	const copyBtnExpr = findCopyButtonJsExpression();
 
-	await cdp(["eval", tab, `${copyBtnExpr}?.click()`]);
-	await new Promise((r) => setTimeout(r, 400));
-
-	let answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
+	let answer = await clickCopyAndAwaitClipboard(
+		tab,
+		`(${copyBtnExpr})?.click()`,
+		GLOBAL_VAR,
+		{ timeoutMs: 2400, retryClick: 400 },
+	);
 	env.clipboardEmpty = !answer;
-
-	// Retry once if clipboard is empty (Perplexity might be slow to write)
-	if (!answer) {
-		console.error("[perplexity] Clipboard empty, retrying in 2s...");
-		await cdp(["eval", tab, `${copyBtnExpr}?.click()`]);
-		await new Promise((r) => setTimeout(r, 2000));
-		answer = await cdp(["eval", tab, `window.${GLOBAL_VAR} || ''`]);
-		env.clipboardEmpty = !answer;
-	}
 
 	// Reject suspicious answers: the user's query echoed back, or a copy
 	// button click that landed on the question (not the answer) copy

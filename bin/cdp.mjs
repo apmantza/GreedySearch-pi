@@ -539,12 +539,23 @@ async function navStr(cdp, sid, url) {
 		loadEvent.cancel();
 		throw new Error(result.errorText);
 	}
+	_mainCtx.delete(sid);
+
+	let loadFired = false;
 	if (result.loaderId) {
-		await loadEvent.promise;
+		try {
+			await loadEvent.promise;
+			loadFired = true;
+		} catch {}
 	} else {
 		loadEvent.cancel();
 	}
-	await waitForDocumentReady(cdp, sid, 5000);
+
+	// loadEventFired already confirms the document is ready; only fall back
+	// to polling readyState when that event didn't resolve.
+	if (!loadFired) {
+		await waitForDocumentReady(cdp, sid, 5000);
+	}
 	return `Navigated to ${url}`;
 }
 
@@ -872,11 +883,16 @@ async function getOrStartTabDaemon(targetId) {
 	);
 	child.unref();
 
-	for (let i = 0; i < DAEMON_CONNECT_RETRIES; i++) {
-		await sleep(DAEMON_CONNECT_DELAY);
+	const backoffSchedule = [50, 100, 200];
+	const deadline = Date.now() + DAEMON_CONNECT_RETRIES * DAEMON_CONNECT_DELAY;
+	let attempt = 0;
+	while (Date.now() < deadline) {
 		try {
 			return await connectToSocket(sp);
 		} catch {}
+		const delay = backoffSchedule[attempt] ?? DAEMON_CONNECT_DELAY;
+		attempt++;
+		await sleep(delay);
 	}
 	throw new Error("Daemon failed to start — did you click Allow in Chrome?");
 }
@@ -899,7 +915,11 @@ function sendCommand(conn, req) {
 			if (idx === -1) return;
 			settled = true;
 			cleanup();
-			resolve(JSON.parse(buf.slice(0, idx)));
+			try {
+				resolve(JSON.parse(buf.slice(0, idx)));
+			} catch (error) {
+				reject(new Error(`Invalid JSON response from daemon: ${error.message}`));
+			}
 			conn.end();
 		};
 
@@ -1049,8 +1069,7 @@ async function main() {
 		}
 		writeFileSync(PAGES_CACHE, JSON.stringify(pages));
 		console.log(formatPageList(pages));
-		setTimeout(() => process.exit(0), 100);
-		return;
+		process.exit(0);
 	}
 
 	if (cmd === "stop") {

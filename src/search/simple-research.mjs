@@ -8,6 +8,7 @@ import { ALL_ENGINES, RESEARCH_ENGINES } from "./constants.mjs";
 import {
 	buildSourceRegistry,
 	mergeFetchDataIntoSources,
+	normalizeUrl,
 	trimText,
 } from "./sources.mjs";
 import {
@@ -158,11 +159,15 @@ async function runFastAllSearch(query, { locale = null, short = true } = {}) {
 function annotateFetchedSourcesWithIds(fetchedSources, sources) {
 	const byUrl = new Map();
 	for (const source of sources || []) {
-		const key = source?.canonicalUrl || source?.finalUrl || source?.url || "";
+		const key = normalizeUrl(
+			source?.canonicalUrl || source?.finalUrl || source?.url,
+		);
 		if (key && source?.id) byUrl.set(key, source.id);
 	}
 	return (fetchedSources || []).map((source, index) => {
-		const key = source?.finalUrl || source?.canonicalUrl || source?.url || "";
+		const key = normalizeUrl(
+			source?.finalUrl || source?.canonicalUrl || source?.url,
+		);
 		return {
 			...source,
 			id: source?.id || byUrl.get(key) || `F${index + 1}`,
