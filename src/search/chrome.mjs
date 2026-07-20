@@ -21,10 +21,8 @@ import {
 import http from "node:http";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	cdp as _cdp,
-	injectHeadlessStealth,
-} from "../../extractors/common.mjs";
+import { injectHeadlessStealth } from "../../extractors/common.mjs";
+import { cdpCommand } from "./cdp-client.mjs";
 import { resolveSystemCmd } from "../utils/system-cmds.mjs";
 import {
 	ACTIVE_PORT_FILE,
@@ -342,8 +340,20 @@ export async function checkAndKillIdle() {
 	return false;
 }
 
-/** Re-export cdp() from the canonical location in extractors/common.mjs */
-export const cdp = _cdp;
+/** Execute CDP commands in-process through the shared daemon client. */
+export async function cdp(args, timeoutMs = 30000) {
+	return (await cdpCommand(args, timeoutMs)).trim();
+}
+
+function parseCreatedTarget(raw) {
+	try {
+		const parsed = JSON.parse(raw);
+		if (!parsed?.targetId) throw new Error("missing targetId");
+		return parsed.targetId;
+	} catch (error) {
+		throw new Error(`Target.createTarget returned invalid JSON: ${error.message}`);
+	}
+}
 
 export async function getAnyTab() {
 	const list = await cdp(["list"]);
@@ -354,7 +364,12 @@ export async function getAnyTab() {
 
 export async function openNewTab(url = "about:blank") {
 	const anchor = await getAnyTab();
-	const hostname = new URL(url).hostname;
+	let hostname;
+	try {
+		hostname = new URL(url).hostname;
+	} catch (error) {
+		throw new Error(`Invalid tab URL: ${error.message}`);
+	}
 	const needsStealth =
 		hostname === "copilot.microsoft.com" ||
 		hostname === "www.perplexity.ai" ||
@@ -375,7 +390,7 @@ export async function openNewTab(url = "about:blank") {
 			"Target.createTarget",
 			JSON.stringify({ url: "about:blank" }),
 		]);
-		const { targetId } = JSON.parse(raw);
+		const targetId = parseCreatedTarget(raw);
 		const tid = targetId.slice(0, 8);
 		await cdp(["list"]).catch(() => null);
 
@@ -398,7 +413,7 @@ export async function openNewTab(url = "about:blank") {
 		"Target.createTarget",
 		JSON.stringify({ url }),
 	]);
-	const { targetId } = JSON.parse(raw);
+	const targetId = parseCreatedTarget(raw);
 	await cdp(["list"]).catch(() => null);
 	return targetId;
 }
