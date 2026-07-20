@@ -1230,12 +1230,12 @@ trailing note`);
 		["http://0x7f000001/", true, "hex-IP loopback obfuscation"],
 		["http://0177.0.0.1/", true, "octal-IP loopback obfuscation"],
 		[
-			"http://[::ffff:127.0.0.1]/",
+			"http://[::ffff:127.0.0.1]/", // NOSONAR — test fixture asserting this URL is BLOCKED
 			true,
 			"IPv4-mapped IPv6 loopback (dotted form)",
 		],
 		[
-			"http://[::ffff:7f00:1]/",
+			"http://[::ffff:7f00:1]/", // NOSONAR — test fixture asserting this URL is BLOCKED
 			true,
 			"IPv4-mapped IPv6 loopback (hex-group form)",
 		],
