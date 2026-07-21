@@ -23,6 +23,7 @@ import {
 	prepareArgs,
 	TIMING,
 	validateQuery,
+	verifyInputText,
 	waitForSelector,
 } from "./common.mjs";
 import { readFileSync } from "node:fs";
@@ -106,7 +107,12 @@ async function typeIntoLogically(tab, text) {
 		})()`,
 	]);
 	if (!pointRaw) throw new Error("Logically visible input not found");
-	const point = JSON.parse(pointRaw);
+	let point;
+	try {
+		point = JSON.parse(pointRaw);
+	} catch {
+		throw new Error("Logically input coordinates were invalid");
+	}
 	// Use both selector click and coordinate click. The ProseMirror editor is
 	// sometimes nested in animated MUI layout; selector click can land on a stale
 	// box, while coordinate click reliably focuses the visible editor after the
@@ -115,40 +121,81 @@ async function typeIntoLogically(tab, text) {
 	await new Promise((r) => setTimeout(r, jitter(120)));
 	await cdp(["clickxy", tab, String(point.x), String(point.y)]);
 	await new Promise((r) => setTimeout(r, jitter(TIMING.postClick)));
-	// Use tiptap's commands API to insert text. CDP's Input.insertText
-	// targets input/textarea elements and doesn't dispatch the events
-	// that ProseMirror/tiptap's editor view listens for. The tiptap
-	// editor instance is accessible via ed.editor.commands.
-	const typeResult = await cdp(
-		[
+
+	const type = async () => {
+		// Use tiptap's commands API to insert text. CDP's Input.insertText
+		// targets input/textarea elements and doesn't dispatch the events
+		// that ProseMirror/tiptap's editor view listens for. The tiptap
+		// editor instance is accessible via ed.editor.commands.
+		const typeResult = await cdp(
+			[
+				"eval",
+				tab,
+				`(() => {
+					const ed = document.querySelector('${SELECTORS.input}');
+					if (!ed) return 'no-input';
+					ed.focus();
+					if (!ed.editor || !ed.editor.commands) {
+						// Fallback to execCommand for non-tiptap editors
+						const ok = document.execCommand('insertText', false, ${JSON.stringify(text)});
+						return ok ? 'ok' : 'exec-failed';
+					}
+					const ok = ed.editor.commands.insertContent(${JSON.stringify(text)});
+					return ok ? 'ok' : 'tiptap-failed';
+				})()`,
+			],
+			5000,
+		);
+		if (typeResult !== "ok") {
+			throw new Error(`Logically type failed: ${typeResult}`);
+		}
+		await new Promise((r) => setTimeout(r, jitter(TIMING.postType)));
+	};
+	const readInput = async () => {
+		const raw = await cdp([
+			"eval",
+			tab,
+			`JSON.stringify(Array.from(document.querySelectorAll('${SELECTORS.input}')).map((el) => el.innerText || el.textContent || ''))`,
+		]);
+		try {
+			return JSON.parse(raw);
+		} catch {
+			return [];
+		}
+	};
+	const verify = async () => {
+		const contents = await readInput();
+		return contents.some((content) => verifyInputText(content, text));
+	};
+	const clear = async () => {
+		await cdp([
 			"eval",
 			tab,
 			`(() => {
 				const ed = document.querySelector('${SELECTORS.input}');
-				if (!ed) return 'no-input';
+				if (!ed) return false;
 				ed.focus();
-				if (!ed.editor || !ed.editor.commands) {
-					// Fallback to execCommand for non-tiptap editors
-					const ok = document.execCommand('insertText', false, ${JSON.stringify(text)});
-					return ok ? 'ok' : 'exec-failed';
+				if (ed.editor?.commands?.clearContent) {
+					ed.editor.commands.clearContent();
+					return true;
 				}
-				const ok = ed.editor.commands.insertContent(${JSON.stringify(text)});
-				return ok ? 'ok' : 'tiptap-failed';
+				const range = document.createRange();
+				range.selectNodeContents(ed);
+				const selection = window.getSelection();
+				selection.removeAllRanges();
+				selection.addRange(range);
+				document.execCommand('delete');
+				return true;
 			})()`,
-		],
-		5000,
-	);
-	if (typeResult !== "ok") {
-		throw new Error(`Logically type failed: ${typeResult}`);
-	}
-	await new Promise((r) => setTimeout(r, jitter(TIMING.postType)));
+		]);
+	};
 
-	const inserted = await cdp([
-		"eval",
-		tab,
-		`Array.from(document.querySelectorAll('${SELECTORS.input}')).some((el) => (el.innerText || '').length >= ${Math.floor(text.length * 0.8)})`,
-	]);
-	if (inserted !== "true") {
+	await type();
+	if (await verify()) return;
+
+	await clear();
+	await type();
+	if (!(await verify())) {
 		throw new Error(
 			"Logically input did not accept text — input verification failed",
 		);
@@ -195,7 +242,11 @@ async function extractAnswer(tab) {
 			answerHtml: clone.innerHTML,
 		});
 	})()`;
-	return JSON.parse(await cdp(["eval", tab, code], 10000));
+	try {
+		return JSON.parse(await cdp(["eval", tab, code], 10000));
+	} catch {
+		return { answer: "", answerHtml: "" };
+	}
 }
 
 async function extractFullCitationSources(tab) {
@@ -345,7 +396,11 @@ async function extractFullCitationSources(tab) {
 		});
 	})()`;
 	const raw = await cdp(["eval", tab, code], 20000);
-	return JSON.parse(raw);
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return { sources: [], summary: { expectedTotal: 0, reason: "invalid-json" } };
+	}
 }
 
 async function extractCitationSources(tab) {
@@ -460,7 +515,11 @@ async function extractCitationSources(tab) {
 		return JSON.stringify(sources);
 	})()`;
 	const raw = await cdp(["eval", tab, code], 45000);
-	return JSON.parse(raw);
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return [];
+	}
 }
 
 const USAGE =

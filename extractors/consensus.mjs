@@ -29,6 +29,7 @@ import {
 	prepareArgs,
 	TIMING,
 	validateQuery,
+	verifyInputText,
 	waitForSelector,
 } from "./common.mjs";
 import { ensureChrome } from "../src/search/chrome.mjs";
@@ -141,18 +142,46 @@ async function typeIntoConsensus(tab, text) {
 	await cdp(["click", tab, SELECTORS.input]);
 	await new Promise((r) => setTimeout(r, jitter(200)));
 
-	// 2. Type using CDP Input.insertText. Pass long queries through stdin so
-	// Windows does not reject the cdp.mjs process spawn with ENAMETOOLONG.
-	await cdpWithInput(["type", tab, "--stdin"], text);
-	await new Promise((r) => setTimeout(r, jitter(300)));
+	const type = async () => {
+		// 2. Type using CDP Input.insertText. Pass long queries through stdin so
+		// Windows does not reject the cdp.mjs process spawn with ENAMETOOLONG.
+		await cdpWithInput(["type", tab, "--stdin"], text);
+		await new Promise((r) => setTimeout(r, jitter(300)));
+	};
+	const readInput = async () => {
+		const raw = await cdp([
+			"eval",
+			tab,
+			`JSON.stringify(document.querySelector('${SELECTORS.input}')?.value || '')`,
+		]);
+		try {
+			return JSON.parse(raw);
+		} catch {
+			return raw;
+		}
+	};
+	const verify = async () => verifyInputText(await readInput(), text);
+	const clear = async () => {
+		await cdp([
+			"eval",
+			tab,
+			`(() => {
+				const el = document.querySelector('${SELECTORS.input}');
+				if (!el) return false;
+				el.focus();
+				el.select();
+				document.execCommand('delete');
+				return true;
+			})()`,
+		]);
+	};
 
-	// 3. Verify the text was actually inserted
-	const inserted = await cdp([
-		"eval",
-		tab,
-		`(document.querySelector('${SELECTORS.input}')?.value || '').length >= ${Math.floor(text.length * 0.8)}`,
-	]);
-	if (inserted !== "true") {
+	await type();
+	if (await verify()) return;
+
+	await clear();
+	await type();
+	if (!(await verify())) {
 		throw new Error(
 			"Consensus input did not accept text — input verification failed",
 		);
@@ -253,7 +282,11 @@ async function fetchPapersDetailsResponse(tab, timeoutMs = 10000, afterTs = 0) {
 		_check();
 	})`;
 	const result = await cdp(["eval", tab, code], timeoutMs + 5000);
-	return JSON.parse(result);
+	try {
+		return JSON.parse(result);
+	} catch {
+		return { ok: false, reason: "invalid-json" };
+	}
 }
 
 // ============================================================================
@@ -490,7 +523,11 @@ async function extractSourcesFromDom(tab) {
 		return JSON.stringify(sources);
 	})()`;
 	const result = await cdp(["eval", tab, code], 10000);
-	return JSON.parse(result);
+	try {
+		return JSON.parse(result);
+	} catch {
+		return [];
+	}
 }
 
 // ============================================================================

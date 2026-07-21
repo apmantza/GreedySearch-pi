@@ -24,6 +24,7 @@ import {
 	prepareArgs,
 	TIMING,
 	validateQuery,
+	verifyInputText,
 	waitForSelector,
 	waitForStreamComplete,
 } from "./common.mjs";
@@ -43,24 +44,54 @@ async function typeIntoGemini(tab, text) {
 	await cdp(["click", tab, S.input]);
 	await new Promise((r) => setTimeout(r, jitter(200)));
 
-	// 2. Type using CDP Input.insertText (more reliable than document.execCommand).
-	// Pass long research prompts through stdin so Windows does not reject the
-	// cdp.mjs process spawn with ENAMETOOLONG.
-	await cdpWithInput(["type", tab, "--stdin"], text);
-	await new Promise((r) => setTimeout(r, jitter(300)));
+	const type = async () => {
+		// 2. Type using CDP Input.insertText (more reliable than document.execCommand).
+		// Pass long research prompts through stdin so Windows does not reject the
+		// cdp.mjs process spawn with ENAMETOOLONG.
+		await cdpWithInput(["type", tab, "--stdin"], text);
+		await new Promise((r) => setTimeout(r, jitter(300)));
+	};
+	const readInput = async () => {
+		const raw = await cdp([
+			"eval",
+			tab,
+			`(() => {
+				const el = document.querySelector('${S.input}');
+				return JSON.stringify(el ? el.innerText || el.textContent || '' : '');
+			})()`,
+		]);
+		try {
+			return JSON.parse(raw);
+		} catch {
+			return raw;
+		}
+	};
+	const verify = async () => verifyInputText(await readInput(), text);
+	const clear = async () => {
+		await cdp([
+			"eval",
+			tab,
+			`(() => {
+				const el = document.querySelector('${S.input}');
+				if (!el) return false;
+				el.focus();
+				const range = document.createRange();
+				range.selectNodeContents(el);
+				const selection = window.getSelection();
+				selection.removeAllRanges();
+				selection.addRange(range);
+				document.execCommand('delete');
+				return true;
+			})()`,
+		]);
+	};
 
-	// 3. Verify the text was actually inserted
-	const inserted = await cdp([
-		"eval",
-		tab,
-		`(function() {
-			var el = document.querySelector('${S.input}');
-			if (!el) return false;
-			var content = el.innerText || el.textContent || '';
-			return content.trim().length >= ${Math.floor(text.length * 0.8)};
-		})()`,
-	]);
-	if (inserted !== "true") {
+	await type();
+	if (await verify()) return;
+
+	await clear();
+	await type();
+	if (!(await verify())) {
 		throw new Error(
 			"Gemini input field did not accept text — input verification failed",
 		);

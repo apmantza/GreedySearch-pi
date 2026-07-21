@@ -105,6 +105,21 @@ export function cdpWithInput(args, input = null, timeoutMs = 30000) {
 	});
 }
 
+export function verifyInputText(actual, expected) {
+	const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+	const actualNormalized = normalize(actual);
+	const expectedNormalized = normalize(expected);
+	if (!expectedNormalized) return false;
+	if (actualNormalized.length < Math.ceil(expectedNormalized.length * 0.8)) {
+		return false;
+	}
+	const sampleLength = Math.min(40, expectedNormalized.length);
+	return (
+		actualNormalized.includes(expectedNormalized.slice(0, sampleLength)) &&
+		actualNormalized.includes(expectedNormalized.slice(-sampleLength))
+	);
+}
+
 // ============================================================================
 // Tab management
 // ============================================================================
