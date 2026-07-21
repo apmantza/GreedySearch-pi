@@ -34,6 +34,8 @@ const DEFAULT_RESEARCH_BUNDLE_ROOT = join(
 	".pi",
 	"greedysearch-research",
 );
+// Keep Gemini evidence/learning input below its composer cap.
+const MAX_PROMPT_CHARS = 28000;
 
 function slugifyResearchName(value) {
 	const slug = String(value || "research")
@@ -966,7 +968,7 @@ export async function extractEvidenceFromSources({
  * originals; only source-snippet context is shared between the two "tasks"
  * embedded in the same prompt.
  */
-function buildEvidenceAndLearningPrompt(
+export function buildEvidenceAndLearningPrompt(
 	originalQuery,
 	questions,
 	roundQueries,
@@ -979,26 +981,43 @@ function buildEvidenceAndLearningPrompt(
 		.filter((q) => q.status !== "closed")
 		.slice(0, 12)
 		.map((q) => ({ id: q.id, question: q.question }));
-	const extractionSourceSnippets = (pendingSources || [])
-		.filter((source) => source?.content || source?.snippet)
-		.slice(0, 6)
-		.map((source, index) => ({
-			id: source.id || `F${index + 1}`,
-			title: source.title || "",
-			url: source.finalUrl || source.url || source.canonicalUrl || "",
-			content: trimText(source.content || source.snippet || "", 5000),
-		}));
-	const learningSourceSnippets = (fetchedSources || [])
-		.filter((source) => source?.content || source?.snippet)
-		.slice(0, 10)
-		.map((source, index) => ({
-			id: `F${index + 1}`,
-			title: source.title || "",
-			url: source.finalUrl || source.url || "",
-			snippet: trimText(source.content || source.snippet || "", 3000),
-		}));
+	const extractionSources = (pendingSources || []).filter(
+		(source) => source?.content || source?.snippet,
+	);
+	const learningSources = (fetchedSources || []).filter(
+		(source) => source?.content || source?.snippet,
+	);
 
-	return [
+	const assemblePrompt = ({
+		extractionCount,
+		extractionLimit,
+		learningCount,
+		learningLimit,
+	}) => {
+		const extractionSourceSnippets = extractionSources
+			.slice(0, extractionCount)
+			.map((source, index) => ({
+				id: source.id || `F${index + 1}`,
+				title: source.title || "",
+				url: source.finalUrl || source.url || source.canonicalUrl || "",
+				content: trimText(
+					source.content || source.snippet || "",
+					extractionLimit,
+				),
+			}));
+		const learningSourceSnippets = learningSources
+			.slice(0, learningCount)
+			.map((source, index) => ({
+				id: `F${index + 1}`,
+				title: source.title || "",
+				url: source.finalUrl || source.url || "",
+				snippet: trimText(
+					source.content || source.snippet || "",
+					learningLimit,
+				),
+			}));
+
+		return [
 		"You are doing two combined research tasks for one round of an iterative research run. Perform BOTH tasks and return a single combined JSON object.",
 		"",
 		"TASK A — Goal-based evidence extraction:",
@@ -1012,13 +1031,13 @@ function buildEvidenceAndLearningPrompt(
 		"Also propose follow-up search queries that would most improve confidence or fill gaps.",
 		"",
 		`Original research question: ${originalQuery}`,
-		`Open question ledger: ${JSON.stringify(openQuestions, null, 2)}`,
-		`Round queries: ${JSON.stringify(roundQueries, null, 2)}`,
-		`Question ledger: ${JSON.stringify(questions, null, 2)}`,
-		`Extracted source evidence so far: ${JSON.stringify(evidenceItems.slice(-12), null, 2)}`,
-		`Engine summaries: ${JSON.stringify(searchSummaries, null, 2)}`,
-		`Sources for evidence extraction (Task A): ${JSON.stringify(extractionSourceSnippets, null, 2)}`,
-		`Fetched source snippets (Task B context): ${JSON.stringify(learningSourceSnippets, null, 2)}`,
+		`Open question ledger: ${JSON.stringify(openQuestions)}`,
+		`Round queries: ${JSON.stringify(roundQueries)}`,
+		`Question ledger: ${JSON.stringify(questions)}`,
+		`Extracted source evidence so far: ${JSON.stringify(evidenceItems.slice(-12))}`,
+		`Engine summaries: ${JSON.stringify(searchSummaries)}`,
+		`Sources for evidence extraction (Task A): ${JSON.stringify(extractionSourceSnippets)}`,
+		`Fetched source snippets (Task B context): ${JSON.stringify(learningSourceSnippets)}`,
 		"",
 		"Respond ONLY with JSON wrapped in BEGIN_JSON / END_JSON markers, combining both tasks into one object:",
 		"BEGIN_JSON",
@@ -1058,6 +1077,61 @@ function buildEvidenceAndLearningPrompt(
 		),
 		"END_JSON",
 	].join("\n");
+	};
+
+	let extractionCount = Math.min(4, extractionSources.length);
+	let extractionLimit = 3000;
+	let learningCount = Math.min(6, learningSources.length);
+	let learningLimit = 2000;
+	let prompt = assemblePrompt({
+		extractionCount,
+		extractionLimit,
+		learningCount,
+		learningLimit,
+	});
+	let trimmedToFit = false;
+	const minimumSourceChars = 600;
+
+	while (prompt.length > MAX_PROMPT_CHARS) {
+		if (
+			extractionLimit > minimumSourceChars ||
+			learningLimit > minimumSourceChars
+		) {
+			extractionLimit = Math.max(
+				minimumSourceChars,
+				Math.floor(extractionLimit / 2),
+			);
+			learningLimit = Math.max(
+				minimumSourceChars,
+				Math.floor(learningLimit / 2),
+			);
+		} else if (learningCount > 1) {
+			learningCount -= 1;
+		} else if (extractionCount > 1) {
+			extractionCount -= 1;
+		} else if (extractionLimit > 1 || learningLimit > 1) {
+			extractionLimit = Math.max(1, Math.floor(extractionLimit / 2));
+			learningLimit = Math.max(1, Math.floor(learningLimit / 2));
+		} else {
+			throw new Error(
+				`[greedysearch] evidence/learning prompt exceeds Gemini input cap after source trimming: ${prompt.length} chars`,
+			);
+		}
+		trimmedToFit = true;
+		prompt = assemblePrompt({
+			extractionCount,
+			extractionLimit,
+			learningCount,
+			learningLimit,
+		});
+	}
+
+	if (trimmedToFit) {
+		console.error(
+			`[greedysearch] evidence/learning prompt trimmed to fit Gemini input cap: ${prompt.length} chars`,
+		);
+	}
+	return prompt;
 }
 
 /**
