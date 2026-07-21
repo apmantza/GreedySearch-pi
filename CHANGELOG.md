@@ -4,6 +4,14 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [2.1.6] — 2026-07-21
+
+### Added
+
 - **MCP server** (`bin/mcp.mjs`, `.mcp.json`) — GreedySearch is now usable from Claude Code and any MCP client: a dependency-free stdio server exposing `greedy_search` (full search/research surface, mirroring the pi tool's parameters) and `greedy_fetch` (single-URL fetch/extract). Registered at project scope via `.mcp.json`; `npm run mcp` to run manually.
 
 ### Changed
