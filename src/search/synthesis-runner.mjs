@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { GREEDY_PROFILE_DIR, SUPPORTED_SYNTHESIZERS } from "./constants.mjs";
 import {
 	buildSynthesisPrompt,
+	getEngineSummaryKeys,
 	normalizeSynthesisPayload,
 	parseStructuredJson,
 } from "./synthesis.mjs";
@@ -105,9 +106,7 @@ export async function runSynthesisPrompt(
 				resolve(JSON.parse(out.trim()));
 			} catch {
 				reject(
-					new Error(
-						`bad JSON from ${normalizedSynthesizer}: ${out.slice(0, 100)}`,
-					),
+					new Error(`bad JSON from ${normalizedSynthesizer}: ${out.slice(0, 100)}`),
 				);
 			}
 		});
@@ -154,10 +153,7 @@ export async function synthesizeResults(
 	const hasSynthesisFields =
 		structured && SYNTHESIS_FIELDS.some((f) => f in structured);
 	const hasEngineKeys =
-		structured &&
-		["perplexity", "bing", "google", "chatgpt", "gemini"].some(
-			(e) => e in structured,
-		);
+		structured && getEngineSummaryKeys(results).some((e) => e in structured);
 	if (hasEngineKeys && !hasSynthesisFields) {
 		structured = null; // Treat as parse failure — synthesizer echoed input
 	}

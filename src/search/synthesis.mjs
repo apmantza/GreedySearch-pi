@@ -152,33 +152,78 @@ export function normalizeSynthesisPayload(
 	};
 }
 
+/**
+ * Determine which engine entries of a multi-engine results object should be
+ * summarized for synthesis. Filters to non-private (`_`-prefixed) object keys
+ * that carry `answer`/`error`/`engine` fields, ordered deterministically:
+ * engines in ALL_ENGINES first (config order), then any extras (aliases /
+ * engines not in the known list) in object insertion order.
+ */
+export function getEngineSummaryKeys(results) {
+	const knownEngines = Array.isArray(ALL_ENGINES) ? ALL_ENGINES : [];
+	return Object.keys(results)
+		.filter(
+			(key) =>
+				!key.startsWith("_") &&
+				results[key] &&
+				typeof results[key] === "object" &&
+				("answer" in results[key] ||
+					"error" in results[key] ||
+					"engine" in results[key]),
+		)
+		.sort((a, b) => {
+			const ia = knownEngines.indexOf(a);
+			const ib = knownEngines.indexOf(b);
+			return (
+				(ia === -1 ? knownEngines.length : ia) -
+				(ib === -1 ? knownEngines.length : ib)
+			);
+		});
+}
+
 export function buildSynthesisPrompt(
 	query,
 	results,
 	sources,
 	{ grounded = false } = {},
 ) {
+	// Build over every engine present in `results`, not a hard-coded subset:
+	// with ~/.pi/greedyconfig engines like chatgpt/gemini in the fan-out, the
+	// synthesizer must see ALL engine answers.
+	const engineKeys = getEngineSummaryKeys(results);
+
+	// Per-engine answer cap is primary (matches pre-fix quality for the common
+	// 3-4 engine configs); the flat total budget is a safety ceiling that only
+	// binds for wide configs (n >= 6) so the assembled prompt stays under the
+	// composer's ~32k input ceiling.
+	const perEngineCap = grounded ? 4500 : 2200;
+	const totalBudget = grounded ? 18000 : 11000;
+	const perEngineChars = Math.max(
+		1,
+		Math.min(
+			perEngineCap,
+			Math.floor(totalBudget / Math.max(1, engineKeys.length)),
+		),
+	);
 	const engineSummaries = {};
-	for (const engine of ["perplexity", "bing", "google"]) {
+	for (const engine of engineKeys) {
 		const result = results[engine];
-		if (!result) continue;
 		if (result.error) {
 			engineSummaries[engine] = {
 				status: "error",
-				error: String(result.error),
+				error: trimText(String(result.error), 500),
 			};
 			continue;
 		}
 
 		engineSummaries[engine] = {
 			status: "ok",
-			answer: trimText(result.answer || "", grounded ? 4500 : 2200),
+			answer: trimText(result.answer || "", perEngineChars),
 			sourceIds: sources
 				.filter((source) => source.engines.includes(engine))
 				.sort(
 					(a, b) =>
-						(a.perEngine[engine]?.rank || 99) -
-						(b.perEngine[engine]?.rank || 99),
+						(a.perEngine[engine]?.rank || 99) - (b.perEngine[engine]?.rank || 99),
 				)
 				.map((source) => source.id)
 				.slice(0, 6),

@@ -70,5 +70,8 @@
 		"@earendil-works/pi-coding-agent": {
 			"optional": true
 		}
+	},
+	"devDependencies": {
+		"@types/node": "^26.2.0"
 	}
 }

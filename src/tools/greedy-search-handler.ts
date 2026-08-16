@@ -90,11 +90,13 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 		promptSnippet: "Multi-engine AI web search with streaming progress",
 		parameters: Type.Object({
 			query: Type.String({ description: "The search query" }),
-			engine: Type.String({
-				description:
-					'Engine to use: "all" (default), "perplexity", "google", "chatgpt", "gemini", "gem". Research engines: "semantic-scholar" (alias "s2") and "logically". "all" fans out to the configured engines and fetches top sources. Customize via ~/.pi/greedyconfig. Bing Copilot is still available as "bing" for signed-in users.',
-				default: "all",
-			}),
+			engine: Type.Optional(
+				Type.String({
+					description:
+						'Engine to use: "all" (default), "perplexity", "google", "chatgpt", "gemini", "gem". Research engines: "semantic-scholar" (alias "s2") and "logically". "all" fans out to the configured engines and fetches top sources. Customize via ~/.pi/greedyconfig. Bing Copilot is still available as "bing" for signed-in users.',
+					default: "all",
+				}),
+			),
 			synthesize: Type.Optional(
 				Type.Boolean({
 					description:
@@ -192,19 +194,19 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				| "";
 			const researchMode = depthRaw === "research";
 			const legacyFast = depthRaw === "fast";
-			const legacySynthesisDepth =
-				depthRaw === "standard" || depthRaw === "deep";
+			const legacySynthesisDepth = depthRaw === "standard" || depthRaw === "deep";
 			const synthesize =
 				engine === "all" &&
 				!legacyFast &&
 				(params.synthesize === true || legacySynthesisDepth);
 			const effectiveEngine = researchMode ? "all" : engine;
+			const env = process.env as Record<string, string | undefined>;
 			const visible =
 				params.visible === true ||
 				params.alwaysVisible === true ||
 				params.headless === false ||
-				process.env.GREEDY_SEARCH_VISIBLE === "1" ||
-				process.env.GREEDY_SEARCH_ALWAYS_VISIBLE === "1";
+				env.GREEDY_SEARCH_VISIBLE === "1" ||
+				env.GREEDY_SEARCH_ALWAYS_VISIBLE === "1";
 			const headless = !visible;
 
 			if (!cdpAvailable(baseDir)) return cdpMissingResult();
@@ -279,9 +281,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			theme: ToolTheme,
 		) {
 			if (isPartial) {
-				const progressText = result.content.find(
-					(c) => c.type === "text",
-				)?.text;
+				const progressText = result.content.find((c) => c.type === "text")?.text;
 				const display = progressText
 					? progressText.replace(/\*\*/g, "")
 					: "Searching...";
@@ -304,9 +304,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 					);
 				}
 
-				const synthesis = raw?._synthesis as
-					| Record<string, unknown>
-					| undefined;
+				const synthesis = raw?._synthesis as Record<string, unknown> | undefined;
 				const sources = raw?._sources as Array<unknown> | undefined;
 				if (synthesis) {
 					const sourceCount = Array.isArray(sources) ? sources.length : 0;
@@ -321,9 +319,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				}
 
 				// Single engine: count its sources
-				const engineKeys = Object.keys(raw || {}).filter(
-					(k) => !k.startsWith("_"),
-				);
+				const engineKeys = Object.keys(raw || {}).filter((k) => !k.startsWith("_"));
 				let totalSources = 0;
 				for (const key of engineKeys) {
 					const eng = raw?.[key] as Record<string, unknown> | undefined;
@@ -344,11 +340,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 				// No structured data — show content text as error/fallback
 				const snippet = textContent?.text;
 				if (snippet) {
-					return new Text(
-						theme.fg("warning", ` → ${snippet.slice(0, 80)}`),
-						0,
-						0,
-					);
+					return new Text(theme.fg("warning", ` → ${snippet.slice(0, 80)}`), 0, 0);
 				}
 				return new Text(theme.fg("muted", " → Done"), 0, 0);
 			}

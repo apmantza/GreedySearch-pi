@@ -117,8 +117,7 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	for (const [input, expected, label] of stripCases) {
 		const got = stripQuotes(input);
 		if (got === expected) passMsg(`stripQuotes: ${label}`);
-		else
-			failMsg(`stripQuotes: ${label} — expected "${expected}", got "${got}"`);
+		else failMsg(`stripQuotes: ${label} — expected "${expected}", got "${got}"`);
 	}
 
 	subsection("Tool param normalization — greedy_search engine/depth");
@@ -164,11 +163,7 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	const cfTestCases = [
 		// [error message, expected match, label]
 		["input not found", true, 'legacy pattern: "input not found"'],
-		[
-			"Copilot input not found",
-			true,
-			'extended: "input not found" in sentence',
-		],
+		["Copilot input not found", true, 'extended: "input not found" in sentence'],
 		["VERIFICATION REQUIRED", true, 'legacy pattern: "VERIFICATION REQUIRED"'],
 		["verification failed", true, 'extended: "verification" in sentence'],
 		[
@@ -255,13 +250,13 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	for (const [error, expected, label] of pplxTestCases) {
 		const matched = isHeadlessBlockedError(error);
 		if (matched === expected) passMsg(`pplxPattern: ${label}`);
-		else
-			failMsg(`pplxPattern: ${label} — expected ${expected}, got ${matched}`);
+		else failMsg(`pplxPattern: ${label} — expected ${expected}, got ${matched}`);
 	}
 
 	subsection("Chrome lifecycle — visible/headless mode detection");
-	const { detectHeadlessFromChromeCommandLine, isChromeHeadless } =
-		await import("./src/search/chrome.mjs");
+	const { detectHeadlessFromChromeCommandLine, isChromeHeadless } = await import(
+		"./src/search/chrome.mjs"
+	);
 	const { commandLineMatchesGreedyChrome } = await import(
 		"./src/search/browser-lifecycle.mjs"
 	);
@@ -308,9 +303,7 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	) {
 		passMsg("stale cleanup: renderer child is not treated as browser process");
 	} else {
-		failMsg(
-			"stale cleanup: renderer child should not verify as browser process",
-		);
+		failMsg("stale cleanup: renderer child should not verify as browser process");
 	}
 	if (typeof isChromeHeadless === "function")
 		passMsg("isChromeHeadless: function exists");
@@ -548,10 +541,7 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	const tokens2 = tokenSet("HELLO World");
 	if (tokens1.size === 2) passMsg("tokenSet: basic tokenization (2 tokens)");
 	else failMsg(`tokenSet: expected 2 tokens, got ${tokens1.size}`);
-	if (
-		tokens1.size === tokens2.size &&
-		[...tokens1].every((t) => tokens2.has(t))
-	)
+	if (tokens1.size === tokens2.size && [...tokens1].every((t) => tokens2.has(t)))
 		passMsg("tokenSet: case-insensitive");
 	else failMsg("tokenSet: case sensitivity mismatch");
 
@@ -576,9 +566,7 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	if (jNearDup > 0.6)
 		passMsg(`jaccard: near-duplicate = ${jNearDup.toFixed(3)}`);
 	else
-		failMsg(
-			`jaccard: near-duplicate expected >0.6, got ${jNearDup.toFixed(3)}`,
-		);
+		failMsg(`jaccard: near-duplicate expected >0.6, got ${jNearDup.toFixed(3)}`);
 
 	// isDuplicateQuery
 	const used = new Set();
@@ -673,11 +661,10 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	// smoke because it requires Chrome + network and takes several minutes.
 	// ─────────────────────────────────────────────────────────────────────────
 	if (["", "all", "synth"].includes(mode)) {
-		subsection(
-			"Synthesis routing — config-driven live smoke (gemini + chatgpt)",
+		subsection("Synthesis routing — config-driven live smoke (gemini + chatgpt)");
+		const { existsSync, copyFileSync, writeFileSync, unlinkSync } = await import(
+			"node:fs"
 		);
-		const { existsSync, copyFileSync, writeFileSync, unlinkSync } =
-			await import("node:fs");
 		const { homedir } = await import("node:os");
 		const { join } = await import("node:path");
 		const cfgDir = join(homedir(), ".pi");
@@ -1093,9 +1080,7 @@ END_JSON`,
 					"writeProvenanceSidecar: writes provenance.md with query and sources",
 				);
 			} else {
-				failMsg(
-					"writeProvenanceSidecar: provenance.md missing expected content",
-				);
+				failMsg("writeProvenanceSidecar: provenance.md missing expected content");
 			}
 		} else {
 			failMsg("writeProvenanceSidecar: provenance.md not created");
@@ -1190,6 +1175,71 @@ trailing note`);
 	} else {
 		failMsg(
 			`structured JSON: failed to repair ${JSON.stringify(parsedLooseJson)}`,
+		);
+	}
+
+	subsection("Synthesis prompt — engine coverage and size budget");
+	const { buildSynthesisPrompt, getEngineSummaryKeys } = await import(
+		"./src/search/synthesis.mjs"
+	);
+	const synthResults = {
+		perplexity: { engine: "perplexity", answer: "P", sources: [] },
+		google: { engine: "google", answer: "G", sources: [] },
+		chatgpt: { engine: "chatgpt", answer: "C", sources: [] },
+		gemini: { engine: "gemini", error: "boom" },
+		_sources: [],
+		_synthesis: {},
+	};
+	const summaryKeys = getEngineSummaryKeys(synthResults);
+	const coversAllEngines =
+		["perplexity", "google", "chatgpt", "gemini"].every((k) =>
+			summaryKeys.includes(k),
+		) && !summaryKeys.includes("_sources");
+	const prompt = buildSynthesisPrompt("test", synthResults, []);
+	const promptMentionsChatgpt = prompt.includes('"C"');
+	const promptSurfacesErrors = prompt.includes("boom");
+	const promptExcludesMetadata = !prompt.includes("_sources");
+	// Membership + determinism (relative order of known engines depends on the
+	// developer's real ~/.pi/greedyconfig, so it isn't a unit-test contract).
+	const deterministic =
+		JSON.stringify(summaryKeys) ===
+		JSON.stringify(getEngineSummaryKeys(synthResults));
+	if (
+		coversAllEngines &&
+		promptMentionsChatgpt &&
+		promptSurfacesErrors &&
+		promptExcludesMetadata &&
+		deterministic
+	) {
+		passMsg(
+			"synthesis prompt: includes chatgpt/gemini summaries, excludes metadata",
+		);
+	} else {
+		failMsg(
+			`synthesis prompt: keys=${JSON.stringify(summaryKeys)} ` +
+				`chatgpt=${promptMentionsChatgpt} errors=${promptSurfacesErrors} ` +
+				`metaExcluded=${promptExcludesMetadata} deterministic=${deterministic}`,
+		);
+	}
+	// Size budget: 6 long-answer engines (grounded) must stay well under the
+	// composer's ~32k hard cap instead of 6 x 4500 chars.
+	const manyResults = {
+		perplexity: { answer: "x".repeat(9000) },
+		google: { answer: "x".repeat(9000) },
+		chatgpt: { answer: "x".repeat(9000) },
+		gemini: { answer: "x".repeat(9000) },
+		bing: { answer: "x".repeat(9000) },
+		"semantic-scholar": { answer: "x".repeat(9000) },
+	};
+	const groundedPrompt = buildSynthesisPrompt("test", manyResults, [], {
+		grounded: true,
+	});
+	// Throttled 6-engine = ~20k unchars; unthrottled 6x4500 would be ~28.7k.
+	if (groundedPrompt.length < 26000) {
+		passMsg("synthesis prompt: size budget bounds 6-engine grounded prompt");
+	} else {
+		failMsg(
+			`synthesis prompt: grounded prompt too large (${groundedPrompt.length} chars)`,
 		);
 	}
 
@@ -1319,13 +1369,7 @@ if (["", "all", "flags", "quick", "smoke"].includes(mode)) {
 	for (const alias of ["p", "g"]) {
 		const aliasFile = join(resultsDir, `alias_${alias}.json`);
 		const { out: _aliasOut } = await runNode(
-			[
-				join(__dir, "bin", "search.mjs"),
-				alias,
-				"test query",
-				"--out",
-				aliasFile,
-			],
+			[join(__dir, "bin", "search.mjs"), alias, "test query", "--out", aliasFile],
 			60,
 		);
 		if (existsSync(aliasFile) && aliasFile.length > 0) {
@@ -1405,9 +1449,7 @@ if (["", "all", "edge", "quick"].includes(mode)) {
 		120,
 	);
 	if (existsSync(unicodeFile)) {
-		const unicodeCheck = checkJson(unicodeFile, (d) =>
-			d.query?.includes("日本"),
-		);
+		const unicodeCheck = checkJson(unicodeFile, (d) => d.query?.includes("日本"));
 		if (unicodeCheck) {
 			passMsg("Edge3: unicode preserved");
 		} else {
@@ -1442,10 +1484,7 @@ if (["", "all", "edge", "quick", "smoke"].includes(mode)) {
 	await runNode([blobTmp], 20);
 
 	if (existsSync(ghBlobFile)) {
-		const result = checkJson(
-			ghBlobFile,
-			(r) => r.ok && r.content?.length > 100,
-		);
+		const result = checkJson(ghBlobFile, (r) => r.ok && r.content?.length > 100);
 		if (result) {
 			passMsg("GitHub blob: content fetched");
 		} else {
