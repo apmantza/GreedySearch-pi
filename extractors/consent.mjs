@@ -110,7 +110,12 @@ const VERIFY_DETECT_JS = `
     // text. The previous list missed "email" and "sso" which let the
     // auto-click land on the email/SSO sign-in buttons on Perplexity's
     // anonymous-mode homepage, navigating us into a login flow.
-    var isSignIn = new RegExp("sign.?in|log.?in|sign.?up|with\\s+(google|apple|email|github|facebook|microsoft|sso)|sso|auth", "i").test(t);
+    var isSignIn = new RegExp("sign.?in|log.?in|sign.?up|with\\s+(google|apple|email|github|facebook|microsoft|sso|phone|sms|text)|sso|auth", "i").test(t);
+    // Also exclude buttons inside <form> elements — these are sign-in / input
+    // forms (e.g. ChatGPT's email sign-in "Continue" button), not verification
+    // challenges. Clicking them navigates into a login flow rather than clearing
+    // a CAPTCHA.
+    if (!isSignIn && b.closest("form")) isSignIn = true;
     return !isSignIn;
   });
   if (verify) { verify.setAttribute('data-gs-verify','1'); return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:verify.innerText?.trim()||verify.value}); }
@@ -138,7 +143,11 @@ const VERIFY_RETRY_JS = `
     var t = (b.innerText?.trim() || b.value || '').toLowerCase();
     var isVerifyLike = t.includes('verify') || t.includes('human') || t.includes('robot') || t.includes('continue') || t.includes('next') || t.includes('submit');
     if (!isVerifyLike) return false;
-    var isSignIn = /sign.in|log.in|google|microsoft|apple|facebook|github|auth/i.test(t);
+    var isSignIn = /sign.in|log.in|google|microsoft|apple|facebook|github|auth|phone|sms|text/i.test(t);
+    // Also exclude buttons inside <form> elements — these are sign-in / input
+    // forms (e.g. ChatGPT's email sign-in "Continue" button), not verification
+    // challenges.
+    if (!isSignIn && b.closest("form")) isSignIn = true;
     return !isSignIn;
   });
   if (btn) { btn.setAttribute('data-gs-verify','1'); return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:btn.innerText?.trim()||btn.value}); }
@@ -378,7 +387,7 @@ function tryHumanClick(tab, cdp, detectResult) {
 				`[greedysearch] Human-clicking "${info.txt}" via CDP...\n`,
 			);
 			return humanClickElement(tab, cdp, info.s).then((r) =>
-				r !== null ? "clicked" : "cant-click",
+				r === null ? "cant-click" : "clicked",
 			);
 		}
 		if (info.t === "xy") {
@@ -435,9 +444,12 @@ async function findCloudflareIframeViaPierce(tab, cdp) {
 	await cdp(["evalraw", tab, "DOM.enable", "{}"]).catch(() => {});
 
 	// Step 2: get the full DOM tree with pierce — walks closed shadow roots
-	const doc = await cdp(["evalraw", tab, "DOM.getDocument", JSON.stringify({ depth: -1, pierce: true })]).catch(
-		() => null,
-	);
+	const doc = await cdp([
+		"evalraw",
+		tab,
+		"DOM.getDocument",
+		JSON.stringify({ depth: -1, pierce: true }),
+	]).catch(() => null);
 	if (!doc) return null;
 	let docParsed;
 	try {
@@ -562,11 +574,11 @@ export async function handleVerification(tab, cdp, waitMs = 30000) {
 				process.stderr.write("[greedysearch] Verification cleared.\n");
 				return "clicked";
 			}
-			if (retryResult !== "still-verifying") {
+			if (retryResult === "still-verifying") {
+				await new Promise((r) => setTimeout(r, 1500));
+			} else {
 				await tryHumanClick(tab, cdp, retryResult);
 				await new Promise((r) => setTimeout(r, 2000));
-			} else {
-				await new Promise((r) => setTimeout(r, 1500));
 			}
 		}
 		process.stderr.write(
