@@ -437,12 +437,47 @@ function tryHumanClick(tab, cdp, detectResult) {
 	try {
 		const info = JSON.parse(detectResult);
 		if (info.t === "sel" && info.s) {
-			process.stderr.write(
-				`[greedysearch] Human-clicking "${info.txt}" via CDP...\n`,
-			);
-			return humanClickElement(tab, cdp, info.s).then((r) =>
-				r === null ? "cant-click" : "clicked",
-			);
+			return (async () => {
+				// Transient-zero-rect filter. chatgpt.com keeps prefetch
+				// dialogs in the DOM with display:none + zero rects, and
+				// their "Continue" / "Log in" buttons match the verifier
+				// regex during a brief window after Page.navigate when
+				// React transitions the dialog visibility. The verifier
+				// returns a selector, but the element has zero rect at
+				// click time — the click would no-op. Re-probe after a
+				// short settle: if the dialog transitioned back to hidden
+				// (page settled), the verifier returns null on the retry
+				// and we treat the original detection as transient.
+				const probeExpr = `(function(){ var el = document.querySelector(${JSON.stringify(info.s)}); if (!el) return 'gone'; var cs = getComputedStyle(el); var r = el.getBoundingClientRect(); return JSON.stringify({display: cs.display, visibility: cs.visibility, w: r.width, h: r.height}); })()`;
+				const initial = await cdp(["eval", tab, probeExpr], 4000).catch(() => null);
+				if (initial && initial !== "gone" && initial !== "null") {
+					try {
+						const pr = JSON.parse(initial);
+						if (pr.w === 0 || pr.h === 0) {
+							await new Promise((r) => setTimeout(r, 700));
+							const re = await cdp(["eval", tab, probeExpr], 4000).catch(() => null);
+							if (!re || re === "gone" || re === "null") {
+								// Element disappeared between probes — transient.
+								return "no-challenge";
+							}
+							try {
+								const pr2 = JSON.parse(re);
+								if (pr2.w === 0 || pr2.h === 0) {
+									// Still zero — treat as transient (the
+									// page hasn't fully rendered the dialog
+									// yet; the verifier caught a brief flash).
+									return "no-challenge";
+								}
+							} catch {}
+						}
+					} catch {}
+				}
+				process.stderr.write(
+					`[greedysearch] Human-clicking "${info.txt}" via CDP...\n`,
+				);
+				const r = await humanClickElement(tab, cdp, info.s);
+				return r === null ? "cant-click" : "clicked";
+			})();
 		}
 		if (info.t === "xy") {
 			// Skip zero/invalid coordinates — element is off-screen or not rendered
