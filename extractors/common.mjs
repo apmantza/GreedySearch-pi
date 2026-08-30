@@ -65,9 +65,7 @@ function cdpSafeArgv(args) {
 
 function validateArg(value, index) {
 	if (typeof value !== "string") {
-		throw new Error(
-			`cdp: argv[${index}] must be a string (got ${typeof value})`,
-		);
+		throw new Error(`cdp: argv[${index}] must be a string (got ${typeof value})`);
 	}
 	if (value.includes("\0")) {
 		throw new Error(`cdp: argv[${index}] contains a null byte`);
@@ -106,7 +104,10 @@ export function cdpWithInput(args, input = null, timeoutMs = 30000) {
 }
 
 export function verifyInputText(actual, expected) {
-	const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+	const normalize = (value) =>
+		String(value ?? "")
+			.replace(/\s+/g, " ")
+			.trim();
 	const actualNormalized = normalize(actual);
 	const expectedNormalized = normalize(expected);
 	if (!expectedNormalized) return false;
@@ -1067,6 +1068,23 @@ export function buildEnvelope({
  */
 export function handleError(error, envelope = null) {
 	if (envelope) {
+		// Attach the envelope to the Error object so the parent process
+		// (bin/search.mjs → recovery helpers) can inspect blockedBy
+		// without having to re-parse stdout. The stdout payload is kept
+		// for human-visible logging / debugging.
+		try {
+			error.envelope = envelope;
+		} catch {
+			// Some built-in Error subclasses freeze properties; fall
+			// back to a plain object copy so callers still see the
+			// envelope rather than silently losing it.
+			const wrapper = new Error(error.message);
+			wrapper.envelope = envelope;
+			wrapper.original = error;
+			process.exitCode = 1;
+			process.stderr.write(`Error: ${wrapper.message}\n`);
+			throw wrapper;
+		}
 		const out = JSON.stringify({ _envelope: envelope, error: error.message });
 		process.stdout.write(`${out}\n`);
 	}

@@ -31,9 +31,25 @@ import {
 import { dismissConsent, handleVerification } from "./consent.mjs";
 
 const GLOBAL_VAR = "__chatgptClipboard";
+// Two distinct chat surfaces on chatgpt.com:
+//   * Signed-in conversations at /c/<uuid> use a ProseMirror editor
+//     (`div.ProseMirror`) and `data-message-author-role` on responses.
+//   * Anonymous /uc/<uuid> conversations (no sign-in) use a plain
+//     `<textarea name="prompt">` and render the response as
+//     `You said:` / `ChatGPT said:` text blocks without role attributes.
+// The dispatch happens in main() based on which selector resolves first.
 const PROSE_SELECTOR = "div.ProseMirror";
+const LANDING_TEXTAREA_SELECTOR = 'textarea[name="prompt"]';
 const SEND_SELECTOR = 'button[data-testid="send-button"]';
+const LANDING_SEND_SELECTOR = 'button[aria-label="Send message"]';
 const COPY_SELECTOR = 'button[data-testid="copy-turn-action-button"]';
+
+// Anonymous-chat response markers. ChatGPT renders the assistant reply
+// between "ChatGPT said:" and a trailing footer ("ChatGPT is AI and can
+// make mistakes." or "Chat with ChatGPT"). ExtractAnswerAnonymous uses
+// these to slice out the response body without relying on role attrs.
+const ANONYMOUS_RESPONSE_PREFIX = "ChatGPT said:";
+const ANONYMOUS_USER_MARKER = "You said:";
 
 const CHATGPT_RESPONSE_SELECTOR = String.raw`(() => {
 	const all = document.querySelectorAll('[data-message-author-role]');
@@ -68,8 +84,12 @@ const CHATGPT_ASSISTANT_COPY_CLICK_EXPR = `(() => {
 // ============================================================================
 
 async function typeAndSubmit(tab, query) {
-	// Focus the ProseMirror editor
-	await cdp(["click", tab, PROSE_SELECTOR]);
+	// Prefer the in-conversation ProseMirror editor. The anonymous landing
+	// page uses a plain <textarea name="prompt"> until the user signs in;
+	// typing into it raises a sign-in modal mid-flow (handled by the
+	// caller, which surfaces `blockedBy: "login-required"`).
+	const targetSelector = PROSE_SELECTOR;
+	await cdp(["click", tab, targetSelector]);
 	await new Promise((r) => setTimeout(r, jitter(200)));
 
 	// Type via execCommand — this is the only reliable way to insert text into
@@ -82,7 +102,7 @@ async function typeAndSubmit(tab, query) {
 			"eval",
 			tab,
 			`(() => {
-				const editor = document.querySelector('${PROSE_SELECTOR}');
+				const editor = document.querySelector('${targetSelector}');
 				if (!editor) return 'no-editor';
 				editor.focus();
 				const ok = document.execCommand('insertText', false, ${JSON.stringify(query)});
@@ -107,11 +127,148 @@ async function typeAndSubmit(tab, query) {
 		})()
 	`;
 	const sendResult = await cdp(["eval", tab, sendCode]);
-	if (sendResult === "no-send")
-		throw new Error("ChatGPT send button not found");
+	if (sendResult === "no-send") throw new Error("ChatGPT send button not found");
 	if (sendResult === "send-disabled")
 		throw new Error("ChatGPT send button disabled — query was not registered");
 	await new Promise((r) => setTimeout(r, jitter(300)));
+}
+
+/**
+ * Anonymous-chat (chatgpt.com/uc/...) input flow. The landing page
+ * surfaces a `<textarea name="prompt">` instead of a ProseMirror editor
+ * and a `button[aria-label="Send message"]` instead of
+ * `button[data-testid="send-button"]`. React tracks the textarea value
+ * via a controlled-component pattern, so plain `el.value = …` is ignored;
+ * we must call the native setter and dispatch an `input` event for React
+ * to update its internal state.
+ */
+async function typeAndSubmitLanding(tab, query) {
+	const code = `
+		(() => {
+			const ta = document.querySelector('${LANDING_TEXTAREA_SELECTOR}');
+			if (!ta) return 'no-textarea';
+			ta.focus();
+			const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+			setter.call(ta, ${JSON.stringify(query)});
+			ta.dispatchEvent(new Event('input', { bubbles: true }));
+			const send = document.querySelector('${LANDING_SEND_SELECTOR}')
+				|| Array.from(document.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Send message');
+			if (!send) return 'no-send';
+			if (send.disabled) return 'send-disabled';
+			// The Send button is a submit-type button inside a form
+			// (chatgpt anonymous /uc/ composer form). React binds its
+			// onSubmit handler to the form, and calling the button
+			// .click() method does not fire the synthetic submit event
+			// React listens for — the textarea gets the query but
+			// nothing submits. form.requestSubmit(send) fires both the
+			// submit event on the form AND React's onSubmit handler.
+			const form = send.form || send.closest('form');
+			if (form && typeof form.requestSubmit === 'function') {
+				form.requestSubmit(send);
+			} else {
+				send.click();
+			}
+			return 'ok';
+		})()
+	`;
+	const result = await cdp(["eval", tab, code], 5000);
+	if (result !== "ok") {
+		throw new Error(`ChatGPT anonymous type/submit failed: ${result}`);
+	}
+}
+
+/**
+ * Wait for the anonymous `/uc/<uuid>` chat response. The page renders
+ * "ChatGPT said:" once the model begins streaming and removes the
+ * "Stop generating" button when streaming completes. We resolve on either
+ * the disappearance of the stop button OR a stable body length under
+ * "ChatGPT said:" for 3 consecutive polls.
+ */
+async function waitForAnonymousResponse(tab, timeoutMs = 35000) {
+	const expr = `
+		new Promise((resolve) => {
+			const _deadline = Date.now() + ${timeoutMs};
+			let _last = '';
+			let _stable = 0;
+			function _poll() {
+				try {
+					const stopBtn = !!document.querySelector('button[aria-label="Stop generating"]');
+					const txt = document.body.innerText || '';
+					const idx = txt.indexOf(${JSON.stringify(ANONYMOUS_RESPONSE_PREFIX)});
+					if (idx < 0) {
+						if (Date.now() < _deadline) setTimeout(_poll, 600);
+						else resolve({ done: false, reason: 'no-prefix', length: 0 });
+						return;
+					}
+					const slice = txt.slice(idx);
+					if (!stopBtn && slice === _last) {
+						_stable++;
+						if (_stable >= 3) {
+							resolve({ done: true, length: slice.length, body: slice });
+							return;
+						}
+					} else {
+						_stable = 0;
+						_last = slice;
+					}
+					if (Date.now() < _deadline) setTimeout(_poll, 600);
+					else resolve({ done: true, length: slice.length, body: slice });
+				} catch (_) {
+					resolve({ done: false, reason: 'poll-error', length: 0 });
+				}
+			}
+			_poll();
+		})
+	`;
+	const raw = await cdp(["eval", tab, expr], timeoutMs + 5000);
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return { done: false, reason: "parse-error", length: 0 };
+	}
+}
+
+/**
+ * Extract the assistant response text from the anonymous /uc/ page.
+ * Strategy: find "ChatGPT said:" in body.innerText, then take the text
+ * up to the next "You said:" marker (next user turn) or up to the first
+ * known footer phrase. Returns the cleaned body and an empty sources
+ * array (anonymous chat doesn't expose citation links).
+ */
+async function extractAnswerAnonymous(tab) {
+	const raw = await cdp([
+		"eval",
+		tab,
+		`(() => {
+			const txt = document.body.innerText || '';
+			const prefixIdx = txt.indexOf(${JSON.stringify(ANONYMOUS_RESPONSE_PREFIX)});
+			if (prefixIdx < 0) return JSON.stringify({ answer: '', skipped: 'no-prefix' });
+			const afterPrefix = txt.slice(prefixIdx + ${JSON.stringify(ANONYMOUS_RESPONSE_PREFIX)}.length);
+			// Strip leading whitespace/newlines after "ChatGPT said:"
+			let body = afterPrefix.replace(/^s+/, '');
+			// Truncate at the next user turn or any known footer marker
+			const stopMarkers = [
+				${JSON.stringify(ANONYMOUS_USER_MARKER)},
+				'ChatGPT is AI and can make mistakes.',
+				'Chat with ChatGPT',
+				"You'll get smarter responses",
+				'Response complete',
+				'Log in\\nSign up for free',
+			];
+			let cutAt = body.length;
+			for (const m of stopMarkers) {
+				const i = body.indexOf(m);
+				if (i >= 0 && i < cutAt) cutAt = i;
+			}
+			body = body.slice(0, cutAt).trim();
+			return JSON.stringify({ answer: body, sources: [], skipped: body ? null : 'empty' });
+		})()`,
+	]);
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return { answer: "", sources: [], skipped: "parse-error" };
+	}
 }
 
 const CHATGPT_STREAMING_EXPR = String.raw`(() => {
@@ -307,9 +464,7 @@ async function extractAnswer(tab, env) {
 	if (answer) {
 		const trimmed = answer.trim();
 		const looksLikeShortAnswer =
-			trimmed.length >= 5 &&
-			trimmed.length <= 50 &&
-			/\s|[.,!?;:]/.test(trimmed);
+			trimmed.length >= 5 && trimmed.length <= 50 && /\s|[.,!?;:]/.test(trimmed);
 		const looksLikeLongAnswer = trimmed.length > 50;
 		const words = trimmed.split(/\s+/).filter(Boolean);
 		const domainRepeats = (
@@ -394,7 +549,13 @@ async function main() {
 		if (!onChatGPT) {
 			logStage(env, "nav", startTime);
 			await cdp(["nav", tab, "https://chatgpt.com"], 20000);
-			await new Promise((r) => setTimeout(r, 600));
+			// Cloudflare's edge can serve a brief Turnstile interstitial
+			// (~800-1500ms) before the page transitions to chatgpt.com/.
+			// 600ms was too short — the verifier caught the interstitial
+			// and tripped visible recovery. 1200ms gives the interstitial
+			// time to clear without meaningfully extending clean-path
+			// nav times.
+			await new Promise((r) => setTimeout(r, 1200));
 		}
 		logStage(env, "consent", startTime);
 		await dismissConsent(tab, cdp);
@@ -414,19 +575,35 @@ async function main() {
 		}
 
 		logStage(env, "input-wait", startTime);
-		const inputReady = await waitForSelector(tab, PROSE_SELECTOR, 8000, 400);
+		// Two distinct chat surfaces on chatgpt.com:
+		//   * Signed-in: ProseMirror editor + `data-message-author-role`
+		//     assistant messages + `button[data-testid="send-button"]`.
+		//   * Anonymous /uc/<uuid>: plain <textarea name="prompt"> +
+		//     `button[aria-label="Send message"]` + plain-text response.
+		// Try the signed-in selector first; fall back to the textarea
+		// when the user is anonymous. The dispatch flag (`usedLandingInput`)
+		// picks the right type/submit/wait/extract path downstream.
+		let inputReady = await waitForSelector(tab, PROSE_SELECTOR, 8000, 400);
+		let usedLandingInput = false;
+		if (!inputReady) {
+			inputReady = await waitForSelector(
+				tab,
+				LANDING_TEXTAREA_SELECTOR,
+				4000,
+				400,
+			);
+			usedLandingInput = !!inputReady;
+		}
 		env.inputReady = inputReady;
+		env.usedLandingInput = usedLandingInput;
 		if (!inputReady) {
 			const bodyText = await cdp([
 				"eval",
 				tab,
 				`document.body?.innerText || ''`,
 			]).catch(() => "");
-			if (
-				/sign in|log in|sign up|\u03a3\u03cd\u03bd\u03b4\u03b5\u03c3\u03b7|login/i.test(
-					bodyText,
-				)
-			) {
+			if (LOGIN_WALL_PATTERN.test(bodyText)) {
+				env.blockedBy = "login-required";
 				throw new Error(
 					"ChatGPT requires sign-in — please sign in in the visible browser window",
 				);
@@ -436,64 +613,119 @@ async function main() {
 			);
 		}
 
-		logStage(env, "clipboard-inject", startTime);
-		await injectClipboardInterceptor(tab, GLOBAL_VAR);
-		logStage(env, "type-and-submit", startTime);
-		await typeAndSubmit(tab, query);
+		let answer = "";
+		let sources = [];
 
-		logStage(env, "stream-wait", startTime);
-		// waitForStreamComplete handles the in-browser poll in a single
-		// Runtime.evaluate call. If the response is still streaming past
-		// 20s (slow under tab throttling in `all` mode), fall back to
-		// node-side polls that release the WebSocket between each call.
-		// Together they stay well within the engine's 80s outer budget.
-		let asstLen = 0;
-		try {
-			asstLen = await waitForResponse(tab, 20000);
-		} catch (e) {
-			logStage(env, "stream-poll-fallback", startTime);
-			asstLen = await pollForResponseNodeSide(tab, 15000);
-		}
-		env.assistantTextLen = asstLen;
-		if (asstLen < 1) {
-			console.error(
-				"[chatgpt] Warning: assistant response may not have completed",
-			);
-		}
+		if (usedLandingInput) {
+			// ----- Anonymous /uc/<uuid> flow -----
+			logStage(env, "type-and-submit", startTime);
+			await typeAndSubmitLanding(tab, query);
+			logStage(env, "stream-wait", startTime);
+			let anonResult;
+			try {
+				anonResult = await waitForAnonymousResponse(tab, 25000);
+			} catch (anonErr) {
+				console.error(
+					`[chatgpt] anonymous stream wait failed (${anonErr.message}); proceeding to extract`,
+				);
+				anonResult = { done: false, reason: "wait-error", length: 0 };
+			}
+			env.assistantTextLen = anonResult?.length || 0;
+			logStage(env, "extract", startTime);
+			const extracted = await extractAnswerAnonymous(tab);
+			env.fallbackUsed = extracted.answer ? "anonymous-dom" : null;
+			answer = extracted.answer;
+			sources = extracted.sources || [];
+			if (!answer) {
+				env.blockedBy = "no-response";
+				env.skipped = extracted.skipped || null;
+				throw new Error(
+					"ChatGPT anonymous response did not render — assistant text never appeared",
+				);
+			}
+		} else {
+			// ----- Signed-in /c/<uuid> flow (existing behavior) -----
+			logStage(env, "clipboard-inject", startTime);
+			await injectClipboardInterceptor(tab, GLOBAL_VAR);
+			logStage(env, "type-and-submit", startTime);
+			await typeAndSubmit(tab, query);
 
-		logStage(env, "extract", startTime);
-		// Retry extract up to 3 times with 2s delays. After stream-wait
-		// times out in all-mode under CDP contention, the assistant message
-		// may still be rendering. A short retry loop catches the response
-		// once it lands without burning the full 60s engine budget.
-		//
-		// Each retry first re-runs waitForResponse (which the tightened
-		// minLength=50 + stableRounds=5 makes more accurate), so we don't
-		// just blindly re-click the copy button on a still-streaming
-		// assistant message.
-		let extractResult;
-		for (let attempt = 0; attempt < 3; attempt++) {
-			// Re-wait on retries (attempt 0 already waited; attempts 1-2
-			// didn't because we already passed waitForResponse once). Skip
-			// the wait on attempt 0 to avoid a redundant 20s budget burn.
-			if (attempt > 0) {
-				try {
-					await waitForResponse(tab, 10000);
-				} catch {
-					// Best-effort: fall through to extract which itself
-					// returns empty on a still-streaming page.
+			logStage(env, "stream-wait", startTime);
+			// waitForStreamComplete handles the in-browser poll in a single
+			// Runtime.evaluate call. If the response is still streaming past
+			// 20s (slow under tab throttling in `all` mode), fall back to
+			// node-side polls that release the WebSocket between each call.
+			// Together they stay well within the engine's 80s outer budget.
+			let asstLen = 0;
+			try {
+				asstLen = await waitForResponse(tab, 20000);
+			} catch (streamErr) {
+				console.error(
+					`[chatgpt] in-browser stream wait failed (${streamErr.message}); falling back to node-side polling`,
+				);
+				logStage(env, "stream-poll-fallback", startTime);
+				asstLen = await pollForResponseNodeSide(tab, 15000);
+			}
+			env.assistantTextLen = asstLen;
+			if (asstLen < 1) {
+				console.error(
+					"[chatgpt] Warning: assistant response may not have completed",
+				);
+			}
+
+			logStage(env, "extract", startTime);
+			// Retry extract up to 3 times with 2s delays. After stream-wait
+			// times out in all-mode under CDP contention, the assistant message
+			// may still be rendering. A short retry loop catches the response
+			// once it lands without burning the full 60s engine budget.
+			//
+			// Each retry first re-runs waitForResponse (which the tightened
+			// minLength=50 + stableRounds=5 makes more accurate), so we don't
+			// just blindly re-click the copy button on a still-streaming
+			// assistant message.
+			let extractResult;
+			for (let attempt = 0; attempt < 3; attempt++) {
+				// Re-wait on retries (attempt 0 already waited; attempts 1-2
+				// didn't because we already passed waitForResponse once). Skip
+				// the wait on attempt 0 to avoid a redundant 20s budget burn.
+				if (attempt > 0) {
+					try {
+						await waitForResponse(tab, 10000);
+					} catch {
+						// Best-effort: fall through to extract which itself
+						// returns empty on a still-streaming page.
+					}
+				}
+				extractResult = await extractAnswer(tab, env);
+				if (extractResult.answer) break;
+				if (attempt < 2) {
+					console.error(
+						`[chatgpt] Extract attempt ${attempt + 1} returned empty, retrying in 2s...`,
+					);
+					await new Promise((r) => setTimeout(r, 2000));
 				}
 			}
-			extractResult = await extractAnswer(tab, env);
-			if (extractResult.answer) break;
-			if (attempt < 2) {
-				console.error(
-					`[chatgpt] Extract attempt ${attempt + 1} returned empty, retrying in 2s...`,
-				);
-				await new Promise((r) => setTimeout(r, 2000));
+			answer = extractResult.answer;
+			sources = extractResult.sources;
+			if (!answer) {
+				env.blockedBy = "no-response";
+				env.skipped = extractResult.skipped || null;
+				let message = "ChatGPT returned no answer — assistant never responded";
+				if (extractResult.skipped === "no-user-message") {
+					message = "ChatGPT still on homepage — query was not submitted";
+				} else if (extractResult.skipped === "no-assistant-response") {
+					message = "ChatGPT did not return an assistant response after submit";
+				} else if (
+					extractResult.skipped === "header-stub" ||
+					extractResult.skipped === "citation-stub" ||
+					extractResult.skipped === "still-streaming"
+				) {
+					message =
+						"ChatGPT response did not finish rendering after 3 retries — assistant never rendered the body";
+				}
+				throw new Error(message);
 			}
 		}
-		const { answer, sources, skipped } = extractResult;
 		// If the DOM fallback skipped the response (no real assistant
 		// message after the user's query), surface a clear error so the
 		// caller doesn't silently consume the static homepage greeting

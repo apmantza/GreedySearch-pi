@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- **ChatGPT anonymous chat now works headless** (`extractors/chatgpt.mjs`, `extractors/common.mjs`, `src/search/recovery.mjs`) — chatgpt.com serves anonymous `/uc/<uuid>` conversations that work without sign-in (single-query sandbox; persistent features require auth). The old `PROSE_SELECTOR = "div.ProseMirror"` path didn't match the anonymous textarea, so the extractor fell through to a string-regex sign-in check that incorrectly flagged the page as a login wall — which then triggered visible-mode retry loops that couldn't actually solve it (cookies don't bypass the structural selector mismatch). The extractor now dispatches on whichever selector resolves first: `div.ProseMirror` + `data-message-author-role` for signed-in conversations, or `<textarea name="prompt">` + `button[aria-label="Send message"]` for anonymous `/uc/` conversations. The anonymous path uses a React-friendly native value setter (the controlled textarea ignores plain `.value =`), waits for the `ChatGPT said:` text block to stabilize, and slices the response body between that marker and the next `You said:` or known footer. `handleError` now also attaches the envelope to the thrown `Error` so the parent process can inspect `blockedBy` without re-parsing stdout; `"login-required"` is registered in `NON_RECOVERABLE_BLOCKED_BY` so the legacy string fallback doesn't kick visible recovery when the page does genuinely require auth.
+
 ## [2.1.6] — 2026-07-21
 
 ### Added

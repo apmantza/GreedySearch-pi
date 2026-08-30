@@ -12,9 +12,16 @@ export const HEADLESS_RECOVERY_ENGINES = [
 
 // blockedBy values that indicate visible-mode cookies CANNOT bypass the block.
 // These still match the "headless blocked" shape but should NOT trigger
-// visible recovery — the block is account-level (rate limit, ban) or
-// structural (page redesign), not session-level.
-const NON_RECOVERABLE_BLOCKED_BY = new Set(["rate-limit"]);
+// visible recovery — the block is account-level (rate limit, ban, sign-in
+// wall) or structural (page redesign), not session-level.
+const NON_RECOVERABLE_BLOCKED_BY = new Set([
+	"rate-limit",
+	// chatgpt.com now requires a signed-in account to use the chat input.
+	// The anonymous landing page only exposes a decorative <textarea> with
+	// a "Log in / Sign up" wall; cookies from a visible session don't help
+	// because there is no session to fall back to.
+	"login-required",
+]);
 
 const HEADLESS_BLOCKED_PATTERN =
 	/timed out|timeout|verification|captcha|cloudflare|turnstile|input not found|ask-input|copy button hidden|sign.in|login required/i;

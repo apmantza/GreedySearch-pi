@@ -30,9 +30,6 @@ const VERIFY_DETECT_JS = `
 (function() {
   var url = document.location.href;
 
-  // --- Google "sorry" page (hard CAPTCHA, can't auto-solve) ---
-  if (url.includes('/sorry/') || url.includes('sorry.google')) return 'sorry-page';
-
   // --- Microsoft account verification page ---
   if (url.includes('login.microsoftonline.com') || url.includes('login.live.com') || url.includes('account.microsoft.com')) {
     var msBtns = Array.from(document.querySelectorAll('button, input[type=submit], a'));
@@ -41,11 +38,28 @@ const VERIFY_DETECT_JS = `
   }
 
   // --- Copilot / modal verification ---
-  var modal = document.querySelector('[role="dialog"], .b_modal, [class*="verify"], [class*="challenge"]');
+  // Skip hidden / off-screen dialogs. chatgpt.com keeps multiple
+  // role=dialog prefetch panels in the DOM (settings, search, sign-up
+  // CTAs) with display:none and zero rects; their button text matches
+  // the regex below but clicking them either fails or bounces the
+  // user into an unrelated feature. The verify path should only fire
+  // on dialogs the user can actually see.
+  var allModalCandidates = Array.from(document.querySelectorAll('[role="dialog"], .b_modal, [class*="verify"], [class*="challenge"]'));
+  var modal = allModalCandidates.find(function(m) {
+    var cs = getComputedStyle(m);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+    var r = m.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return false;
+    return true;
+  });
   if (modal) {
     var modalBtns = Array.from(modal.querySelectorAll('button, a[role="button"], input[type="submit"]'));
     var actionBtn = modalBtns.find(b => /^(continue|verify|submit|next|i agree|accept|got it)$/i.test(b.innerText?.trim() || b.value || ''));
-    if (actionBtn) { actionBtn.setAttribute('data-gs-verify','1'); return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:actionBtn.innerText?.trim()}); }
+    if (actionBtn) {
+      var _md = { found: true, modalDisplay: getComputedStyle(modal).display, modalRect: { w: modal.getBoundingClientRect().width, h: modal.getBoundingClientRect().height }, btnText: actionBtn.innerText?.trim(), btnRect: { w: actionBtn.getBoundingClientRect().width, h: actionBtn.getBoundingClientRect().height } };
+      actionBtn.setAttribute('data-gs-verify','1');
+      return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:actionBtn.innerText?.trim(), _dbg: _md});
+    }
   }
 
   // --- Turnstile / Cloudflare challenge iframe (return coordinates for humanClickXY) ---
@@ -96,8 +110,27 @@ const VERIFY_DETECT_JS = `
   // wall — a much worse outcome than the original search failure we were
   // trying to recover from. The exclusion list must cover both OAuth
   // providers AND generic "sign in / log in / with email" patterns.
+  // Also skip buttons inside hidden dialogs (display:none, visibility
+  // hidden, or zero bounding rect) — chatgpt.com keeps prefetch panels
+  // with Continue/Sign up buttons that match the regex below but live
+  // in off-screen dialogs the user can't interact with.
   var btns = Array.from(document.querySelectorAll('button, input[type=submit], a[role=button]'));
+  function isButtonVisible(b) {
+    var cs = getComputedStyle(b);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+    var r = b.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return false;
+    var host = b.closest('[role="dialog"]');
+    if (host) {
+      var hcs = getComputedStyle(host);
+      if (hcs.display === 'none' || hcs.visibility === 'hidden') return false;
+      var hr = host.getBoundingClientRect();
+      if (hr.width === 0 || hr.height === 0) return false;
+    }
+    return true;
+  }
   var verify = btns.find(b => {
+    if (!isButtonVisible(b)) return false;
     var t = (b.innerText?.trim() || b.value || '').toLowerCase();
     var isVerifyLike = (t === 'continue' || t === 'proceed' || t === 'next' ||
                        t.startsWith('verify ') || t.startsWith('human ') || t === 'i am human' || t.includes('robot check')) &&
@@ -118,7 +151,11 @@ const VERIFY_DETECT_JS = `
     if (!isSignIn && b.closest("form")) isSignIn = true;
     return !isSignIn;
   });
-  if (verify) { verify.setAttribute('data-gs-verify','1'); return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:verify.innerText?.trim()||verify.value}); }
+  if (verify) {
+    var _dbg = { found: true, text: verify.innerText?.trim(), rect: { w: verify.getBoundingClientRect().width, h: verify.getBoundingClientRect().height, x: verify.getBoundingClientRect().x, y: verify.getBoundingClientRect().y }, display: getComputedStyle(verify).display, dialogAncestor: !!verify.closest('[role="dialog"]'), dialogDisplay: verify.closest('[role="dialog"]') ? getComputedStyle(verify.closest('[role="dialog"]')).display : null };
+    verify.setAttribute('data-gs-verify','1');
+    return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:verify.innerText?.trim()||verify.value, _dbg: _dbg});
+  }
 
   // --- Google reCAPTCHA checkbox ---
   var recaptchaCheckbox = document.querySelector('.recaptcha-checkbox-unchecked, input[type=checkbox][id*="recaptcha"]');
@@ -226,7 +263,16 @@ async function browserLevelClick(x, y) {
 				new Promise((r) => {
 					const id = ++msgId;
 					const handler = (evt) => {
-						if (JSON.parse(evt.data).id === id) {
+						// Guard against malformed frames — malformed JSON
+						// would otherwise throw and leave the message
+						// handler un-removed, leaking a listener per send.
+						let parsed;
+						try {
+							parsed = JSON.parse(evt.data);
+						} catch {
+							return;
+						}
+						if (parsed && parsed.id === id) {
 							ws.removeEventListener("message", handler);
 							r();
 						}
@@ -348,7 +394,15 @@ export async function humanClickElement(tab, cdpFn, selector) {
 		return null; // Element not found
 	}
 
-	const parsed = JSON.parse(rect);
+	let parsed;
+	try {
+		parsed = JSON.parse(rect);
+	} catch {
+		// Malformed response from the bounding-rect eval (shouldn't
+		// happen, but the eval could return a non-JSON sentinel under
+		// edge conditions). Treat as element-not-found.
+		return null;
+	}
 	// Skip elements with zero dimensions or off-screen position — clicking at
 	// (0,0) is a false positive (hidden/unmounted element matched the selector).
 	if (parsed.w === 0 || parsed.h === 0 || (parsed.x === 0 && parsed.y === 0)) {
@@ -419,6 +473,37 @@ export async function detectVerificationChallenge(tab, cdp) {
 		);
 		if (cfIframe) return cfIframe;
 		return result;
+	}
+
+	// Transient-challenge filter. Cloudflare's edge sometimes serves a
+	// Turnstile iframe / #cf-turnstile host for 200-800ms during the
+	// initial page load, then the page transitions past it before any
+	// user interaction happens (e.g. chatgpt.com after Page.navigate
+	// completes — the tab briefly shows the CF interstitial before
+	// redirecting to the landing page). Without this filter, every fresh
+	// navigation to chatgpt.com in a warm Chrome session trips the
+	// verifier's click path, the click target is already gone by the time
+	// CDP dispatches it, and the engine surfaces a spurious
+	// "needs-human" that triggers a visible-recovery cycle.
+	//
+	// We re-probe after a short settle window. If the challenge cleared
+	// (page transitioned past it), return null — the verifier will see
+	// the landing page on its next call. If the challenge persists
+	// across both probes, treat it as real and return it. The settle
+	// window is kept under 1.5s so we don't meaningfully extend
+	// clean-page nav times.
+	if (result && result !== "null" && result !== "sorry-page") {
+		await new Promise((r) => setTimeout(r, 800));
+		const retry = await cdp(["eval", tab, VERIFY_DETECT_JS]).catch(() => null);
+		if (!retry || retry === "null") {
+			// Challenge cleared between probes — treat as transient.
+			return null;
+		}
+		// If the retry confirms the challenge, return the retry result so
+		// we work with fresh coordinates (the iframe may have re-rendered
+		// between probes; using the first probe's stale coords wastes a
+		// click attempt).
+		return retry;
 	}
 
 	if (result && result !== "null") return result;
