@@ -5,6 +5,9 @@ const DEFAULT_HEADERS = {
 	"user-agent": "GreedySearch/1.0",
 	accept: "application/vnd.github+json",
 	"x-github-api-version": "2022-11-28",
+	...(process.env.GITHUB_TOKEN
+		? { authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
+		: {}),
 };
 
 /**
