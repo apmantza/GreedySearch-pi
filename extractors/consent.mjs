@@ -56,6 +56,13 @@ const VERIFY_DETECT_JS = `
     var modalBtns = Array.from(modal.querySelectorAll('button, a[role="button"], input[type="submit"]'));
     var actionBtn = modalBtns.find(b => /^(continue|verify|submit|next|i agree|accept|got it)$/i.test(b.innerText?.trim() || b.value || ''));
     if (actionBtn) {
+      // Skip form-submit buttons (chatgpt.com's prefetch dialogs have
+      // a "Continue" submit-type button inside a sign-in form like
+      // <form action="https://chatgpt.com/auth/login_with">). They
+      // match the regex but clicking them navigates into a login flow
+      // — a much worse outcome than a verifier false positive. The
+      // catch-all path already has this guard; mirror it here.
+      if (actionBtn.closest("form")) return null;
       var _md = { found: true, modalDisplay: getComputedStyle(modal).display, modalRect: { w: modal.getBoundingClientRect().width, h: modal.getBoundingClientRect().height }, btnText: actionBtn.innerText?.trim(), btnRect: { w: actionBtn.getBoundingClientRect().width, h: actionBtn.getBoundingClientRect().height } };
       actionBtn.setAttribute('data-gs-verify','1');
       return JSON.stringify({t:'sel',s:'[data-gs-verify="1"]',txt:actionBtn.innerText?.trim(), _dbg: _md});
