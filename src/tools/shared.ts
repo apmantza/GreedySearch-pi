@@ -34,7 +34,8 @@ export function cdpMissingResult(): ToolResult {
 		content: [
 			{
 				type: "text",
-				text: "cdp.mjs missing — try reinstalling: pi install git:github.com/apmantza/GreedySearch-pi",
+				text:
+					"cdp.mjs missing — try reinstalling: pi install git:github.com/apmantza/GreedySearch-pi",
 			},
 		],
 		details: {} as Record<string, unknown>,
@@ -119,9 +120,7 @@ export function runSearch(
 			if (process.platform === "win32") proc.kill();
 			else proc.kill("SIGTERM");
 			reject(
-				new Error(
-					`greedy-search child timed out after ${timeoutMs}ms (watchdog)`,
-				),
+				new Error(`greedy-search child timed out after ${timeoutMs}ms (watchdog)`),
 			);
 		}, timeoutMs);
 		timer.unref();
@@ -152,9 +151,7 @@ export function runSearch(
 					});
 				}
 				// Synthesis progress: skipped (manual verification) or done/error
-				const synthMatch = line.match(
-					/^PROGRESS:synthesis:(done|error|skipped)$/,
-				);
+				const synthMatch = line.match(/^PROGRESS:synthesis:(done|error|skipped)$/);
 				if (synthMatch && onProgress) {
 					onProgress({
 						type: "engine",
@@ -212,9 +209,7 @@ export function runSearch(
 				try {
 					resolve(JSON.parse(out.trim()));
 				} catch {
-					reject(
-						new Error(`Invalid JSON from search.mjs: ${out.slice(0, 200)}`),
-					);
+					reject(new Error(`Invalid JSON from search.mjs: ${out.slice(0, 200)}`));
 				}
 			}
 		});
@@ -314,9 +309,7 @@ export function makeProgressTracker(
 			// padding-room for variable emoji widths).
 			const statusLine = parts.join(" · ");
 			lines.push(
-				statusLine.length > 90
-					? statusLine.slice(0, 88) + "…"
-					: statusLine,
+				statusLine.length > 90 ? statusLine.slice(0, 88) + "…" : statusLine,
 			);
 		}
 

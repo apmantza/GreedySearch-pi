@@ -214,8 +214,7 @@ function pickAnswerArticle(articles, query = "") {
 			if (!normalizedQuery) return true;
 			const normalizedText = normalizeForCompare(text);
 			return (
-				!normalizedText.includes(normalizedQuery) ||
-				text.length > query.length * 3
+				!normalizedText.includes(normalizedQuery) || text.length > query.length * 3
 			);
 		});
 	return candidates.at(-1) || "";
@@ -302,12 +301,7 @@ async function extractFromIframes(mainTab, env) {
 		);
 
 		// Get CDP targets to find the copilot.fun iframe
-		const targetsRaw = await cdp([
-			"evalraw",
-			mainTab,
-			"Target.getTargets",
-			"{}",
-		]);
+		const targetsRaw = await cdp(["evalraw", mainTab, "Target.getTargets", "{}"]);
 		const targets = JSON.parse(targetsRaw);
 		const targetInfos = targets.targetInfos || [];
 		const funFrame = targetInfos.find(
@@ -327,9 +321,7 @@ async function extractFromIframes(mainTab, env) {
 		]).catch(() => "");
 
 		if (innerText) {
-			console.error(
-				`[bing] DOM extraction succeeded (${innerText.length} chars)`,
-			);
+			console.error(`[bing] DOM extraction succeeded (${innerText.length} chars)`);
 			return { answer: innerText };
 		}
 
@@ -382,8 +374,7 @@ async function main() {
 		try {
 			const host = new URL(currentUrl).hostname.toLowerCase();
 			onCopilot =
-				host === "copilot.microsoft.com" ||
-				host.endsWith(".copilot.microsoft.com");
+				host === "copilot.microsoft.com" || host.endsWith(".copilot.microsoft.com");
 		} catch {}
 
 		if (!onCopilot) {
@@ -406,11 +397,9 @@ async function main() {
 			await new Promise((r) => setTimeout(r, TIMING.afterVerify));
 
 			// Re-navigate if we got redirected
-			const currentUrl = await cdp([
-				"eval",
-				tab,
-				"document.location.href",
-			]).catch(() => "");
+			const currentUrl = await cdp(["eval", tab, "document.location.href"]).catch(
+				() => "",
+			);
 			let onCopilot = false;
 			try {
 				const host = new URL(currentUrl).hostname.toLowerCase();

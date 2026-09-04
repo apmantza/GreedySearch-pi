@@ -72,12 +72,7 @@ async function fetchSourceViaChrome(tab, url, maxChars = 8000) {
 		if (resource.stream) {
 			try {
 				const ioRaw = await cdp(
-					[
-						"evalraw",
-						tab,
-						"IO.read",
-						JSON.stringify({ handle: resource.stream }),
-					],
+					["evalraw", tab, "IO.read", JSON.stringify({ handle: resource.stream })],
 					10000,
 				);
 				const ioResult = JSON.parse(ioRaw);
@@ -367,11 +362,7 @@ export async function fetchSourceContent(url, maxChars = 8000) {
 		try {
 			const chromeTab = await openNewTab();
 			try {
-				const chromeResult = await fetchSourceViaChrome(
-					chromeTab,
-					url,
-					maxChars,
-				);
+				const chromeResult = await fetchSourceViaChrome(chromeTab, url, maxChars);
 				if (chromeResult.content && chromeResult.content.length > 100) {
 					return chromeResult;
 				}

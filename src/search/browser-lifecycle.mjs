@@ -231,14 +231,11 @@ export function readMetadata() {
 					clientPids: Array.isArray(parsed.clientPids)
 						? parsed.clientPids.filter((p) => Number.isInteger(p) && p > 0)
 						: [],
-					sessionMode:
-						parsed.sessionMode === "visible" ? "visible" : "headless",
+					sessionMode: parsed.sessionMode === "visible" ? "visible" : "headless",
 					lastActivity: Number.isFinite(parsed.lastActivity)
 						? parsed.lastActivity
 						: 0,
-					launchedAt: Number.isFinite(parsed.launchedAt)
-						? parsed.launchedAt
-						: 0,
+					launchedAt: Number.isFinite(parsed.launchedAt) ? parsed.launchedAt : 0,
 				};
 			}
 		}
@@ -260,10 +257,7 @@ export function readMetadata() {
 			: "headless";
 
 		const lastActivity = existsSync(LEGACY_ACTIVITY_FILE)
-			? Number.parseInt(
-					readFileSync(LEGACY_ACTIVITY_FILE, "utf8").trim(),
-					10,
-				) || 0
+			? Number.parseInt(readFileSync(LEGACY_ACTIVITY_FILE, "utf8").trim(), 10) || 0
 			: 0;
 
 		return {

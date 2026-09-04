@@ -33,12 +33,12 @@ import { ensureChrome } from "../src/search/chrome.mjs";
 const START_URL = "https://logically.app/research-assistant/";
 
 const SELECTORS = {
-	input:
-		'div.ProseMirror[contenteditable="true"]',
+	input: 'div.ProseMirror[contenteditable="true"]',
 	submitButton:
 		'.chat-control button[class*="MuiButton-black"], button[type="submit"]',
-	answerContainer: "#last-message .chat-content, [class*=\"chat-content\"]",
-	citationSpan: "#last-message .chat-content span[title], [class*=\"chat-content\"] span[title]",
+	answerContainer: '#last-message .chat-content, [class*="chat-content"]',
+	citationSpan:
+		'#last-message .chat-content span[title], [class*="chat-content"] span[title]',
 };
 
 async function startNewChat(tab) {
@@ -71,9 +71,7 @@ async function activateTab(tab) {
 		await cdp(["list"]);
 		const cachePath = `${tmpdir().replaceAll("\\\\", "/")}/cdp-pages.json`;
 		const pages = JSON.parse(readFileSync(cachePath, "utf8"));
-		const fullTargetId = pages.find((p) =>
-			p.targetId?.startsWith(tab),
-		)?.targetId;
+		const fullTargetId = pages.find((p) => p.targetId?.startsWith(tab))?.targetId;
 		if (fullTargetId) {
 			await cdp([
 				"browse",

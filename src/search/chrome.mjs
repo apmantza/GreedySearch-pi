@@ -89,11 +89,7 @@ export function isChromeHeadless() {
 		const headless = detectHeadlessFromChromeCommandLine(cmdLine);
 		if (headless !== null) {
 			try {
-				writeFileSync(
-					CHROME_MODE_FILE,
-					headless ? "headless" : "visible",
-					"utf8",
-				);
+				writeFileSync(CHROME_MODE_FILE, headless ? "headless" : "visible", "utf8");
 			} catch {}
 			return headless;
 		}
@@ -533,14 +529,11 @@ export async function refreshPortFile() {
 
 	try {
 		const body = await new Promise((res, rej) => {
-			const req = http.get(
-				`http://localhost:${GREEDY_PORT}/json/version`,
-				(r) => {
-					let b = "";
-					r.on("data", (d) => (b += d));
-					r.on("end", () => res(b));
-				},
-			);
+			const req = http.get(`http://localhost:${GREEDY_PORT}/json/version`, (r) => {
+				let b = "";
+				r.on("data", (d) => (b += d));
+				r.on("end", () => res(b));
+			});
 			req.on("error", rej);
 			req.setTimeout(3000, () => {
 				req.destroy();
@@ -665,8 +658,7 @@ export async function ensureChrome() {
 		);
 		const launchArgs = [join(__dir, "..", "..", "bin", "launch.mjs")];
 		// Headless is the default unless GREEDY_SEARCH_VISIBLE=1
-		if (process.env.GREEDY_SEARCH_VISIBLE !== "1")
-			launchArgs.push("--headless");
+		if (process.env.GREEDY_SEARCH_VISIBLE !== "1") launchArgs.push("--headless");
 		await new Promise((resolve, reject) => {
 			// Use process.execPath instead of bare "node" so we are not relying on PATH
 			// (SonarCloud S4036).

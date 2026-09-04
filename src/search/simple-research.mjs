@@ -140,17 +140,13 @@ async function runFastAllSearch(query, { locale = null, short = true } = {}) {
 		proc.on("close", (code) => {
 			clearTimeout(t);
 			if (code !== 0) {
-				reject(
-					new Error(err.trim() || `search child exited with code ${code}`),
-				);
+				reject(new Error(err.trim() || `search child exited with code ${code}`));
 				return;
 			}
 			try {
 				resolve(JSON.parse(out.trim()));
 			} catch {
-				reject(
-					new Error(`Invalid JSON from research child: ${out.slice(0, 200)}`),
-				);
+				reject(new Error(`Invalid JSON from research child: ${out.slice(0, 200)}`));
 			}
 		});
 	});
@@ -229,9 +225,7 @@ export async function runSimpleResearchMode({
 		`${searchAngles.length} angles in parallel`,
 	);
 	const angleOutcomes = await Promise.allSettled(
-		searchAngles.map((angle) =>
-			runFastAllSearch(angle, { locale, short: true }),
-		),
+		searchAngles.map((angle) => runFastAllSearch(angle, { locale, short: true })),
 	);
 	for (let i = 0; i < searchAngles.length; i++) {
 		const angle = searchAngles[i];
@@ -263,10 +257,7 @@ export async function runSimpleResearchMode({
 				Math.min(3, maxSources),
 			);
 			progressTracker.endFetch(true);
-			combinedSources = mergeFetchDataIntoSources(
-				combinedSources,
-				fetchedSources,
-			);
+			combinedSources = mergeFetchDataIntoSources(combinedSources, fetchedSources);
 		} catch (error) {
 			progressTracker.endFetch(false);
 			process.stderr.write(
@@ -401,10 +392,7 @@ export async function runSimpleResearchMode({
 	const citationAudit = auditCitations(synthesis.answer || "", combinedSources);
 
 	// Citation URL reachability check
-	const citationUrls = await runCitationUrlCheck(
-		combinedSources,
-		citationAudit,
-	);
+	const citationUrls = await runCitationUrlCheck(combinedSources, citationAudit);
 
 	reconcileQuestionsFromSynthesis(questions, synthesis, citationAudit);
 	const allGaps = uniqueStrings(synthesis.caveats || []);
@@ -464,8 +452,7 @@ export async function runSimpleResearchMode({
 					actionsRun: 1,
 					searches: 1,
 					fetches: fetchedSources.length,
-					sourcesFetched: fetchedSources.filter((s) => s?.contentChars > 100)
-						.length,
+					sourcesFetched: fetchedSources.filter((s) => s?.contentChars > 100).length,
 					engineFailures: [],
 					floorMet: floor.floorMet,
 				},
@@ -527,8 +514,8 @@ export async function runSimpleResearchMode({
 			sourcesCount: combinedSources.length,
 			fetchedSourceSuccessRate:
 				fetchedSources.length > 0
-					? fetchedSources.filter((source) => source.contentChars > 100)
-							.length / fetchedSources.length
+					? fetchedSources.filter((source) => source.contentChars > 100).length /
+						fetchedSources.length
 					: 0,
 			agreementLevel: synthesis.agreement?.level || "mixed",
 			floorMet: floor.floorMet,

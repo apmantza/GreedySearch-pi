@@ -335,7 +335,9 @@ async function main() {
 				],
 				18000,
 			).catch(() => "timeout");
-			if (_inputReady !== "ready") {
+			if (_inputReady === "ready") {
+				await new Promise((r) => setTimeout(r, 600));
+			} else {
 				// Retry navigation up to 2 more times — the first nav may have
 				// been preempted by CDP contention in all-mode
 				for (let retry = 0; retry < 2; retry++) {
@@ -363,8 +365,6 @@ async function main() {
 					).catch(() => false);
 					if (_retryReady === "true") break;
 				}
-			} else {
-				await new Promise((r) => setTimeout(r, 600));
 			}
 		}
 		// Handle verification challenges (Cloudflare Turnstile, etc.)
