@@ -14,7 +14,6 @@ import {
 import {
 	auditCitations,
 	buildFinalReportPrompt,
-	buildSynthesisFromEvidencePrompt,
 	computeResearchFloor,
 	createQuestionLedger,
 	extractEvidenceFromSources,
@@ -315,7 +314,7 @@ export async function runSimpleResearchMode({
 		);
 	}
 
-	// Step 4: Single-pass synthesis
+	// Step 4: Single-pass synthesis — life-or-death: evidence already contains quoted evidence + answers, build synthesis locally (no 2nd Gemini) when evidence exists
 	process.stderr.write("PROGRESS:research:simple:synthesizing\n");
 	let synthesis = {
 		answer: "",
@@ -328,29 +327,12 @@ export async function runSimpleResearchMode({
 	};
 
 	if (evidenceItems.length > 0) {
-		try {
-			progressTracker.startAction("synth-evidence", "from evidence");
-			const rawReport = await runGeminiPrompt(
-				buildSynthesisFromEvidencePrompt(
-					query,
-					combinedSources,
-					questions,
-					evidenceItems,
-				),
-				{ timeoutMs: 120_000 },
-			);
-			progressTracker.endAction();
-			synthesis = {
-				...synthesis,
-				...(parseStructuredJson(rawReport?.answer || "") || {}),
-			};
-			synthesis.synthesized =
-				Array.isArray(synthesis.claims) && synthesis.claims.length > 0;
-		} catch (error) {
-			process.stderr.write(
-				`[greedysearch] Evidence synthesis failed: ${error.message}\n`,
-			);
-		}
+		// Build answer directly from evidence (no 2nd Gemini) — evidence already has sourceId, evidence, summary
+		const answerParts = evidenceItems.slice(0, 3).map((ev) => `${ev.summary || ev.evidence || ""} [${ev.sourceId || ev.id || "S1"}]`);
+		synthesis.answer = answerParts.join("\n\n");
+		synthesis.claims = evidenceItems.slice(0, 4).map((ev, i) => ({ id: `C${i + 1}`, text: ev.summary || ev.evidence || "", sourceIds: [ev.sourceId || "S1"] }));
+		synthesis.synthesized = synthesis.claims.length > 0;
+		synthesis.agreement = { level: "supported", summary: "Built from extracted evidence." };
 	}
 
 	if (!synthesis.synthesized && combinedSources.length > 0) {
