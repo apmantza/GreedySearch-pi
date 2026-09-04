@@ -92,7 +92,7 @@ async function extractAnswerFromDom(tab, env) {
 	}
 
 	// Perplexity renders the answer in a prose container after the user message.
-	// First wait for the answer to actually appear (up to 5s), then extract it.
+	// First wait for the answer to actually appear (up to 2s) — 5s was tail-wasting, 2s is enough for prose to land and saves ~3s on all fan-out.
 	// Note: the looksLikeAnswerText helper is inlined into the browser-side
 	// eval string below (it can't reference a Node-side function via template).
 	const domExtract = await cdp(
@@ -100,7 +100,7 @@ async function extractAnswerFromDom(tab, env) {
 			"eval",
 			tab,
 			`new Promise((resolve) => {
-				const _deadline = Date.now() + 5000;
+				const _deadline = Date.now() + 2000;
 				function _looksLikeAnswerText(text) {
 					const t = (text || '').trim();
 					if (t.length > 50) return true;
@@ -241,9 +241,7 @@ async function extractAnswer(tab, env) {
 		console.error("[perplexity] Clipboard empty — trying DOM fallback...");
 		const domResult = await extractAnswerFromDom(tab, env);
 		if (domResult) {
-			console.error(
-				`[perplexity] DOM fallback succeeded (${env.fallbackUsed})`,
-			);
+			console.error(`[perplexity] DOM fallback succeeded (${env.fallbackUsed})`);
 			return domResult;
 		}
 		throw new Error("Clipboard interceptor returned empty text");
@@ -297,8 +295,7 @@ async function main() {
 		let onPerplexity = false;
 		try {
 			const host = new URL(currentUrl).hostname.toLowerCase();
-			onPerplexity =
-				host === "perplexity.ai" || host.endsWith(".perplexity.ai");
+			onPerplexity = host === "perplexity.ai" || host.endsWith(".perplexity.ai");
 		} catch {}
 
 		if (!onPerplexity) {
@@ -517,9 +514,7 @@ async function main() {
 		const { answer, sources } = await extractAnswer(tab, env);
 
 		if (!answer)
-			throw new Error(
-				"No answer extracted — Perplexity may not have responded",
-			);
+			throw new Error("No answer extracted — Perplexity may not have responded");
 
 		const finalUrl = await cdp(["eval", tab, "document.location.href"]).catch(
 			() => "",

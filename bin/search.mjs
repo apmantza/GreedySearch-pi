@@ -67,6 +67,7 @@ import { runResearchMode } from "../src/search/research.mjs";
 import { minimizeViaCDP } from "../src/search/minimize.mjs";
 import {
 	cdpIsAvailable as brokerCdpIsAvailable,
+	collectProviderResults,
 	ensureWarmPool,
 	warmPoolStats,
 } from "../src/search/cdp-broker.mjs";
@@ -320,7 +321,9 @@ async function main() {
 				await ensureWarmPool(ALL_ENGINES.length);
 				if (process.env.PI_TIMING === "1") {
 					const stats = warmPoolStats();
-					process.stderr.write(`[greedysearch] warm pool: ${stats.idle} idle / ${stats.total} total${stats.degradedNotice ? ` — ${stats.degradedNotice}` : ""}\n`);
+					process.stderr.write(
+						`[greedysearch] warm pool: ${stats.idle} idle / ${stats.total} total${stats.degradedNotice ? ` — ${stats.degradedNotice}` : ""}\n`,
+					);
 				}
 			}
 		} catch {}
@@ -352,47 +355,35 @@ async function main() {
 		};
 
 		try {
-			const results = await Promise.allSettled(
-				ALL_ENGINES.map((e, i) =>
-					runExtractor(
-						ENGINES[e],
-						normalizeQuery(query),
-						engineTabs[i],
-						short,
-						engineTimeoutFor(e),
-						locale,
-					)
-						.then((r) => {
-							process.stderr.write(`PROGRESS:${e}:done\n`);
-							return { engine: e, ...r };
-						})
-						.catch((err) => {
-							// Do not emit PROGRESS:error yet: Bing/Perplexity may recover in
-							// visible mode. Emit the final status after recovery has run.
-							throw err;
-						}),
-				),
-			);
-
+			// 19s deadline fence — pi-webaio style: don't let one slow engine stall the batch, but keep all 4 (19s > perplexity 15-18s, < 35s tail)
+			const deadlineMs = Number.parseInt(process.env.GREEDY_ALL_DEADLINE_MS || "19000", 10);
+			const providers = ALL_ENGINES.map((e, i) => [
+				e,
+				runExtractor(ENGINES[e], normalizeQuery(query), engineTabs[i], short, engineTimeoutFor(e), locale)
+					.then((r) => {
+						process.stderr.write(`PROGRESS:${e}:done\n`);
+						return { engine: e, ...r };
+					})
+					.catch((err) => {
+						const msg = err?.message || "unknown error";
+						if (err?.lastStage) process.stderr.write(`[greedysearch] ${e} failed at stage '${err.lastStage}': ${msg}\n`);
+						if (err?.partialErr) process.stderr.write(`[greedysearch] ${e} tail stderr:\n${err.partialErr}\n`);
+						return { engine: e, error: msg, _envelope: err?.envelope || null };
+					}),
+			]);
+			const { values, timedOut } = await collectProviderResults(providers, deadlineMs);
+			if (timedOut) process.stderr.write(`[greedysearch] ⏱ deadline ${deadlineMs}ms hit — returning ${Object.keys(values).length}/${ALL_ENGINES.length} engines\n`);
 			const out = {};
-			for (let i = 0; i < results.length; i++) {
-				const r = results[i];
-				if (r.status === "fulfilled") {
-					out[r.value.engine] = r.value;
+			for (let i = 0; i < ALL_ENGINES.length; i++) {
+				const e = ALL_ENGINES[i];
+				const v = values[e];
+				if (v && !v.error) {
+					out[e] = v;
+				} else if (v && v.error) {
+					out[e] = v;
 				} else {
-					const err = r.reason;
-					const msg = err?.message || "unknown error";
-					out[ALL_ENGINES[i]] = { error: msg };
-					if (err?.lastStage) {
-						process.stderr.write(
-							`[greedysearch] ${ALL_ENGINES[i]} failed at stage '${err.lastStage}': ${msg}\n`,
-						);
-					}
-					if (err?.partialErr) {
-						process.stderr.write(
-							`[greedysearch] ${ALL_ENGINES[i]} tail stderr:\n${err.partialErr}\n`,
-						);
-					}
+					const msg = timedOut ? "deadline exceeded" : "unknown error";
+					out[e] = { error: msg };
 				}
 			}
 
@@ -550,8 +541,7 @@ async function main() {
 						// polling budget is exhausted.
 						const allPollResults = await Promise.all(
 							stillBlocked.map(async (blockedEngine) => {
-								const tab =
-									retryTabs[recoveryCandidates.indexOf(blockedEngine)];
+								const tab = retryTabs[recoveryCandidates.indexOf(blockedEngine)];
 								const result = await waitForChallengeCleared({
 									tab,
 									engine: blockedEngine,
@@ -655,11 +645,7 @@ async function main() {
 			// Fetch all sources in a single batch (concurrency = source count).
 			if (shouldFetchSources && out._sources.length > 0) {
 				process.stderr.write("PROGRESS:source-fetch:start\n");
-				const fetchedSources = await fetchMultipleSources(
-					out._sources,
-					5,
-					8000,
-				);
+				const fetchedSources = await fetchMultipleSources(out._sources, 5, 8000);
 
 				out._sources = mergeFetchDataIntoSources(out._sources, fetchedSources);
 				out._fetchedSources = writeSourcesToFiles(fetchedSources);
@@ -691,9 +677,7 @@ async function main() {
 					};
 					process.stderr.write("PROGRESS:synthesis:done\n");
 				} catch (e) {
-					process.stderr.write(
-						`[greedysearch] Synthesis failed: ${e.message}\n`,
-					);
+					process.stderr.write(`[greedysearch] Synthesis failed: ${e.message}\n`);
 					out._synthesis = {
 						error: e.message,
 						synthesized: false,
@@ -706,8 +690,7 @@ async function main() {
 
 			if (fetchSource) {
 				const top = pickTopSource(out);
-				if (top)
-					out._topSource = await fetchTopSource(top.canonicalUrl || top.url);
+				if (top) out._topSource = await fetchTopSource(top.canonicalUrl || top.url);
 			}
 
 			// Include confidence metrics for grounded multi-engine searches.
