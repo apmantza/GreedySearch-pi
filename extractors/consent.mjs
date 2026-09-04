@@ -2,6 +2,28 @@ import { randomInt } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import http from "node:http";
 
+// Escape unsafe chars for code construction via JSON.stringify — mitigates js/bad-code-sanitization (CWE-94).
+// JSON.stringify escapes quotes/backslashes, but not < > / etc which can break out of </script> when the
+// constructed code is ever evaluated in an HTML context. Escaping them as \uXXXX is the CodeQL-recommended fix.
+const _charMap = {
+	"<": "\\u003C",
+	">": "\\u003E",
+	"/": "\\u002F",
+	"\\": "\\\\",
+	"\b": "\\b",
+	"\f": "\\f",
+	"\n": "\\n",
+	"\r": "\\r",
+	"\t": "\\t",
+	"\0": "\\0",
+	"\u2028": "\\u2028",
+	"\u2029": "\\u2029",
+};
+function _escapeUnsafeChars(str) {
+	// eslint-disable-next-line no-control-regex -- intentional control-char escaping for js/bad-code-sanitization (CWE-94)
+	return String(str).replace(/[<\b\f\n\r\t\0\u2028\u2029]/g, (x) => _charMap[x] ?? x).replace(/\//g, "\\u002F");
+}
+
 // consent.mjs — auto-dismiss common cookie/consent banners and human-verification pages
 // Call dismissConsent(tab, cdpFn) after navigating to any page.
 
@@ -455,7 +477,7 @@ function tryHumanClick(tab, cdp, detectResult) {
 				// short settle: if the dialog transitioned back to hidden
 				// (page settled), the verifier returns null on the retry
 				// and we treat the original detection as transient.
-				const probeExpr = `(function(){ var el = document.querySelector(${JSON.stringify(info.s)}); if (!el) return 'gone'; var cs = getComputedStyle(el); var r = el.getBoundingClientRect(); return JSON.stringify({display: cs.display, visibility: cs.visibility, w: r.width, h: r.height}); })()`;
+				const probeExpr = `(function(){ var el = document.querySelector(${_escapeUnsafeChars(JSON.stringify(info.s))}); if (!el) return 'gone'; var cs = getComputedStyle(el); var r = el.getBoundingClientRect(); return JSON.stringify({display: cs.display, visibility: cs.visibility, w: r.width, h: r.height}); })()`;
 				const initial = await cdp(["eval", tab, probeExpr], 4000).catch(() => null);
 				if (initial && initial !== "gone" && initial !== "null") {
 					try {
