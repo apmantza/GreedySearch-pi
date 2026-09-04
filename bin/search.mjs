@@ -65,6 +65,11 @@ import {
 import { normalizeQuery } from "../src/search/query.mjs";
 import { runResearchMode } from "../src/search/research.mjs";
 import { minimizeViaCDP } from "../src/search/minimize.mjs";
+import {
+	cdpIsAvailable as brokerCdpIsAvailable,
+	ensureWarmPool,
+	warmPoolStats,
+} from "../src/search/cdp-broker.mjs";
 
 const CONFIG_DIR = join(homedir(), ".config", "greedysearch");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -308,6 +313,17 @@ async function main() {
 	}
 
 	if (engine === "all") {
+		// Warm CDP broker — ported from pi-webaio browser-pool: keep Chrome hot + tabs warm
+		try {
+			const poolOk = await brokerCdpIsAvailable();
+			if (poolOk) {
+				await ensureWarmPool(ALL_ENGINES.length);
+				if (process.env.PI_TIMING === "1") {
+					const stats = warmPoolStats();
+					process.stderr.write(`[greedysearch] warm pool: ${stats.idle} idle / ${stats.total} total${stats.degradedNotice ? ` — ${stats.degradedNotice}` : ""}\n`);
+				}
+			}
+		} catch {}
 		await cdp(["list"]); // refresh pages cache
 
 		// Create fresh tabs for each engine in parallel, seeded directly to the
@@ -565,6 +581,7 @@ async function main() {
 										);
 										out[p.engine] = result;
 										process.stderr.write(`PROGRESS:${p.engine}:done\n`);
+										return result;
 									} catch (resumeErr) {
 										process.stderr.write(
 											`[greedysearch] ⚠️  Resume extraction failed for ${p.engine}: ${resumeErr.message}\n`,
