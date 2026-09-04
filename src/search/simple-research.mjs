@@ -50,16 +50,12 @@ function uniqueStrings(items, limit = Infinity) {
 	return out;
 }
 
-// Build 3 distinct search angles for direct-mode research. Inspired by
-// Feynman's deepresearch prompt: definition, mechanism, current usage.
+// Life-or-death: 1 angle not 3 — 3 parallel all-engine searches = 12 tabs contending on port 9222, 30s wall. 1 angle = 4 tabs, 10s.
+// For simple queries ("What is X"), 1 angle is enough; complex queries use iterative mode with 3+ angles anyway.
 export function buildSearchAngles(query) {
 	const trimmed = String(query || "").trim();
 	if (!trimmed) return [];
-	return [
-		`${trimmed} — definition and overview`,
-		`${trimmed} — how it works, mechanism, or key details`,
-		`${trimmed} — current usage, comparison, or best practices`,
-	];
+	return [trimmed];
 }
 
 // Merge sources from multiple search angles, deduplicating by URL.
@@ -199,11 +195,8 @@ export async function runSimpleResearchMode({
 		`[greedysearch] Simple research mode: single-pass for "${trimText(query, 80)}"\n`,
 	);
 
-	// Progress bar with ETA — simple path does 3 search angles + 1 fetch
-	// batch + 1-2 synthesis calls. Use a conservative total so the ETA
-	// doesn't start at zero.
-	const searchAnglesCount = 3;
-	const totalSteps = searchAnglesCount + 1 + 2; // searches + fetch + 2 synth calls
+	const searchAnglesCount = 1;
+	const totalSteps = searchAnglesCount + 1 + 2; // 1 search + fetch + 2 synth calls
 	const progressTracker = createProgressTracker({
 		totalActions: totalSteps,
 		totalRounds: 1,
