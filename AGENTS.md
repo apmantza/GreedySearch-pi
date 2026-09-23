@@ -1,5 +1,7 @@
 # GreedySearch-pi Agent Guide
 
+Engineering principles: this project follows the project-neutral rules in https://github.com/apmantza/engineering-principles (PRINCIPLES.md); every agent harness on this machine carries a verbatim copy in its global instruction file. Read them first; this file adds only what is specific to this repository and wins on conflict.
+
 GreedySearch-pi is a Pi package/extension that registers the `greedy_search` tool. It automates a dedicated Chrome instance on port `9222` and queries AI/search engines through browser automation (Perplexity, Google AI, ChatGPT, Gemini, Bing Copilot, and opt-in research engines).
 
 ## Design goals
