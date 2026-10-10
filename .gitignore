@@ -24,6 +24,9 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# TLC model-checker artifacts
+tla/states/
+
 # Temp files
 *.tmp
 *.temp
