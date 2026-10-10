@@ -350,7 +350,12 @@ export async function getAnyTab() {
 
 export async function openNewTab(url = "about:blank") {
 	const anchor = await getAnyTab();
-	const hostname = new URL(url).hostname;
+	let hostname;
+	try {
+		hostname = new URL(url).hostname;
+	} catch {
+		throw new Error(`openNewTab: invalid URL "${url}"`);
+	}
 	const needsStealth =
 		hostname === "www.perplexity.ai" ||
 		hostname === "perplexity.ai" ||
@@ -368,7 +373,14 @@ export async function openNewTab(url = "about:blank") {
 			"Target.createTarget",
 			JSON.stringify({ url: "about:blank" }),
 		]);
-		const { targetId } = JSON.parse(raw);
+		let targetId;
+		try {
+			({ targetId } = JSON.parse(raw));
+		} catch {
+			throw new Error(
+				"openNewTab: unexpected CDP response for Target.createTarget — browser gone?",
+			);
+		}
 		const tid = targetId.slice(0, 8);
 		await cdp(["list"]).catch(() => null);
 
@@ -386,7 +398,14 @@ export async function openNewTab(url = "about:blank") {
 		"Target.createTarget",
 		JSON.stringify({ url }),
 	]);
-	const { targetId } = JSON.parse(raw);
+	let targetId;
+	try {
+		({ targetId } = JSON.parse(raw));
+	} catch {
+		throw new Error(
+			"openNewTab: unexpected CDP response for Target.createTarget — browser gone?",
+		);
+	}
 	await cdp(["list"]).catch(() => null);
 	return targetId;
 }
