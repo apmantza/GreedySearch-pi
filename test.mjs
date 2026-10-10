@@ -150,9 +150,7 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 		else failMsg(`normalize: ${label} — expected "${expected}", got "${got}"`);
 	}
 
-	subsection(
-		"Bing/Perplexity error matching — headless → visible auto-retry detection",
-	);
+	subsection("Headless → visible auto-retry detection");
 	// The auto-retry in bin/search.mjs uses this shared helper to decide
 	// whether to switch from headless to visible Chrome and retry.
 	const {
@@ -163,7 +161,7 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 	const cfTestCases = [
 		// [error message, expected match, label]
 		["input not found", true, 'legacy pattern: "input not found"'],
-		["Copilot input not found", true, 'extended: "input not found" in sentence'],
+		["ChatGPT input not found", true, 'extended: "input not found" in sentence'],
 		["VERIFICATION REQUIRED", true, 'legacy pattern: "VERIFICATION REQUIRED"'],
 		["verification failed", true, 'extended: "verification" in sentence'],
 		[
@@ -172,7 +170,7 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 			"new: CF closed-shadow-dom block triggers visible retry",
 		],
 		[
-			"Copilot verification required — please solve it manually in the browser window",
+			"Semantic Scholar verification required — please solve it manually in the browser window",
 			true,
 			"new: per-engine 'verification required' triggers visible retry",
 		],
@@ -202,9 +200,9 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 			"perplexity manual verification",
 		],
 		[
-			"Copilot verification required — please solve it manually in the browser window",
+			"Semantic Scholar verification required — please solve it manually in the browser window",
 			true,
-			"bing manual verification",
+			"recovery engine manual verification",
 		],
 		["selector changed", false, "non-verification extractor failure"],
 	];
@@ -222,14 +220,14 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 			error:
 				"Perplexity input not found — page may be blocked or in unexpected state",
 		},
-		bing: { error: "Copilot verification required" },
+		chatgpt: { error: "ChatGPT verification required" },
 		google: { error: "Google verification required" },
 	});
-	if (retryEngines.join(",") === "perplexity,bing") {
+	if (retryEngines.join(",") === "perplexity,chatgpt") {
 		passMsg("visible retry engines: google excluded from recovery");
 	} else {
 		failMsg(
-			`visible retry engines: expected perplexity,bing, got ${retryEngines.join(",")}`,
+			`visible retry engines: expected perplexity,chatgpt, got ${retryEngines.join(",")}`,
 		);
 	}
 
@@ -444,7 +442,7 @@ if (["", "all", "unit", "quick", "smoke", "synth"].includes(mode)) {
 					},
 				],
 			},
-			bing: {
+			chatgpt: {
 				sources: [
 					{
 						title: "Facebook mirror",
@@ -1228,7 +1226,7 @@ trailing note`);
 		google: { answer: "x".repeat(9000) },
 		chatgpt: { answer: "x".repeat(9000) },
 		gemini: { answer: "x".repeat(9000) },
-		bing: { answer: "x".repeat(9000) },
+		s2: { answer: "x".repeat(9000) },
 		"semantic-scholar": { answer: "x".repeat(9000) },
 	};
 	const groundedPrompt = buildSynthesisPrompt("test", manyResults, [], {
@@ -1363,9 +1361,6 @@ if (["", "all", "flags", "quick", "smoke"].includes(mode)) {
 	}
 
 	subsection("Testing engine aliases...");
-	// "b" (Bing Copilot) excluded: copilot.microsoft.com is login-walled,
-	// so the alias can never pass on a fresh session — an environmental
-	// failure, not a code one.
 	for (const alias of ["p", "g"]) {
 		const aliasFile = join(resultsDir, `alias_${alias}.json`);
 		const { out: _aliasOut } = await runNode(

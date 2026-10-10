@@ -65,7 +65,6 @@ check_no_errors() {
     const d = JSON.parse(require('fs').readFileSync('$file','utf8'));
     const errs = [];
     if (d.perplexity?.error) errs.push('perplexity: ' + d.perplexity.error);
-    if (d.bing?.error) errs.push('bing: ' + d.bing.error);
     if (d.google?.error) errs.push('google: ' + d.google.error);
     if (d.gemini?.error) errs.push('gemini: ' + d.gemini.error);
     console.log(errs.join('; ') || 'OK');
@@ -77,7 +76,7 @@ check_correct_queries() {
   local expected="$2"
   node -e "
     const d = JSON.parse(require('fs').readFileSync('$file','utf8'));
-    const queries = [d.perplexity?.query, d.bing?.query, d.google?.query].filter(Boolean);
+    const queries = [d.perplexity?.query, d.google?.query].filter(Boolean);
     const allMatch = queries.every(q => q === '$expected');
     console.log(allMatch ? 'OK' : 'MISMATCH: ' + queries.join(', '));
   " 2>/dev/null || echo "PARSE_ERROR"
@@ -296,7 +295,7 @@ section "🧪 Single Engine Tests"
 # ════════════════════════════════════════════════════════
 
 if [[ "$1" != "parallel" && "$1" != "synthesis" && "$1" != "deep" && "$1" != "flags" && "$1" != "edge" ]]; then
-  for engine in perplexity bing google; do
+  for engine in perplexity google; do
     subsection "Testing $engine engine..."
     
     outfile="$RESULTS_DIR/single_${engine}.json"
@@ -324,7 +323,7 @@ if [[ "$1" != "parallel" && "$1" != "synthesis" && "$1" != "deep" && "$1" != "fl
       if [[ "$src" == OK* ]]; then
         pass "$engine: has $src sources"
       else
-        warn "$engine: $src (Bing often has no sources)"
+        warn "$engine: $src"
       fi
     else
       fail "$engine: search failed or timed out"
@@ -359,7 +358,7 @@ if [[ "$1" != "parallel" && "$1" != "smoke" && "$1" != "flags" && "$1" != "edge"
       fi
       
       # Check all engines have answers
-      for engine in perplexity bing google; do
+      for engine in perplexity google; do
         if [[ $(check_has_answer "$outfile" "$engine") == OK* ]]; then
           pass "Run $i: $engine has answer"
         else
@@ -875,11 +874,10 @@ cat >> "$REPORT_FILE" << 'EOF'
 - `--full` (long answers)
 - `--short` / default (truncated answers)
 - `--inline` (stdout output)
-- Engine aliases (p, g, b, etc.)
+- Engine aliases (p, g, etc.)
 
 ### Single Engine Tests
 - Perplexity: search, answer, sources
-- Bing: search, answer, sources
 - Google: search, answer, sources
 
 ### Multi-Engine Tests

@@ -139,7 +139,7 @@ export function runSearch(
 			if (err.length > MAX_ERR) err = err.slice(-MAX_ERR);
 			// Match PROGRESS lines for any known engine.
 			const ENGINE_PROGRESS_RE =
-				/^PROGRESS:(perplexity|google|chatgpt|bing|gemini|semantic-scholar|semanticscholar|s2|logically):(done|error|needs-human)$/;
+				/^PROGRESS:(perplexity|google|chatgpt|gemini|semantic-scholar|semanticscholar|s2):(done|error|needs-human)$/;
 			for (const line of d.toString().split("\n")) {
 				// Engine progress: any known engine
 				const engineMatch = line.match(ENGINE_PROGRESS_RE);
@@ -177,7 +177,7 @@ export function runSearch(
 				}
 				// Single-engine stage lines: "[perplexity] stage: nav (+563ms)"
 				const stageMatch = line.match(
-					/^\[(perplexity|google|chatgpt|bing|gemini|semantic-scholar|logically)\] stage: (.+) \(\+\d+ms\)$/,
+					/^\[(perplexity|google|chatgpt|gemini|semantic-scholar)\] stage: (.+) \(\+\d+ms\)$/,
 				);
 				if (stageMatch && onProgress) {
 					onProgress({

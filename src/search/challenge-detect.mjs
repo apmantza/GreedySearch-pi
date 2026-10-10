@@ -71,54 +71,6 @@ const ENGINE_SIGNALS = {
 			return info.hasProseMirror || info.bodyLen > 50;
 		},
 	},
-	bing: {
-		// Copilot shows "Verify you are human" challenge, then transitions to the chat UI.
-		// Cleared signals: URL on copilot.microsoft.com (no /challenge), textarea/input exists,
-		// or the Turnstile iframe is gone.
-		name: "bing",
-		isCleared: async (tab) => {
-			const probe = await cdp([
-				"eval",
-				tab,
-				`(() => {
-					const url = location.href;
-					const title = document.title;
-					const onCopilot = /copilot\\.microsoft\\.com/.test(location.hostname);
-					const onChallenge =
-						/challenge|turnstile|cdn-cgi\\/challenge/i.test(url) ||
-						/verify|human|robot/i.test(title);
-					const hasTextarea =
-						!!document.querySelector("textarea") ||
-						!!document.querySelector("div[contenteditable=\\"true\\"]");
-					const hasTurnstileInput =
-						!!document.querySelector("iframe[id^=\\"cf-chl-widget-\\"]") ||
-						!!document.querySelector("input[name=\\"cf-turnstile-response\\"]");
-					const bodyText = (document.body && document.body.innerText) || "";
-					return JSON.stringify({
-						url,
-						title,
-						onCopilot,
-						onChallenge,
-						hasTextarea,
-						hasTurnstileInput,
-						bodyLen: bodyText.length,
-					});
-				})()`,
-			]).catch(() => null);
-			if (!probe) return false;
-			let info;
-			try {
-				info = JSON.parse(probe);
-			} catch {
-				return false;
-			}
-			if (!info.onCopilot) return false;
-			if (info.onChallenge) return false;
-			if (info.hasTurnstileInput) return false;
-			// Either chat input appeared OR we're past the challenge.
-			return info.hasTextarea || info.bodyLen > 50;
-		},
-	},
 };
 
 /**

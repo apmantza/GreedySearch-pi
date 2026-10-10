@@ -6,6 +6,10 @@
 
 ### Changed
 
+### Removed
+
+- **Bing Copilot and Logically engines retired** (`extractors/bing-copilot.mjs`, `extractors/logically.mjs`, `src/search/constants.mjs`, `src/search/recovery.mjs`, `src/search/challenge-detect.mjs`, `src/search/chrome.mjs`, `src/tools/*`, `bin/search.mjs`, `bin/mcp.mjs`, tests, fixtures, docs) — both engines are no longer functional against their live targets: Bing Copilot is Cloudflare/Turnstile-blocked in headless on every run (recovery escalation also carries the shared-Chrome kill hazard tracked in #67), and Logically's input-detection race fails in both headless and visible mode (single-shot geometry check against a settling tiptap editor). Removed from the `ENGINES`/`ENGINE_DOMAINS` registries, `HEADLESS_RECOVERY_ENGINES`, `CHALLENGE_ENGINES`, the stealth tab-pre-seed path, tool/MCP descriptions, the progress-tracking regexes, test fixtures (`test-suite/bing-*.html`), and all docs. `HEADLESS_RECOVERY_ENGINES` is now `[perplexity, chatgpt, semantic-scholar]`.
+
 ### Fixed
 
 - **typebox declared as peer dependency** (`package.json`) — `@sinclair/typebox` moved from `dependencies` to `peerDependencies` with a `"*"` range. It is host-provided by pi (the extension loader injects its own copy), so a hard dependency let installed copies bypass the loader and create duplicate runtime modules; pi's extension loader warned about it on every install.

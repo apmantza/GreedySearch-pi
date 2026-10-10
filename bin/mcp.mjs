@@ -53,8 +53,8 @@ function sendError(id, code, message, data) {
 
 const ENGINE_DESCRIPTION =
 	'Engine to use: "all" (default, fans out to configured engines and fetches top sources), ' +
-	'"perplexity" (p), "google" (g), "chatgpt" (gpt), "gemini" (gem), "bing" (b). ' +
-	'Research engines: "semantic-scholar" (s2) and "logically" (log).';
+	'"perplexity" (p), "google" (g), "chatgpt" (gpt), "gemini" (gem). ' +
+	'Research engine: "semantic-scholar" (s2).';
 
 const GREEDY_SEARCH_SCHEMA = {
 	type: "object",
@@ -148,7 +148,7 @@ const TOOLS = [
 		name: "greedy_search",
 		description:
 			"WEB/RESEARCH SEARCH ONLY — searches live web via Perplexity, Google AI, ChatGPT, and Gemini, " +
-			"plus opt-in research through Semantic Scholar and Logically, using local headless Chrome automation " +
+			"plus opt-in research through Semantic Scholar, using local headless Chrome automation " +
 			"(no API keys needed). Research mode (depth: \"research\") plans follow-up actions, fetches sources, " +
 			"audits citations, and writes a structured research bundle on disk. Searches take roughly 1-5 minutes.",
 		inputSchema: GREEDY_SEARCH_SCHEMA,

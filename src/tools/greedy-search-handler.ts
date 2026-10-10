@@ -81,7 +81,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 		name: "greedy_search",
 		label: "Greedy Search",
 		description:
-			"WEB/RESEARCH SEARCH ONLY — searches live web via Perplexity, Google AI, ChatGPT, and Gemini, plus opt-in research through Semantic Scholar and Logically. " +
+			"WEB/RESEARCH SEARCH ONLY — searches live web via Perplexity, Google AI, ChatGPT, and Gemini, plus opt-in research through Semantic Scholar. " +
 			"Research mode reuses the configured ~/.pi/greedyconfig engines for child searches and Gemini for planning/final synthesis. " +
 			"Research mode is the centerpiece: it plans follow-up actions, fetches sources, audits citations, " +
 			"and writes a structured research bundle on disk. Scale-aware: simple queries auto-classify and use a fast single-pass path. " +
@@ -93,7 +93,7 @@ export function registerGreedySearchTool(pi: ExtensionAPI, baseDir: string) {
 			engine: Type.Optional(
 				Type.String({
 					description:
-						'Engine to use: "all" (default), "perplexity", "google", "chatgpt", "gemini", "gem". Research engines: "semantic-scholar" (alias "s2") and "logically". "all" fans out to the configured engines and fetches top sources. Customize via ~/.pi/greedyconfig. Bing Copilot is still available as "bing" for signed-in users.',
+						'Engine to use: "all" (default), "perplexity", "google", "chatgpt", "gemini", "gem". Research engines: "semantic-scholar" (alias "s2"). "all" fans out to the configured engines and fetches top sources. Customize via ~/.pi/greedyconfig.',
 					default: "all",
 				}),
 			),

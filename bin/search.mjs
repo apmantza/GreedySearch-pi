@@ -8,7 +8,6 @@
 //
 // Engines:
 //   perplexity | pplx | p
-//   bing       | copilot | b
 //   google     | g
 //   gemini     | gem
 //   all        - fan-out to all engines in parallel
@@ -117,7 +116,7 @@ async function main() {
 			`${[
 				'Usage: node search.mjs <engine> "<query>"',
 				"",
-				"Engines: all, perplexity (p), google (g), chatgpt (gpt), gemini (gem), semantic-scholar (s2), logically (log), bing (b)",
+				"Engines: all, perplexity (p), google (g), chatgpt (gpt), gemini (gem), semantic-scholar (s2)",
 				"",
 				"Flags:",
 				"  --synthesize        For engine=all: synthesize fetched sources",
@@ -338,7 +337,6 @@ async function main() {
 			"semantic-scholar": "https://www.semanticscholar.org/",
 			semanticscholar: "https://www.semanticscholar.org/",
 			s2: "https://www.semanticscholar.org/",
-			logically: "https://logically.app/research-assistant/",
 		};
 		const engineTabs = await Promise.all(
 			ALL_ENGINES.map((e) => openNewTab(ENGINE_START_URLS[e])),
@@ -369,7 +367,7 @@ async function main() {
 							return { engine: e, ...r };
 						})
 						.catch((err) => {
-							// Do not emit PROGRESS:error yet: Bing/Perplexity may recover in
+							// Do not emit PROGRESS:error yet: Perplexity may recover in
 							// visible mode. Emit the final status after recovery has run.
 							throw err;
 						}),
@@ -398,7 +396,7 @@ async function main() {
 				}
 			}
 
-			// Cloudflare/verification recovery: if Perplexity or Bing were blocked
+			// Cloudflare/verification recovery: if Perplexity (or another recovery
 			// in headless mode, retry in visible Chrome to establish cookies,
 			// then continue headless with the profile now carrying valid session state.
 			// Recovery is allowed even in fast mode because verification failure would
@@ -741,17 +739,13 @@ async function main() {
 		}
 		writeOutput(result, outFile, { inline, synthesize: false, query });
 	} catch (e) {
-		const recoveryEngine = script.includes("bing")
-			? "bing"
-			: script.includes("perplexity")
-				? "perplexity"
-				: script.includes("chatgpt")
-					? "chatgpt"
-					: script.includes("semantic-scholar")
-						? "semantic-scholar"
-						: script.includes("logically")
-							? "logically"
-							: null;
+		const recoveryEngine = script.includes("perplexity")
+			? "perplexity"
+			: script.includes("chatgpt")
+				? "chatgpt"
+				: script.includes("semantic-scholar")
+					? "semantic-scholar"
+					: null;
 		const canRetryVisible =
 			recoveryEngine &&
 			process.env.GREEDY_SEARCH_VISIBLE !== "1" &&
@@ -907,7 +901,7 @@ async function main() {
 function pickTopSource(out) {
 	if (Array.isArray(out._sources) && out._sources.length > 0)
 		return out._sources[0];
-	for (const engine of ["perplexity", "google", "bing"]) {
+	for (const engine of ["perplexity", "google"]) {
 		const r = out[engine];
 		if (r?.sources?.length > 0) return r.sources[0];
 	}

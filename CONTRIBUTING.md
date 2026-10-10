@@ -87,7 +87,7 @@ formatter. Engines are wired in three places:
    `src/search/recovery.mjs`:
    - Add the engine name to `HEADLESS_RECOVERY_ENGINES` if it benefits
      from automatic visible-mode retry on Cloudflare/captcha blocks
-     (Perplexity, Bing, ChatGPT, Logically all do).
+     (Perplexity, ChatGPT, Semantic Scholar all do).
    - The wrapper picks up the new engine name automatically because
      `bin/search.mjs` maps extractor scripts to engine names via the
      same `ENGINES` map.

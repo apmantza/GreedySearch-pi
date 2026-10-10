@@ -16,17 +16,6 @@ export const SELECTORS = {
 	},
 
 	// ──────────────────────────────────────────────
-	// Bing Copilot (copilot.microsoft.com)
-	// ──────────────────────────────────────────────
-	bing: {
-		input: "#userInput",
-		copyButton: 'button[data-testid="copy-ai-message-button"]',
-		sourceLink: 'a[href^="http"][target="_blank"]',
-		sourceExclude: "copilot.microsoft.com",
-		consent: "#onetrust-accept-btn-handler",
-	},
-
-	// ──────────────────────────────────────────────
 	// Google AI Mode (google.com/search?udm=50)
 	// ──────────────────────────────────────────────
 	google: {

@@ -4,10 +4,8 @@
 // intentionally excluded for now; see issue #9 discussion / maintainer choice.
 export const HEADLESS_RECOVERY_ENGINES = [
 	"perplexity",
-	"bing",
 	"chatgpt",
 	"semantic-scholar",
-	"logically",
 ];
 
 // blockedBy values that indicate visible-mode cookies CANNOT bypass the block.

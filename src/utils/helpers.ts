@@ -5,14 +5,11 @@
 
 /**
  * Format engine name for display
- * Replaces 'bing' with 'Bing Copilot', etc.
  */
 export function formatEngineName(engine: string): string {
 	const displayNames: Record<string, string> = {
-		bing: "Bing Copilot",
 		google: "Google AI",
 		gemini: "Gemini",
-		copilot: "Copilot",
 		perplexity: "Perplexity",
 	};
 

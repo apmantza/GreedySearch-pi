@@ -352,19 +352,16 @@ export async function openNewTab(url = "about:blank") {
 	const anchor = await getAnyTab();
 	const hostname = new URL(url).hostname;
 	const needsStealth =
-		hostname === "copilot.microsoft.com" ||
 		hostname === "www.perplexity.ai" ||
 		hostname === "perplexity.ai" ||
 		hostname.endsWith(".perplexity.ai");
 
 	if (needsStealth) {
-		// Bing Copilot / Perplexity: create blank tab, inject stealth, return.
+		// Perplexity: create blank tab, inject stealth (fire-and-forget), return.
 		// The extractor handles its own navigation, and Page.addScriptToEvaluateOnNewDocument
-		// runs the stealth script before any page scripts.
-		//
-		// For Bing: stealth is awaited (Cloudflare blocks headless without it).
-		// For Perplexity: stealth is fire-and-forget (Perplexity's anti-bot detects
-		// the aggressive canvas/console patches, so we don't block on the CDP response).
+		// runs the stealth script before any page scripts. Stealth is fire-and-forget
+		// because Perplexity's anti-bot detects the aggressive canvas/console patches,
+		// so we don't block on the CDP response.
 		const raw = await cdp([
 			"evalraw",
 			anchor,
@@ -375,12 +372,7 @@ export async function openNewTab(url = "about:blank") {
 		const tid = targetId.slice(0, 8);
 		await cdp(["list"]).catch(() => null);
 
-		if (hostname === "copilot.microsoft.com") {
-			await injectHeadlessStealth(tid);
-		} else {
-			// Perplexity: fire-and-forget (Perplexity's anti-bot detects awaited patches)
-			injectHeadlessStealth(tid).catch(() => {});
-		}
+		injectHeadlessStealth(tid).catch(() => {});
 
 		await cdp(["list"]).catch(() => null);
 		return targetId;

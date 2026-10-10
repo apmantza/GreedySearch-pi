@@ -706,7 +706,7 @@ export function parseSourcesFromMarkdownRefStyle(text) {
 
 export const TIMING = {
 	postNav: 800, // settle after navigation
-	postNavSlow: 1200, // settle after slower navigations (Bing, Gemini)
+	postNavSlow: 1200, // settle after slower navigations (Gemini)
 	postClick: 300, // settle after a UI click
 	postType: 300, // settle after typing
 	inputPoll: 400, // polling interval when waiting for input to appear

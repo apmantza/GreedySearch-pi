@@ -108,21 +108,14 @@ function loadUserSynthesizer() {
 
 export const ENGINE_DOMAINS = {
 	perplexity: "perplexity.ai",
-	bing: "copilot.microsoft.com",
-	google: "google.com",
-	gemini: "gemini.google.com",
-	chatgpt: "chatgpt.com",
 	"semantic-scholar": "semanticscholar.org",
 	semanticscholar: "semanticscholar.org",
 	s2: "semanticscholar.org",
-	logically: "logically.app",
 };
 
 export const ENGINES = {
 	perplexity: "perplexity.mjs",
 	p: "perplexity.mjs",
-	bing: "bing-copilot.mjs",
-	b: "bing-copilot.mjs",
 	google: "google-ai.mjs",
 	g: "google-ai.mjs",
 	gemini: "gemini.mjs",
@@ -132,8 +125,6 @@ export const ENGINES = {
 	"semantic-scholar": "semantic-scholar.mjs",
 	semanticscholar: "semantic-scholar.mjs",
 	s2: "semantic-scholar.mjs",
-	logically: "logically.mjs",
-	log: "logically.mjs",
 };
 
 // ALL_ENGINES drives the "all" fan-out. Edit ~/.pi/greedyconfig to customize.

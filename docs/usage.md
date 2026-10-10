@@ -23,8 +23,7 @@ greedy_search({ query: "What is Redis?", depth: "research", maxSources: 5 });
 ### Normal Search
 
 - `engine` — `all` by default. Supported individual engines:
-  `perplexity`, `google`, `chatgpt`, `gemini`, `semantic-scholar`,
-  `logically`, and `bing`.
+  `perplexity`, `google`, `chatgpt`, `gemini`, and `semantic-scholar`.
 - `synthesize` — for `engine: "all"`, synthesize fetched sources with the
   configured synthesizer.
 - `synthesizer` — `gemini` or `chatgpt`.
@@ -61,8 +60,8 @@ Configure all-engine fan-out and synthesis in `~/.pi/greedyconfig`:
 }
 ```
 
-`semantic-scholar` and `logically` are opt-in research engines. They remain
-available as individual engines and can be added to `engines` when you want them
+`semantic-scholar` is an opt-in research engine. It remains
+available as an individual engine and can be added to `engines` when you want it
 in normal `engine: "all"` fan-out.
 
 Deep research child searches reuse the configured `engines` list and pass query

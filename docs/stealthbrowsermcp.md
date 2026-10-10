@@ -206,13 +206,13 @@ This table is **design-intent vs design-intent**, not empirical test vs empirica
 | Browser driver | nodriver (CDP) | CDP directly |
 | `navigator.webdriver` | Undefined (nodriver default) | Undefined + native-code stringify |
 | Canvas noise | None visible | Stable per-page noise |
-| Console guards | None visible | Fire-and-forget for Bing |
+| Console guards | None visible | Fire-and-forget for Perplexity |
 | `navigator.plugins` | Default Chrome | Patched for consistency |
 | `navigator.mediaDevices` | Default Chrome | Patched for consistency |
 | `navigator.userAgentData` | Default Chrome | Patched for consistency |
 | Tab creation | `uc.start()` → main tab | `Target.createTarget` (less detectable) |
 | Headless detection avoidance | nodriver defaults | Aggressive patches |
-| Visible recovery | Not implemented | Bing, Perplexity, ChatGPT, Semantic Scholar, Logically |
+| Visible recovery | Not implemented | Perplexity, ChatGPT, Semantic Scholar |
 
 **Important caveat:** stealth-browser-mcp has empirical test results in `STEALTH_TESTS.md`:
 
@@ -280,7 +280,6 @@ def _is_recoverable_navigation_error(error):
 Your AGENTS.md describes stale-tab symptoms:
 
 - "ChatGPT background tabs can stall and leave only citation/header stubs in the DOM"
-- "Bing copy button exists in DOM before React hydrates its click handler"
 - "Perplexity's anti-bot system detects aggressive stealth patches"
 
 The **first two are potentially related to tab age/health**, but they may also be caused by:

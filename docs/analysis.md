@@ -226,7 +226,7 @@ Our JS patches achieve the **practical maximum** for headless Chrome stealth wit
 - ✅ All JavaScript-accessible signals are normalized
 - ✅ Headless and visible modes produce identical CreepJS fingerprints
 - ✅ Sannysoft is 100% clean
-- ✅ All engines (Perplexity, Bing, ChatGPT, Gemini, Google) work in headless mode
+- ✅ All engines (Perplexity, ChatGPT, Gemini, Google) work in headless mode
 
 The remaining ~33% headless score is the **architectural ceiling** — Chrome's compiled-in "HeadlessChrome" product name, SwiftShader GPU, and Linux font stack are not reachable from JavaScript.
 
