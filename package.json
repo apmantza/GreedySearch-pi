@@ -58,13 +58,13 @@
 	},
 	"dependencies": {
 		"@mozilla/readability": "^0.6.0",
-		"@sinclair/typebox": "^0.34.49",
 		"jsdom": "^30.0.1",
 		"pdf-parse": "^2.4.5",
 		"turndown": "^7.1.2"
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "^0.79.0"
+		"@earendil-works/pi-coding-agent": "^0.79.0",
+		"@sinclair/typebox": "*"
 	},
 	"peerDependenciesMeta": {
 		"@earendil-works/pi-coding-agent": {
